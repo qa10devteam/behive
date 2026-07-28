@@ -7,6 +7,10 @@
 
 # 🐝 BeHive — Research Engine That Builds Knowledge Graphs
 
+<p align="center">
+  <img src="demo.gif" alt="BeHive demo — 20s terminal session" width="700" />
+</p>
+
 BeHive is an open-source deep research engine that produces **structured, verifiable intelligence** from any topic. Unlike traditional research tools that output text summaries, BeHive extracts **typed claims with quality scores**, builds **entity relationship graphs**, and delivers **cross-mission knowledge fusion**.
 
 ```python
