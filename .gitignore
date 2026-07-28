@@ -20,24 +20,46 @@ env/
 *.swp
 *.swo
 
-# Environment
+# ═══ SECURITY — never commit these ═══
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+*.jks
+*credentials*
+*secret*
+*.token
+id_rsa*
+id_ed25519*
 
 # OS
 .DS_Store
 Thumbs.db
+._*
 
-# Data
+# Data / State
 *.db
 *.sqlite
 /data/
+/backups/
+*.dump
+*.sql.gz
 
 # Logs
 *.log
+logs/
 
 # Testing
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Docker volumes
+docker-data/
+neo4j-data/
+postgres-data/
+qdrant-data/
