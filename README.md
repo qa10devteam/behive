@@ -53,35 +53,162 @@ Your AI assistant → BeHive → Verified, structured, scored knowledge
 ```bash
 pip install behive
 
-# Configure your LLM (pick one)
-export BEHIVE_LLM=bedrock        # AWS Bedrock Claude (recommended)
-export BEHIVE_LLM=openai         # OpenAI GPT-4o
-export BEHIVE_LLM=local          # Self-hosted via SGLang/vLLM
+# Set your LLM API key (you use YOUR OWN subscription — BeHive costs nothing)
+export ANTHROPIC_API_KEY=*** # or OPENAI_API_KEY
 
-# Run research from CLI
-behive research "NVIDIA Blackwell GPU production 2026" --scale 30
-
-# Or from Python
-python -c "
-from behive import research
-import asyncio
-
-result = asyncio.run(research('NVIDIA Blackwell GPU production 2026'))
-print(f'{result.claims_count} claims, avg quality {result.avg_quality:.3f}')
-for claim in result.top_claims(5):
-    print(f'  [{claim.score:.2f}] {claim.text}')
-"
+# Start the server
+behive serve
 ```
+
+That's it. BeHive is now running:
+- **API** → `http://localhost:8091` (REST endpoints)
+- **MCP** → `http://localhost:8090/mcp` (for AI assistants)
+- **Docs** → `http://localhost:8091/docs` (Swagger UI)
 
 ---
 
-## Use with Claude / ChatGPT / Gemini
+## 🔌 Setup with Claude Desktop (30 seconds)
 
-BeHive turns any AI assistant into a **verified research machine**. Three integration paths:
+> **You bring your Claude subscription. BeHive adds research superpowers. No extra cost from us.**
 
-### 🟣 Claude (via MCP — zero-code)
+**Step 1:** Install and start BeHive:
+```bash
+pip install behive
+export ANTHROPIC_API_KEY=*** # your own key
+behive serve
+```
 
-Add to your Claude Desktop `config.json` or Cursor settings:
+**Step 2:** Open Claude Desktop → Settings → Developer → Edit Config → paste:
+```json
+{
+  "mcpServers": {
+    "behive": {
+      "url": "http://localhost:8090/mcp",
+      "transport": "streamable-http"
+    }
+  }
+}
+```
+
+**Step 3:** Restart Claude Desktop. Done. Now ask:
+> "Research the EU AI Act enforcement timeline and penalties"
+
+Claude will call BeHive automatically, fetch 200+ sources, and return scored claims instead of guessing from training data.
+
+<details>
+<summary><strong>What happens under the hood</strong></summary>
+
+```
+You ask Claude a question
+    ↓
+Claude calls BeHive MCP tool "research_topic"
+    ↓
+BeHive scouts 70+ APIs, fetches 1000+ URLs via stealth drones
+    ↓
+Your LLM key extracts claims (Claude Haiku = ~$0.50 per mission)
+    ↓
+BeHive scores, deduplicates, builds knowledge graph
+    ↓
+Returns structured report to Claude
+    ↓
+Claude presents findings with confidence scores and source links
+```
+
+**Cost: ~$0.30–$2.00 per research mission** (your Anthropic/OpenAI tokens).
+BeHive itself: **free forever** (MIT license).
+</details>
+
+---
+
+## 🔌 Setup with ChatGPT (Custom GPT)
+
+**Step 1:** Start BeHive on a server with a public URL (or use tunneling):
+```bash
+pip install behive
+export OPENAI_API_KEY=*** # your own key
+behive serve --host 0.0.0.0
+
+# Expose with a tunnel (for testing):
+# npx cloudflared tunnel --url http://localhost:8091
+```
+
+**Step 2:** Create a Custom GPT at [chat.openai.com/gpts/editor](https://chat.openai.com/gpts/editor):
+
+- **Name:** "Deep Researcher (BeHive)"
+- **Instructions:** "You are a research analyst. Use the BeHive actions to research topics. Always cite claim confidence scores."
+- **Actions → Import URL:** paste your server URL + `/openapi.json`
+
+Or manually add this schema:
+
+```yaml
+openapi: 3.1.0
+info:
+  title: BeHive Research API
+  version: 0.2.0
+servers:
+  - url: https://*** paths:
+  /research:
+    post:
+      operationId: startResearch
+      summary: Start a deep research mission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  description: Research topic or question
+                depth:
+                  type: integer
+                  default: 3
+                  description: 1=quick, 3=standard, 5=deep
+      responses:
+        '200':
+          description: Mission started successfully
+  /research/{mission_id}:
+    get:
+      operationId: getResearchResults
+      summary: Get completed research with scored claims
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Research results with claims and report
+  /claims/search:
+    get:
+      operationId: searchKnowledge
+      summary: Search across all previously researched knowledge
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Matching claims with scores
+```
+
+**Step 3:** Use your Custom GPT. Ask: "Research quantum computing breakthroughs 2026"
+
+---
+
+## 🔌 Setup with Cursor / Windsurf / Any MCP Client
+
+Any editor or tool supporting MCP works identically to Claude Desktop:
 
 ```json
 {
@@ -94,115 +221,30 @@ Add to your Claude Desktop `config.json` or Cursor settings:
 }
 ```
 
-Now Claude can call BeHive natively:
+**Available MCP tools:**
+| Tool | Description |
+|------|-------------|
+| `research_topic` | Start a deep research mission (returns job_id) |
+| `mission_status` | Poll running mission progress |
+| `get_report` | Get synthesized report for completed mission |
+| `search_knowledge` | Search all previously extracted claims |
 
-> **You:** "Research the EU Carbon Border Adjustment Mechanism — what are the compliance deadlines and industry impacts?"
->
-> **Claude** *(calls `research_topic`)* **:** "I've launched a deep research mission. BeHive found 312 claims across 156 sources. Here are the key findings, scored by confidence:
-> - [0.94] CBAM transitional phase runs Jan 2024–Dec 2025; full enforcement begins Jan 2026
-> - [0.91] Importers must purchase CBAM certificates matching embedded CO₂ at EU ETS price
-> - [0.88] Steel, cement, aluminium, fertilizers, electricity, and hydrogen are covered sectors
-> ..."
+---
 
-Claude's responses shift from "based on my training data" to **"verified against 156 live sources with per-claim confidence scores."**
+## 🔌 Setup with Hermes Agent / OpenClaw
 
-### 🟢 ChatGPT (via Custom GPT / Function Calling)
-
-Create a Custom GPT with this action:
-
-```yaml
-openapi: 3.0.0
-info:
-  title: BeHive Research
-  version: 1.0.0
-servers:
-  - url: https://your-server.com/api/v1
-paths:
-  /research:
-    post:
-      operationId: startResearch
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                query:
-                  type: string
-                depth:
-                  type: integer
-                  default: 3
-      responses:
-        '200':
-          description: Mission started
-  /research/{job_id}/report:
-    get:
-      operationId: getReport
-      parameters:
-        - name: job_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Research report
+**Hermes Agent** (automatic — skill already published):
+```bash
+# BeHive skill auto-loads when you ask Hermes to research anything
+# Just ensure behive serve is running on the same machine
+behive serve
 ```
 
-Or call from the OpenAI API with function calling:
-
-```python
-import openai
-import requests
-
-# Start BeHive research
-mission = requests.post("http://localhost:8091/research", json={
-    "query": "Quantum computing error correction breakthroughs 2026",
-    "depth": 3
-}).json()
-
-# Wait for completion, then feed to GPT-4o
-report = requests.get(f"http://localhost:8091/research/{mission['job_id']}/report").json()
-
-response = openai.chat.completions.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "You are an analyst. Use the research data below to answer questions. Cite claim IDs."},
-        {"role": "user", "content": f"Research data:\n{report['synthesis']}\n\nQuestion: What's the most promising approach to fault-tolerant quantum computing?"}
-    ]
-)
+**OpenClaw:**
+```bash
+# Install from integrations directory
+cp integrations/openclaw/SKILL.md ~/.openclaw/skills/behive-research.md
 ```
-
-### 🔵 Gemini (via API or Vertex AI)
-
-```python
-import google.generativeai as genai
-import requests
-
-# BeHive produces the research
-claims = requests.get("http://localhost:8091/search", params={
-    "query": "autonomous vehicles regulations 2026",
-    "limit": 50
-}).json()
-
-# Gemini synthesizes with verified data
-model = genai.GenerativeModel("gemini-2.0-flash")
-response = model.generate_content(
-    f"Based on these verified research claims (each with a confidence score), "
-    f"write a briefing on autonomous vehicle regulation trends:\n\n"
-    f"{claims['results']}"
-)
-```
-
-### Why this matters
-
-| Without BeHive | With BeHive |
-|---|---|
-| "Based on my training data..." | "Based on 234 live sources, scored 0.79 avg..." |
-| Hallucination risk | Every claim traced to source URL |
-| Stale knowledge (months old) | Real-time web research |
-| Unstructured text blob | Typed claims, entities, relationships |
-| One-shot, forgotten | Cumulative knowledge graph across sessions |
 
 ---
 
