@@ -1,10 +1,14 @@
 """BeHive API Server — FastAPI app for research missions."""
 
 import os
+import time
+import hashlib
+from collections import defaultdict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -14,13 +18,66 @@ from typing import Optional
 def get_db_url():
     return os.environ.get(
         "DATABASE_URL",
-        os.environ.get("BEHIVE_DB_URL", "postgresql://behive_user:REDACTED@localhost:5432/hive")
+        os.environ.get("BEHIVE_DB_URL", "postgresql://localhost:5432/behive")
     )
 
 
 def get_db():
     import psycopg2
     return psycopg2.connect(get_db_url())
+
+
+# ─── Security: Rate Limiter ──────────────────────────────────────────────────
+
+class RateLimiter:
+    """Simple in-memory rate limiter (per-IP, sliding window)."""
+    
+    def __init__(self, max_requests: int = 60, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self.requests: dict[str, list[float]] = defaultdict(list)
+    
+    def is_allowed(self, key: str) -> bool:
+        now = time.time()
+        window_start = now - self.window
+        # Clean old entries
+        self.requests[key] = [t for t in self.requests[key] if t > window_start]
+        if len(self.requests[key]) >= self.max_requests:
+            return False
+        self.requests[key].append(now)
+        return True
+
+
+# Global rate limiters
+_rate_limiter = RateLimiter(max_requests=60, window_seconds=60)  # 60 req/min general
+_research_limiter = RateLimiter(max_requests=5, window_seconds=60)  # 5 research/min
+
+
+# ─── Security: API Key Auth ──────────────────────────────────────────────────
+
+def get_api_key() -> Optional[str]:
+    """Get configured API key (if any). None = open access."""
+    return os.environ.get("BEHIVE_API_KEY")
+
+
+async def verify_auth(request: Request):
+    """Verify API key if BEHIVE_API_KEY is set."""
+    api_key = get_api_key()
+    if not api_key:
+        return  # No key configured = open access (self-hosted default)
+    
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        if token == api_key:
+            return
+    
+    # Also check X-API-Key header
+    x_key = request.headers.get("X-API-Key", "")
+    if x_key == api_key:
+        return
+    
+    raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 # ─── App ──────────────────────────────────────────────────────────────────────
@@ -41,11 +98,47 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.environ.get("BEHIVE_CORS_ORIGINS", "*").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    """Rate limiting + security headers."""
+    # Get client IP
+    client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+    
+    # Rate limit check
+    if not _rate_limiter.is_allowed(client_ip):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many requests. Max 60/min."},
+            headers={"Retry-After": "60"},
+        )
+    
+    # Stricter rate limit for research endpoints
+    if request.url.path == "/research" and request.method == "POST":
+        if not _research_limiter.is_allowed(client_ip):
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Research rate limit: max 5/min."},
+                headers={"Retry-After": "60"},
+            )
+    
+    response = await call_next(request)
+    
+    # Security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    
+    return response
 
 
 # ─── Models ───────────────────────────────────────────────────────────────────
@@ -89,7 +182,7 @@ async def health():
         return HealthResponse(status="degraded", db=str(e))
 
 
-@app.post("/research")
+@app.post("/research", dependencies=[Depends(verify_auth)])
 async def start_research(req: ResearchRequest):
     """Start a new research mission. Returns job_id for polling."""
     import hashlib
