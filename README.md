@@ -204,7 +204,7 @@ response = model.generate_content(
 
 ## Benchmarks
 
-Real results. No cherry-picking. Scale 30 (standard depth), EC2 g5.12xlarge, Bedrock Claude Haiku + Sonnet.
+Real results. No cherry-picking. Scale 30 (standard depth), EC2 g6.24xlarge, Bedrock Claude Haiku + Sonnet.
 
 | Topic | Claims | Avg Quality | Duration | Sources |
 |:------|-------:|:-----------:|---------:|--------:|
