@@ -1,0 +1,88 @@
+# BeHive Self-Hosted Research Engine
+#
+# cp .env.example .env && docker compose up -d
+# Full: docker compose --profile full up -d
+
+services:
+  behive:
+    build: .
+    container_name: behive-api
+    ports:
+      - "${BEHIVE_PORT:-8091}:8091"
+    environment:
+      - BEHIVE_DB_URL=postgresql://behive:${POSTGRES_PASSWORD:-behive2026}@postgres:5432/behive
+      - BEHIVE_LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - BEHIVE_LOCAL_LLM_URL=${LOCAL_LLM_URL:-}
+      - BEHIVE_NEO4J_URI=bolt://neo4j:7687
+      - BEHIVE_NEO4J_USER=neo4j
+      - BEHIVE_NEO4J_PASSWORD=${NEO4J_PASSWORD:-behive2026}
+      - BEHIVE_QDRANT_URL=http://qdrant:6333
+      - BEHIVE_DATA_DIR=/data
+    volumes:
+      - behive-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: behive-postgres
+    environment:
+      - POSTGRES_DB=behive
+      - POSTGRES_USER=behive
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-behive2026}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U behive -d behive"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: behive-neo4j
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-behive2026}
+      - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - neo4j-data:/data
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    restart: unless-stopped
+    profiles:
+      - full
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    container_name: behive-qdrant
+    volumes:
+      - qdrant-data:/qdrant/storage
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+    restart: unless-stopped
+    profiles:
+      - full
+
+volumes:
+  behive-data:
+  postgres-data:
+  neo4j-data:
+  qdrant-data:

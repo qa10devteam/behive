@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+.git
+.env
+*.egg-info
+dist/
+build/
+node_modules/
+.venv/
+venv/
+*.cast
+*.gif
+demo.gif
