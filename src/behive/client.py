@@ -79,7 +79,7 @@ class BeHiveClient:
     ) -> ResearchResult:
         """Run research using local pipeline (direct DB access)."""
         import sys
-        sys.path.insert(0, os.environ.get("BEHIVE_PATH", "/home/ubuntu"))
+        sys.path.insert(0, os.environ.get("BEHIVE_PATH", os.path.dirname(__file__)))
         
         from hive2 import cmd_run
         
