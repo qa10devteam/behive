@@ -7,7 +7,7 @@ where = ["src"]
 
 [project]
 name = "behive"
-version = "0.1.0"
+version = "0.2.0"
 description = "Research engine that builds structured knowledge graphs from any topic"
 readme = "README.md"
 license = "MIT"
