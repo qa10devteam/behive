@@ -720,7 +720,7 @@ class OperationRouter:
             import psycopg2
             pg = psycopg2.connect(
                 host='127.0.0.1', port=5432,
-                user='behive', password='***', dbname=os.environ.get("BEHIVE_DB_NAME", "behive")
+                user='behive', password='***', dbname='hive'
             )
             cur = pg.cursor()
             cur.execute("""
@@ -1998,3 +1998,271 @@ class ProcessingDrones:
         )
 
     async def _process_doc_with_ops(
+        self,
+        doc: dict,
+        ops: list,
+        worker: BeeWorker,
+        topic: str,
+    ) -> dict:
+        """Run all selected ops for a doc in parallel; return entity/fact totals."""
+        tasks = [
+            worker.execute(op, doc, self.con, self.mission_id)
+            for op in ops
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        entities = facts = ops_run = 0
+        for r in results:
+            if isinstance(r, Exception):
+                log.debug(f"  op error: {r}")
+            elif isinstance(r, dict) and r.get("success"):
+                entities += r.get("entities_saved", 0)
+                facts    += r.get("facts_saved", 0)
+                ops_run  += 1
+
+        return {"entities": entities, "facts": facts, "ops_run": ops_run}
+
+    async def _fallback_extract(self, doc: dict) -> dict:
+        """Regex-only fallback when ops registry is unavailable."""
+        url  = doc.get("url", "")
+        text = doc.get("raw_text", "") or ""
+
+        entities = _regex_extract_entities(text, url)
+        facts    = _regex_extract_facts(text, url)
+
+        ent_saved = 0
+        # Batch insert entities with executemany for throughput
+        ent_rows = [
+            [self.mission_id, url,
+             ent["entity_type"], ent["value"], ent["context"],
+             round(ent["confidence"], 4), _now_utc()]
+            for ent in entities
+        ]
+        if ent_rows:
+            try:
+                self.con.executemany("""
+                    INSERT INTO hive_entities
+                        (id, mission_id, source_url, entity_type, value, context,
+                         confidence, extracted_at)
+                    VALUES (nextval('hive_entities_seq'), ?, ?, ?, ?, ?, ?, ?)
+                """, ent_rows)
+                ent_saved = len(ent_rows)
+            except Exception as exc:
+                log.debug(f"  fallback entity batch save error: {exc}")
+                for row in ent_rows:
+                    try:
+                        self.con.execute("""
+                            INSERT INTO hive_entities
+                                (id, mission_id, source_url, entity_type, value, context,
+                                 confidence, extracted_at)
+                            VALUES (nextval('hive_entities_seq'), ?, ?, ?, ?, ?, ?, ?)
+                        """, row)
+                        ent_saved += 1
+                    except Exception as exc2:
+                        log.debug(f"  fallback entity save error: {exc2}")
+
+        fact_saved = 0
+        # Batch insert facts with executemany for throughput
+        fact_rows = [
+            [self.mission_id, f["value"], f["unit"], f["context"], 1,
+             json.dumps([url]), json.dumps([_domain(url)]),
+             "LOW", False, _now_utc()]
+            for f in facts
+        ]
+        if fact_rows:
+            try:
+                self.con.executemany("""
+                    INSERT INTO hive_facts
+                        (id, mission_id, value, unit, context, source_count,
+                         sources, domains, confidence, is_outlier, created_at)
+                    VALUES (nextval('hive_facts_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, fact_rows)
+                fact_saved = len(fact_rows)
+            except Exception as exc:
+                log.debug(f"  fallback fact batch save error: {exc}")
+                for row in fact_rows:
+                    try:
+                        self.con.execute("""
+                            INSERT INTO hive_facts
+                                (id, mission_id, value, unit, context, source_count,
+                                 sources, domains, confidence, is_outlier, created_at)
+                            VALUES (nextval('hive_facts_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, row)
+                        fact_saved += 1
+                    except Exception as exc2:
+                        log.debug(f"  fallback fact save error: {exc2}")
+
+        return {"entities": ent_saved, "facts": fact_saved, "ops_run": 0}
+
+    # ------------------------------------------------------------------
+    # DB helpers
+    # ------------------------------------------------------------------
+
+    def _load_content(self) -> list[dict]:
+        try:
+            rows = self.con.execute("""
+                SELECT id, url, domain, title, raw_text, word_count, language, harvest_method
+                FROM hive_content
+                WHERE mission_id = ?
+                ORDER BY quality_score DESC NULLS LAST
+            """, [self.mission_id]).fetchall()
+            cols = ["source_id", "url", "domain", "title", "raw_text",
+                    "word_count", "language", "harvest_method"]
+            return [dict(zip(cols, r)) for r in rows]
+        except Exception as exc:
+            log.error(f"Failed to load content: {exc}")
+            return []
+
+    def _get_mission_topic(self) -> str:
+        try:
+            row = self.con.execute(
+                "SELECT topic FROM hive_missions WHERE id = ?",
+                [self.mission_id]
+            ).fetchone()
+            return row[0] if row else "Unknown topic"
+        except Exception:
+            return "Unknown topic"
+
+    def _finalize(
+        self,
+        sources_processed: int,
+        total_entities: int,
+        total_facts: int,
+        clusters: int,
+        gaps: int,
+    ):
+        try:
+            self.con.execute("""
+                UPDATE hive_missions
+                SET status = 'synth',
+                    sources_processed = ?,
+                    total_entities = ?,
+                    total_facts = ?,
+                    process_done_at = ?
+                WHERE id = ?
+            """, [
+                sources_processed, total_entities, total_facts,
+                _now_utc(), self.mission_id,
+            ])
+        except Exception as exc:
+            log.warning(f"Could not update hive_missions: {exc}")
+
+        # ── Knowledge Graph ingest (Neo4j) ────────────────────────────────────
+        try:
+            from hive4_knowledge_graph import ingest_from_db
+            kg_result = ingest_from_db(self.mission_id)
+            log.info(f"KG ingest: +{kg_result.get('entities_created', 0)} entities, "
+                     f"+{kg_result.get('relationships_created', 0)} relationships")
+        except Exception as e:
+            log.debug(f"KG ingest skipped: {e}")
+
+        # ── Topic Clustering hook ─────────────────────────────────────────────
+        try:
+            import importlib.util as _clu
+            _cspec = _clu.spec_from_file_location("hive2_cluster", "hive2_cluster.py")
+            _cmod  = _clu.module_from_spec(_cspec)
+            _cspec.loader.exec_module(_cmod)
+            topic_str = None
+            try:
+                row = self.con.execute(
+                    "SELECT topic FROM hive_missions WHERE id = ?", [self.mission_id]
+                ).fetchone()
+                topic_str = row[0] if row else None
+                self.con.close()
+            except Exception:
+                pass
+            if topic_str:
+                cr = _cmod.post_process_hook(self.mission_id, topic_str)
+                log.info(
+                    f"🍯 ClusterPipeline: {cr.get('clusters', 0)} klastrów "
+                    f"dla misji {self.mission_id}"
+                )
+        except Exception as _ce:
+            log.debug(f"ClusterPipeline hook pominięty: {_ce}")
+    def _print_summary(
+        self,
+        docs_input: int,
+        docs_processed: int,
+        total_entities: int,
+        total_facts: int,
+        clusters: int,
+        gaps: int,
+        bee_ops: int,
+    ):
+        filtered = docs_input - docs_processed
+        print("\n" + "=" * 65)
+        print(f"  HIVE 2.0 BPMN PROCESS SUMMARY — Mission: {self.mission_id}")
+        print("=" * 65)
+        print(f"  Documents input     : {docs_input}")
+        print(f"  Docs filtered out   : {filtered}  (relevance < {self.relevance_threshold})")
+        # Explicitly close DuckDB to release write lock before exit
+        try:
+            self.con.close()
+        except Exception:
+            pass
+
+        print(f"  Documents processed : {docs_processed}")
+        print(f"  BPMN op executions  : {bee_ops}")
+        print(f"  Entities extracted  : {total_entities}")
+        print(f"  Facts extracted     : {total_facts}")
+        print(f"  Dedup clusters      : {clusters}")
+        print(f"  Research gaps       : {gaps}")
+        print("=" * 65 + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="HIVE 3.0 BPMN ProcessingDrones — transform raw content into intelligence"
+    )
+    parser.add_argument("mission_id", help="Mission ID to process")
+    parser.add_argument(
+        "--relevance-threshold", type=float, default=0.25,
+        help="Minimum relevance score (0.0–1.0) to process a document (default: 0.25)"
+    )
+    parser.add_argument(
+        "--max-ops", type=int, default=5,
+        help="Maximum BPMN operations per document (default: 5)"
+    )
+    parser.add_argument(
+        "--deep", action="store_true",
+        help="Deep cascade mode: activate all biomimetic tiers (max_ops=50)"
+    )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="Enable debug logging"
+    )
+    parser.add_argument(
+        "--no-filter", action="store_true",
+        help="Skip RelevanceFilter (process all docs, saves Bedrock TPM)"
+    )
+    args = parser.parse_args()
+
+    # Deep mode overrides max_ops to utilize full biomimetic cascade
+    if args.deep:
+        args.max_ops = 5    # depth=1: 5 ops×doc — BPMN-CI1+047+048+049+800, ~200s process
+
+    if args.debug:
+        # Only raise our own logger to DEBUG; leave boto3/botocore at WARNING
+        log.setLevel(logging.DEBUG)
+        logging.getLogger("hive2").setLevel(logging.DEBUG)
+        # Suppress boto3/botocore HTTP-level noise
+        logging.getLogger("boto3").setLevel(logging.WARNING)
+        logging.getLogger("botocore").setLevel(logging.WARNING)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
+
+    drones = ProcessingDrones(
+        mission_id=args.mission_id,
+        relevance_threshold=0.0 if getattr(args, 'no_filter', False) else args.relevance_threshold,
+        max_ops=args.max_ops,
+        debug=args.debug,
+    )
+    drones.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -1998,3 +1998,52 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
             print(
                 f"🧠 QueenMemory: {len(key_findings)} key_findings do pamięci cross-mission",
                 file=sys.stderr
+            )
+        except Exception as _qme:
+            print(f"⚠️  QueenMemory persist pominięty: {_qme}", file=sys.stderr)
+
+        # ── Numerical Falsification hook ─────────────────────────────────────
+        try:
+            import importlib.util as _flu
+            _fspec = _flu.spec_from_file_location("hive2_falsifier", "hive2_falsifier.py")
+            _fmod  = _flu.module_from_spec(_fspec)
+            _fspec.loader.exec_module(_fmod)
+            _fr = _fmod.run_falsification_for_mission(self.mission_id, resolve=True)
+            log.info(
+                f"🔴 NumericalFalsifier: {_fr.get('real_conflicts', 0)} REAL_CONFLICT "
+                f"z {_fr.get('conflicts_detected', 0)} wykrytych"
+            )
+        except Exception as _fe:
+            log.debug(f"NumericalFalsifier hook pominięty: {_fe}")
+
+        elapsed = time.time() - t0
+        print(f"\n[QUEEN] Synteza zakończona w {elapsed:.1f}s", file=sys.stderr)
+        print(f"[QUEEN] Raport MD: {paths['md']}", file=sys.stderr)
+        if paths["pdf"]:
+            print(f"[QUEEN] Raport PDF: {paths['pdf']}", file=sys.stderr)
+
+        print("\n" + "=" * 70)
+        print(report)
+        print("=" * 70)
+        print(f"\nMD:  {paths['md']}")
+        if paths["pdf"]:
+            print(f"PDF: {paths['pdf']}")
+
+
+# ---------------------------------------------------------------------------
+# CLI entry
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python3 hive2_synth.py <mission_id>", file=sys.stderr)
+        sys.exit(1)
+
+    mission_id = sys.argv[1]
+    try:
+        queen = Queen(mission_id)
+        queen.run()
+    except Exception as exc:
+        print(f"[QUEEN] BŁĄD KRYTYCZNY: {exc}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)

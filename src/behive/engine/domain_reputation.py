@@ -49,7 +49,7 @@ from urllib.parse import urlparse
 
 log = logging.getLogger("hive2_domain_reputation")
 
-DB_PATH = "os.environ.get("BEHIVE_DB_PATH", "behive.db")"
+DB_PATH = ""
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS hive_domain_reputation (
