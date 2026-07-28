@@ -204,7 +204,10 @@ response = model.generate_content(
 
 ## Benchmarks
 
-Real results. No cherry-picking. Scale 30 (standard depth), EC2 g6.24xlarge, Bedrock Claude Haiku + Sonnet.
+Real results. No cherry-picking. Scale 30 (standard depth).
+
+**Hardware:** EC2 g6.24xlarge — 4× NVIDIA L4 (92 GB VRAM), 96 vCPU, 384 GB RAM  
+**Models:** Bedrock Claude Haiku (bulk extraction) + Sonnet (enrichment), SGLang/Qwen on local GPUs
 
 | Topic | Claims | Avg Quality | Duration | Sources |
 |:------|-------:|:-----------:|---------:|--------:|
