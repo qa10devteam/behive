@@ -42,11 +42,12 @@ USER behive
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:8091/health || exit 1
 
-EXPOSE 8091
+EXPOSE 8091 8090
 
 ENV BEHIVE_DATA_DIR=/data \
     BEHIVE_HOST=0.0.0.0 \
     BEHIVE_PORT=8091 \
+    BEHIVE_MCP_PORT=8090 \
     PYTHONUNBUFFERED=1
 
-CMD ["python", "-m", "uvicorn", "behive_api:app", "--host", "0.0.0.0", "--port", "8091"]
+CMD ["behive", "serve", "--host", "0.0.0.0", "--port", "8091", "--mcp-port", "8090"]
