@@ -11,6 +11,8 @@
 
 <p align="center">
   <a href="https://pypi.org/project/behive"><img src="https://img.shields.io/badge/pip_install-behive-FFB300?style=for-the-badge&logo=python&logoColor=white" /></a>
+  <a href="https://www.npmjs.com/package/n8n-nodes-behive"><img src="https://img.shields.io/badge/n8n-community_node-FF6D5A?style=for-the-badge&logo=n8n&logoColor=white" /></a>
+  <a href="#self-hosting"><img src="https://img.shields.io/badge/Docker-compose_up-2496ED?style=for-the-badge&logo=docker&logoColor=white" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge" /></a>
   <a href="https://api.yu-na.io/docs"><img src="https://img.shields.io/badge/API-Live-4FC3F7?style=for-the-badge&logo=fastapi&logoColor=white" /></a>
   <a href="#mcp-integration"><img src="https://img.shields.io/badge/MCP-Native-AB47BC?style=for-the-badge" /></a>
@@ -19,10 +21,12 @@
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
   <a href="#use-with-claude--chatgpt--gemini">Use with AI Assistants</a> •
+  <a href="#drone-arsenal">Drone Arsenal</a> •
   <a href="#benchmarks">Benchmarks</a> •
   <a href="#architecture">Architecture</a> •
   <a href="#api-reference">API</a> •
-  <a href="#mcp-integration">MCP</a>
+  <a href="#self-hosting">Self-Hosting</a> •
+  <a href="#integrations">Integrations</a>
 </p>
 
 ---
@@ -462,26 +466,24 @@ BeHive implements the [Model Context Protocol](https://modelcontextprotocol.io) 
 
 ## Self-Hosting
 
-### Requirements
-
-- Python 3.10+
-- PostgreSQL 14+ (claims storage)
-- LLM access (Bedrock, OpenAI, or local SGLang/vLLM)
-- Optional: Neo4j (knowledge graph), Qdrant (embeddings)
-
-### Docker (coming soon)
+### Docker (recommended)
 
 ```bash
-docker compose up -d
-behive research "your topic" --scale 30
+git clone https://github.com/qa10devteam/behive.git
+cd behive
+cp .env.example .env     # add your LLM API key
+docker compose up -d     # API ready at localhost:8091
+```
+
+Full stack with knowledge graph + vector search:
+```bash
+docker compose --profile full up -d
 ```
 
 ### Manual Setup
 
 ```bash
-git clone https://github.com/qa10devteam/behive.git
-cd behive
-pip install -e .
+pip install behive[all]
 
 # PostgreSQL
 createdb hive
@@ -495,6 +497,17 @@ export BEHIVE_LLM=bedrock  # or openai, local
 behive api start      # REST API on :8091
 behive mcp start      # MCP server on :8090
 ```
+
+### Minimum Requirements
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| RAM | 4 GB | 16 GB |
+| CPU | 2 cores | 8+ cores |
+| Storage | 10 GB | 50 GB |
+| GPU | Not required | 4× L4 (local LLM) |
+| PostgreSQL | 14+ | 16 (pgvector) |
+| LLM | Any OpenAI-compatible | Bedrock Claude (Haiku + Sonnet) |
 
 ---
 
@@ -561,21 +574,44 @@ behive mcp start      # MCP server on :8090
 - [x] SSE streaming (real-time progress)
 - [x] Knowledge graph (Neo4j)
 - [x] 70+ API sources
-- [ ] `pip install behive` (PyPI)
-- [ ] Docker Compose one-liner
-- [ ] n8n community node
+- [x] `pip install behive` ([PyPI](https://pypi.org/project/behive/))
+- [x] Docker Compose one-liner
+- [x] n8n community node ([npm](https://www.npmjs.com/package/n8n-nodes-behive))
+- [x] Agent skills (Hermes, OpenClaw, Claude Desktop)
 - [ ] Web UI dashboard
 - [ ] Multi-tenant API keys
 - [ ] Webhook callbacks
+- [ ] Scheduled recurring research
+- [ ] PDF export with charts
+
+---
+
+## Integrations
+
+BeHive works with every major AI agent platform:
+
+| Platform | Method | Install |
+|----------|--------|---------|
+| **Claude Desktop** | MCP (zero-code) | Add URL to `claude_desktop_config.json` |
+| **Cursor / Windsurf** | MCP | Add MCP server in settings |
+| **Hermes Agent** | MCP + Skill | `cp integrations/hermes ~/.hermes/skills/research/behive-research` |
+| **OpenClaw** | Skill | `cp integrations/openclaw ~/.openclaw/workspace/skills/behive-research` |
+| **n8n** | Community Node | Install `n8n-nodes-behive` in Settings → Community Nodes |
+| **ChatGPT** | Custom GPT / API | OpenAPI spec in README above |
+| **Any MCP client** | Streamable HTTP | URL: `http://localhost:8090/mcp` |
+
+See [`integrations/`](integrations/) for detailed setup guides.
 
 ---
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and PR guidelines.
+
 ```bash
 git clone https://github.com/qa10devteam/behive.git
 cd behive
-pip install -e ".[dev]"
+pip install -e ".[all,dev]"
 pytest
 ```
 
