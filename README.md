@@ -202,6 +202,86 @@ response = model.generate_content(
 
 ---
 
+## Drone Arsenal
+
+BeHive doesn't just search the web. It deploys **stealth drones** — multi-layered fetch agents that break through anti-bot defenses, paywalls, and rate limits.
+
+### 8-Layer Evasion Stack
+
+Every URL goes through an **escalation cascade**. If Layer 1 gets blocked, Layer 2 fires. All the way to Layer 8.
+
+```
+Layer 1 │ DIRECT          — aiohttp + full Chrome 131 headers
+Layer 2 │ UA ROTATION     — 10 browser fingerprints (Chrome/Firefox/Safari/Edge)
+Layer 3 │ curl_cffi       — TLS impersonation (JA3/JA4 fingerprint matching)
+Layer 4 │ primp           — Rust-native TLS, newer fingerprints than curl_cffi
+Layer 5 │ nodriver        — Headless Chrome via CDP, passes Cloudflare Bot Management
+Layer 6 │ patchright      — Stealth Playwright (no Runtime.enable/Console.enable leak)
+Layer 7 │ Jina relay      — r.jina.ai proxy (paywall + captcha bypass)
+Layer 8 │ Archives        — Wayback Machine + archive.org fallback
+```
+
+### What they bypass
+
+| Defense | How |
+|---------|-----|
+| Cloudflare | Detected → escalate to nodriver/patchright (JS challenge solved) |
+| DataDome | TLS fingerprint rotation (primp/curl_cffi) |
+| Akamai Bot Manager | CDP-based headless + real browser UA pool |
+| Rate limits | Automatic backoff + UA rotation + parallel diversification |
+| Paywalls | Jina relay proxy + archive.org cache |
+| Turnstile CAPTCHA | patchright stealth Playwright |
+| 403/429 blocks | Smart retry with escalation, never hammer the same layer |
+
+### Parallel fetch architecture
+
+```
+                    ┌─── HEAD sweep (974+ URLs, async semaphore) ───┐
+                    │                                                │
+                    ▼                                                ▼
+          ┌─────────────────┐                            ┌────────────────┐
+          │  Resource Router │                            │  Domain Recon  │
+          │  (8 resource     │                            │  (tier scoring │
+          │   types detected)│                            │   reputation)  │
+          └────────┬────────┘                            └───────┬────────┘
+                   │                                              │
+        ┌──────────┼──────────┬──────────┐                       │
+        ▼          ▼          ▼          ▼                       ▼
+   api_bee    pdf_drone   std_drone  heavy_drone         domain_score
+   (70 APIs)  (VLM parse) (Layer 1-8) (patchright)       (0.0 - 1.0)
+```
+
+**Routing decisions per resource type:**
+- `api_endpoint` → Direct API bee (structured JSON, no parsing needed)
+- `pdf` → PDF drone (Vision LLM extraction)
+- `static_html` → Standard drone (Layer 1-4 usually sufficient)
+- `spa` → Heavy drone (Layer 5-6, needs JS execution)
+- `paywall` → Jina relay or archive fallback
+- `rss_feed` → RSS bee (structured, fast)
+- `database_portal` → Dedicated connector (custom scraping logic)
+
+### 70+ API Sources
+
+Scout bees don't just Google. They query **specialized APIs** across 37 categories:
+
+| Category | APIs | Examples |
+|----------|------|----------|
+| Academic | 5 | arXiv, Semantic Scholar, CrossRef, OpenAlex, CORE |
+| Financial | 6 | SEC EDGAR, Yahoo Finance, FRED, ECB, World Bank |
+| Government | 5 | TED (EU procurement), SAM.gov, UK FTS, BZP (Poland), GUS |
+| Security | 6 | CVE/NVD, Shodan, VirusTotal, AbuseIPDB |
+| Development | 8 | GitHub, npm, PyPI, crates.io, Docker Hub, Homebrew |
+| ML/AI | 5 | HuggingFace, Papers With Code, Replicate, Ollama |
+| News | 4 | NewsAPI, GNews, TheNewsAPI, Mediastack |
+| Crypto | 2 | CoinGecko, CoinMarketCap |
+| Patents | 1 | Google Patents (via SerpAPI) |
+| Medical | 1 | PubMed/NCBI |
+| ... | 25+ | Trade, geopolitics, environment, demographics, ... |
+
+**Total: 70 APIs, 125 endpoints** — each checked per-mission based on topic relevance.
+
+---
+
 ## Benchmarks
 
 Real results. No cherry-picking. Scale 30 (standard depth).
