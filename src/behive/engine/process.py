@@ -240,7 +240,7 @@ def _detect_doc_type(title: str, domain: str, text: str) -> str:
 
 import urllib.request as _urllib_request
 
-SGLANG_URL        = "http://localhost:8002/v1/chat/completions"
+SGLANG_URL        = os.environ.get("BEHIVE_SGLANG_URL", "http://localhost:8002/v1/chat/completions")
 SGLANG_MODEL      = "Qwen2.5-7B-Instruct"
 MAX_LLM_CALLS     = 40   # SGLang continuous batching — 40 parallel bez problemu
 
@@ -718,10 +718,8 @@ class OperationRouter:
         """Load operation fitness from user feedback. Returns {op_name: useful_ratio}."""
         try:
             import psycopg2
-            pg = psycopg2.connect(
-                host='127.0.0.1', port=5432,
-                user='behive', password='***', dbname='hive'
-            )
+            from behive.engine.db import get_pg_connection
+            pg = get_pg_connection()
             cur = pg.cursor()
             cur.execute("""
                 SELECT source_operation, 
@@ -1013,10 +1011,13 @@ class BeeWorker:
                 if any(p.lower() in claim_text.lower() for p in skip_phrases):
                     return
                 # ─── QUALITY GATE: reject low-quality claims before DB insert ───
-                from hive3_bees import SpecializedBee
-                quality = SpecializedBee._score_claim_quality(claim_text)
-                if quality < 0.65:  # Quality gate — only useful claims enter DB
-                    return  # Garbage/mediocre — don't pollute the DB
+                try:
+                    from hive3_bees import SpecializedBee
+                    quality = SpecializedBee._score_claim_quality(claim_text)
+                    if quality < 0.65:  # Quality gate — only useful claims enter DB
+                        return  # Garbage/mediocre — don't pollute the DB
+                except ImportError:
+                    pass  # hive3_bees not available — skip quality gate
                 claim_type = str(
                     data.get("type") or data.get("claim_type") or "intelligence"
                 ).lower()
@@ -1911,10 +1912,14 @@ class ProcessingDrones:
                 results = await extractor.extract_batch(extract_docs, enrich=True)
                 
                 # Save to hive_claims
-                from hive3_bees import SpecializedBee
+                try:
+                    from hive3_bees import SpecializedBee
+                    _has_bee = True
+                except ImportError:
+                    _has_bee = False
                 for r in results:
                     try:
-                        quality = SpecializedBee._score_claim_quality(r.claim)
+                        quality = SpecializedBee._score_claim_quality(r.claim) if _has_bee else 0.7
                         if quality >= 0.65:
                             self.con.execute("""
                                 INSERT INTO hive_claims

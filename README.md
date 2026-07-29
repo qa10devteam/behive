@@ -60,6 +60,19 @@ export ANTHROPIC_API_KEY=*** # or OPENAI_API_KEY
 behive serve
 ```
 
+**Full install** (stealth drones, content extraction, NLP processing):
+```bash
+pip install "behive[all]"
+```
+
+Or pick what you need:
+```bash
+pip install "behive[stealth]"   # curl_cffi, primp, nodriver, patchright
+pip install "behive[harvest]"   # trafilatura, newspaper4k, PyMuPDF, crawl4ai
+pip install "behive[process]"   # rapidfuzz, spacy, litellm, tiktoken
+pip install "behive[mcp,api]"   # MCP server + REST API
+```
+
 That's it. BeHive is now running:
 - **API** → `http://localhost:8091` (REST endpoints)
 - **MCP** → `http://localhost:8090/mcp` (for AI assistants)

@@ -96,7 +96,7 @@ def _sglang_call(prompt: str, max_tokens: int = 4096) -> str:
     import urllib.request as _req
     import json as _json
 
-    SGLANG_URL   = "http://localhost:8002/v1/chat/completions"
+    SGLANG_URL   = os.environ.get("BEHIVE_SGLANG_URL", "http://localhost:8002/v1/chat/completions")
     SGLANG_MODEL = "Qwen2.5-7B-Instruct"
 
     # Try SGLang first (fast, local)
