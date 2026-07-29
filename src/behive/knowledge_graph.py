@@ -228,15 +228,46 @@ def graph_stats() -> Optional[dict]:
         return None
 
 
-def ingest_entities_from_claims(mission_id: str, claims: list[dict]):
+def ingest_entities_from_claims(mission_id: str, claims: list[dict] | None = None) -> int:
     """Extract entities from claims and ingest into Neo4j knowledge graph.
     
     Called at the end of a research mission to persist entities/relationships.
+    If claims is None, fetches them from PostgreSQL.
+    Returns number of entities ingested.
     """
     driver = get_driver()
     if not driver:
-        return
+        return 0
     
+    # Fetch claims from DB if not provided
+    if claims is None:
+        try:
+            import psycopg2
+            conn = psycopg2.connect(
+                dbname="hive", user="hive_app",
+                password=open("/tmp/.hive_db_pass").read().strip() if os.path.exists("/tmp/.hive_db_pass") else "hive_2026_prod",
+                host="127.0.0.1", port=5432
+            )
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT claim, evidence, source_url, claim_type, confidence, quality_score "
+                "FROM hive_claims WHERE mission_id = %s AND quality_score >= 0.7",
+                (mission_id,)
+            )
+            claims = [
+                {"claim": r[0], "evidence": r[1], "source_url": r[2], 
+                 "claim_type": r[3], "confidence": r[4], "quality_score": r[5]}
+                for r in cur.fetchall()
+            ]
+            conn.close()
+        except Exception as e:
+            log.debug(f"Failed to fetch claims from DB: {e}")
+            return 0
+    
+    if not claims:
+        return 0
+    
+    ingested = 0
     try:
         with driver.session() as s:
             # Ensure mission node exists
@@ -268,10 +299,13 @@ def ingest_entities_from_claims(mission_id: str, claims: list[dict]):
                         MATCH (m:HiveMission {mission_id: $mid})
                         MERGE (e)-[:MENTIONED_IN]->(m)
                     """, name=entity_name, type=entity_type, mid=mission_id)
+                    ingested += 1
             
-            log.info(f"Ingested entities for mission {mission_id}")
+            log.info(f"Ingested {ingested} entities for mission {mission_id}")
     except Exception as e:
         log.error(f"Neo4j ingest error: {e}")
+    
+    return ingested
 
 
 def _extract_entity_names(text: str) -> list[tuple[str, str]]:

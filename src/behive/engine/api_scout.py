@@ -445,10 +445,14 @@ def _extract_text_from_response(data: dict, api: dict) -> str:
                      "esearchresult", "response", "message", "assets",
                      "models", "packages", "repositories", "total_count",
                      "search-results", "result", "output", "collection",
-                     "feed", "observations"]
+                     "feed", "observations", "rates", "people", "features",
+                     "abilities", "stats", "types", "moves", "forms"]
         for key in containers:
             if key in data:
                 inner = data[key]
+                # Skip if value is a short primitive (e.g. "result": "success")
+                if isinstance(inner, (str, int, float, bool)):
+                    continue
                 if isinstance(inner, list):
                     for item in inner[:25]:
                         if isinstance(item, dict):
