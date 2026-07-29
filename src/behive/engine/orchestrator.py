@@ -1408,26 +1408,45 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
     t1 = time.time()
     scout_script = str(HIVE_DIR / 'hive2_scout.py')
     scout_cmd = [PYTHON, scout_script, mission_id, '--plan', plan_file]
+    scout_timeout = int(os.environ.get("BEHIVE_SCOUT_TIMEOUT", "300"))
     sys.stdout.flush()
-    try:
-        result = subprocess.run(scout_cmd, check=False)
-        if result.returncode != 0:
-            log.info(f'  ⚠️  Scout exit {result.returncode} — continuing with partial results.')
-    except FileNotFoundError:
-        log.info(f'  ⚠️  hive2_scout.py not found — skipped.')
+    
+    # Scout with retry on 0 sources (handles search rate-limiting)
+    _n_sources = 0
+    for scout_attempt in range(2):  # max 2 scout attempts
+        try:
+            result = subprocess.run(scout_cmd, check=False, timeout=scout_timeout)
+            if result.returncode != 0:
+                log.info(f'  ⚠️  Scout exit {result.returncode} — continuing with partial results.')
+        except subprocess.TimeoutExpired:
+            log.warning(f'  ⚠️  Scout timed out after {scout_timeout}s — continuing with partial results.')
+        except FileNotFoundError:
+            log.info(f'  ⚠️  hive2_scout.py not found — skipped.')
+            break
+        
+        # Check how many sources we got
+        try:
+            _con = _connect_db(read_only=True)
+            _n_sources = _con.execute(
+                "SELECT COUNT(*) FROM hive_sources WHERE mission_id=?", [mission_id]
+            ).fetchone()[0]
+            _con.close()
+        except Exception:
+            _n_sources = 0
+        
+        if _n_sources > 0:
+            break  # Got sources, proceed
+        elif scout_attempt == 0:
+            log.warning(f'  ⚠️  Scout returned 0 sources — retrying in 10s (rate-limit backoff)...')
+            time.sleep(10)
+    
     timings['scout'] = time.time() - t1
-    # Emit scout completed event
-    try:
-        # import duckdb as _ddb  # removed — using _connect_db()
-        _con = _connect_db(read_only=True)
-        _n_sources = _con.execute(
-            "SELECT COUNT(*) FROM hive_sources WHERE mission_id=?", [mission_id]
-        ).fetchone()[0]
-        _con.close()
-    except Exception:
-        _n_sources = 0
     _emit(mission_id, 'scout', 'completed', data={'sources_found': _n_sources})
-    log.info(f'  └─ done · {timings["scout"]:.1f}s ──────────────────────────────┘\n')
+    log.info(f'  └─ done · {timings["scout"]:.1f}s · {_n_sources} sources ─────────────┘\n')
+    
+    # If still 0 sources after retry, fail fast (don't waste time on empty harvest/process)
+    if _n_sources == 0:
+        raise RuntimeError(f"Scout found 0 sources for '{topic[:60]}' — all search backends exhausted")
 
     # ═══ PHASE 1.5: DRONES (Trutnie) — rekon i penetracja barier ════════════
     log.debug('  ┌─ PHASE 1.5 · DRONES (Trutnie) ────────────────────────┐')
