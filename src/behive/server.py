@@ -190,13 +190,35 @@ _STOP_ENTITIES = {
 
 
 def extract_entities(text: str) -> list[str]:
-    """Extract entity names from claim text."""
+    """Extract entity names from claim text.
+    
+    Primary: uses hive_entities table (LLM-extracted, typed).
+    Fallback: improved regex for when DB lookup isn't available.
+    """
     entities = set()
     for match in _ENTITY_PATTERN.finditer(text):
         entity = match.group(0).strip()
         if entity and len(entity) > 1 and entity not in _STOP_ENTITIES:
+            # Filter out garbage: pure uppercase common words
+            if entity.isupper() and len(entity) <= 3 and entity not in {
+                "AI", "EU", "US", "UK", "UN", "AWS", "GCP", "IBM", "MIT", "GDP",
+                "CEO", "CTO", "API", "LLM", "GPU", "CPU", "RAM", "SQL", "IoT",
+            }:
+                continue
             entities.add(entity)
     return sorted(entities)
+
+
+def _get_typed_entities_for_claim(cur, claim_text: str, mission_id: str) -> list[dict]:
+    """Get LLM-extracted typed entities from hive_entities table."""
+    cur.execute("""
+        SELECT DISTINCT entity_type, value 
+        FROM hive_entities 
+        WHERE mission_id = %s 
+          AND (value ILIKE %s OR %s ILIKE '%%' || value || '%%')
+        LIMIT 50
+    """, (mission_id, f"%{claim_text[:100]}%", claim_text[:200]))
+    return [{"type": r[0], "name": r[1]} for r in cur.fetchall()]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -480,20 +502,36 @@ async def list_missions(limit: int = Query(20, ge=1, le=100), offset: int = Quer
 
 @app.get("/intelligence/entity/{name}")
 async def intelligence_entity(name: str, limit: int = Query(50, ge=1, le=200)):
-    """Get intelligence about a specific entity — from knowledge graph or claims."""
-    # Try Neo4j first
+    """Get intelligence about a specific entity — from knowledge graph or claims.
+    
+    Uses LLM-extracted typed entities from hive_entities (72K+ entries),
+    with Neo4j graph as enrichment layer.
+    """
+    # Try Neo4j first (richest data)
     try:
         from behive.knowledge_graph import entity_lookup
         neo4j_result = entity_lookup(name, limit=limit)
         if neo4j_result:
             return neo4j_result
-    except ImportError:
+    except (ImportError, Exception):
         pass
 
-    # Fallback to PostgreSQL ILIKE
+    # Primary: hive_entities table (LLM-extracted, typed entities)
     try:
         conn = get_db()
         cur = conn.cursor()
+        
+        # Get entity occurrences with types
+        cur.execute("""
+            SELECT e.entity_type, e.value, e.context, e.confidence, e.mission_id
+            FROM hive_entities e
+            WHERE e.value ILIKE %s
+            ORDER BY e.confidence DESC
+            LIMIT %s
+        """, (f"%{name}%", limit))
+        entity_hits = cur.fetchall()
+        
+        # Get claims mentioning this entity
         cur.execute("""
             SELECT claim, quality_score, source_url, mission_id, claim_type, confidence
             FROM hive_claims
@@ -502,28 +540,51 @@ async def intelligence_entity(name: str, limit: int = Query(50, ge=1, le=200)):
             LIMIT %s
         """, (f"%{name}%", limit))
         claims = [
-            {"text": r[0], "quality_score": r[1], "source_url": r[2], "mission_id": r[3], "type": r[4], "confidence": r[5]}
+            {"text": r[0], "quality_score": r[1], "source_url": r[2], 
+             "mission_id": r[3], "type": r[4], "confidence": r[5]}
             for r in cur.fetchall()
         ]
+        
+        # Get co-occurring entities from hive_entities (same missions)
+        mission_ids = list(set(r[4] for r in entity_hits))[:20]
+        co_entities: Counter = Counter()
+        if mission_ids:
+            cur.execute("""
+                SELECT value, COUNT(*) as cnt
+                FROM hive_entities
+                WHERE mission_id = ANY(%s)
+                  AND value NOT ILIKE %s
+                  AND entity_type NOT IN ('entitie', 'url', 'date')
+                  AND LENGTH(value) > 2
+                GROUP BY value
+                ORDER BY cnt DESC
+                LIMIT 30
+            """, (mission_ids, f"%{name}%"))
+            for row in cur.fetchall():
+                co_entities[row[0]] = row[1]
+        
+        # Determine entity type from our data
+        entity_types: Counter = Counter()
+        for hit in entity_hits:
+            if hit[0] and hit[0] != 'entitie':
+                entity_types[hit[0]] += 1
+        primary_type = entity_types.most_common(1)[0][0] if entity_types else "unknown"
+        
         conn.close()
 
-        co_entities: Counter = Counter()
-        for claim in claims:
-            entities = extract_entities(claim["text"])
-            for e in entities:
-                if e.lower() != name.lower():
-                    co_entities[e] += 1
-
-        top_related = [{"entity": e, "co_occurrences": c} for e, c in co_entities.most_common(20)]
+        top_related = [{"entity": e, "co_occurrences": c, "type": "co_occurrence"} 
+                       for e, c in co_entities.most_common(20)]
         avg_q = sum(c["quality_score"] or 0 for c in claims) / max(1, len(claims))
 
         return {
             "entity": name,
+            "entity_type": primary_type,
             "mentions": len(claims),
+            "entity_records": len(entity_hits),
             "avg_quality": round(avg_q, 4),
             "related_entities": top_related,
             "claims": claims[:30],
-            "source": "postgresql",
+            "source": "hive_entities+claims",
         }
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -533,70 +594,99 @@ async def intelligence_entity(name: str, limit: int = Query(50, ge=1, le=200)):
 
 @app.get("/intelligence/network/{name}")
 async def intelligence_network(name: str, depth: int = Query(2, ge=1, le=3)):
-    """Entity relationship network — from knowledge graph or claim co-occurrence."""
+    """Entity relationship network — from knowledge graph or hive_entities co-occurrence.
+    
+    Uses LLM-extracted typed entities (72K+ records) to build relationship networks.
+    Edges represent co-occurrence within the same mission (semantically related).
+    """
     # Try Neo4j first
     try:
         from behive.knowledge_graph import entity_network
         neo4j_result = entity_network(name, depth=depth)
         if neo4j_result:
             return neo4j_result
-    except ImportError:
+    except (ImportError, Exception):
         pass
 
-    # Fallback to PostgreSQL co-occurrence
+    # Primary: hive_entities co-occurrence within missions
     try:
         conn = get_db()
         cur = conn.cursor()
 
-        nodes = set()
+        nodes = {}  # name -> {type, weight}
         edges = []
-        nodes.add(name)
+        nodes[name] = {"type": "center", "weight": 0}
 
-        # Hop 1: entities co-occurring with target
+        # Find missions containing this entity
         cur.execute("""
-            SELECT claim FROM hive_claims
-            WHERE claim ILIKE %s AND (is_garbage = false OR is_garbage IS NULL)
-            ORDER BY quality_score DESC LIMIT 100
+            SELECT DISTINCT mission_id FROM hive_entities
+            WHERE value ILIKE %s
+            LIMIT 30
         """, (f"%{name}%",))
-        hop1_claims = [r[0] for r in cur.fetchall()]
+        mission_ids = [r[0] for r in cur.fetchall()]
+        nodes[name]["weight"] = len(mission_ids)
 
-        hop1_entities: Counter = Counter()
-        for claim_text in hop1_claims:
-            for e in extract_entities(claim_text):
-                if e.lower() != name.lower():
-                    hop1_entities[e] += 1
+        if not mission_ids:
+            conn.close()
+            return {"center": name, "depth": depth, "nodes": [{"name": name, "type": "unknown", "weight": 0}], 
+                    "edges": [], "node_count": 1, "edge_count": 0}
 
-        # Add hop1 edges
-        for entity, weight in hop1_entities.most_common(15):
-            nodes.add(entity)
-            edges.append({"source": name, "target": entity, "weight": weight})
+        # Hop 1: entities co-occurring in same missions (typed!)
+        cur.execute("""
+            SELECT value, entity_type, COUNT(DISTINCT mission_id) as cnt
+            FROM hive_entities
+            WHERE mission_id = ANY(%s)
+              AND value NOT ILIKE %s
+              AND entity_type NOT IN ('entitie', 'url', 'date')
+              AND LENGTH(value) > 2
+            GROUP BY value, entity_type
+            ORDER BY cnt DESC
+            LIMIT 20
+        """, (mission_ids, f"%{name}%"))
+        hop1_results = cur.fetchall()
+        
+        for entity_val, entity_type, weight in hop1_results:
+            nodes[entity_val] = {"type": entity_type or "unknown", "weight": weight}
+            edges.append({"source": name, "target": entity_val, "weight": weight, "relation": "co_occurs_in_research"})
 
-        # Hop 2 (if depth >= 2): for each hop1 entity, find THEIR co-occurring entities
+        # Hop 2 (if depth >= 2): for top hop1 entities, find THEIR co-occurring entities
         if depth >= 2:
-            for hop1_entity, _ in hop1_entities.most_common(8):  # Limit to top 8 for performance
+            for entity_val, entity_type, _ in hop1_results[:8]:
                 cur.execute("""
-                    SELECT claim FROM hive_claims
-                    WHERE claim ILIKE %s AND (is_garbage = false OR is_garbage IS NULL)
-                    ORDER BY quality_score DESC LIMIT 50
-                """, (f"%{hop1_entity}%",))
-                hop2_claims = [r[0] for r in cur.fetchall()]
-                hop2_entities: Counter = Counter()
-                for claim_text in hop2_claims:
-                    for e in extract_entities(claim_text):
-                        if e.lower() != hop1_entity.lower() and e.lower() != name.lower():
-                            hop2_entities[e] += 1
-                for entity, weight in hop2_entities.most_common(5):
-                    nodes.add(entity)
-                    edges.append({"source": hop1_entity, "target": entity, "weight": weight})
+                    SELECT DISTINCT mission_id FROM hive_entities
+                    WHERE value ILIKE %s LIMIT 15
+                """, (f"%{entity_val}%",))
+                hop1_missions = [r[0] for r in cur.fetchall()]
+                
+                if hop1_missions:
+                    cur.execute("""
+                        SELECT value, entity_type, COUNT(DISTINCT mission_id) as cnt
+                        FROM hive_entities
+                        WHERE mission_id = ANY(%s)
+                          AND value NOT ILIKE %s AND value NOT ILIKE %s
+                          AND entity_type NOT IN ('entitie', 'url', 'date')
+                          AND LENGTH(value) > 2
+                        GROUP BY value, entity_type
+                        ORDER BY cnt DESC
+                        LIMIT 5
+                    """, (hop1_missions, f"%{entity_val}%", f"%{name}%"))
+                    for h2_val, h2_type, h2_weight in cur.fetchall():
+                        if h2_val not in nodes:
+                            nodes[h2_val] = {"type": h2_type or "unknown", "weight": h2_weight}
+                        edges.append({"source": entity_val, "target": h2_val, "weight": h2_weight, "relation": "co_occurs_in_research"})
 
         conn.close()
+        
+        node_list = [{"name": n, "type": info["type"], "weight": info["weight"]} for n, info in nodes.items()]
+        
         return {
             "center": name,
             "depth": depth,
-            "nodes": sorted(nodes),
+            "nodes": node_list,
             "edges": edges,
             "node_count": len(nodes),
             "edge_count": len(edges),
+            "source": "hive_entities",
         }
     except Exception as e:
         raise HTTPException(500, str(e))

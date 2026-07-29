@@ -1113,6 +1113,29 @@ class BeeWorker:
         url    = doc.get("url", "")
         saved  = 0
         items: list[tuple[str, str, str, float]] = []  # (entity_type, value, context, confidence)
+        
+        # Canonical entity types (normalize LLM output variations)
+        _TYPE_MAP = {
+            "entitie": "entity", "entities": "entity", "ent": "entity",
+            "org": "organization", "orgs": "organization", "company": "organization",
+            "corp": "organization", "institution": "organization",
+            "person": "person", "people": "person", "individual": "person",
+            "loc": "location", "place": "location", "geo": "location", "country": "location",
+            "city": "location", "region": "location",
+            "tech": "technology", "tool": "technology", "software": "technology",
+            "product": "technology", "framework": "technology", "platform": "technology",
+            "money": "amount", "financial": "amount", "price": "amount",
+            "currency": "amount", "value": "amount", "funding": "amount",
+            "date": "date", "time": "date", "year": "date", "period": "date",
+            "regulation": "regulation", "law": "regulation", "policy": "regulation",
+            "act": "regulation", "directive": "regulation",
+            "metric": "metric", "statistic": "metric", "kpi": "metric",
+            "event": "event", "conference": "event",
+        }
+
+        def _normalize_type(t: str) -> str:
+            t_lower = t.lower().strip()
+            return _TYPE_MAP.get(t_lower, t_lower if t_lower else "unknown")
 
         def _extract_entities_from(data):
             if isinstance(data, list):
@@ -1121,12 +1144,12 @@ class BeeWorker:
             elif isinstance(data, dict):
                 # Explicit entity fields
                 if "entity_type" in data or "type" in data:
-                    etype   = str(data.get("entity_type") or data.get("type", "UNKNOWN"))
+                    etype   = _normalize_type(str(data.get("entity_type") or data.get("type", "UNKNOWN")))
                     value   = str(data.get("value") or data.get("text") or data.get("name") or data.get("canonical", ""))
                     context = str(data.get("context") or data.get("description") or "")[:500]
                     conf    = float(data.get("confidence", 0.7))
                     if value and len(value) >= 2:
-                        items.append((etype.upper(), value[:500], context, conf))
+                        items.append((etype, value[:500], context, conf))
                 # Handle 'company' field from competitive intelligence claims
                 # Schema: {claim, company, type, confidence, source_context}
                 company_name = str(data.get("company") or "").strip()
@@ -1148,14 +1171,14 @@ class BeeWorker:
                             role = str(p.get("role", "")) if isinstance(p, dict) else ""
                             ctx = f"{role} @ {org}".strip(" @") if (role or org) else ""
                             if v and len(v) >= 2:
-                                items.append(("PERSON", v[:500], ctx[:300], 0.75))
+                                items.append(("person", v[:500], ctx[:300], 0.75))
                 for key in ("organizations", "orgs", "org_names"):
                     if key in data:
                         for o in (data[key] if isinstance(data[key], list) else [data[key]]):
                             v = str(o.get("name") or o.get("canonical_form") or o.get("canonical") or o) if isinstance(o, dict) else str(o)
                             ctx = str(o.get("description") or o.get("type") or "") if isinstance(o, dict) else ""
                             if v and len(v) >= 2:
-                                items.append(("ORG", v[:500], ctx[:300], 0.75))
+                                items.append(("organization", v[:500], ctx[:300], 0.75))
 
         _extract_entities_from(parsed)
 
