@@ -281,3 +281,51 @@ CREATE INDEX IF NOT EXISTS idx_content_url ON hive_content(url);
 CREATE INDEX IF NOT EXISTS idx_entities_value ON hive_entities(value);
 CREATE INDEX IF NOT EXISTS idx_facts_mission ON hive_facts(mission_id);
 CREATE INDEX IF NOT EXISTS idx_clusters_mission ON hive_clusters(mission_id);
+
+-- ─── Bee Results ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS hive_bee_results (
+    id              TEXT PRIMARY KEY,
+    mission_id      TEXT REFERENCES hive_missions(id),
+    doc_id          TEXT,
+    operation_id    TEXT,
+    operation_name  TEXT,
+    tier            INTEGER,
+    relevance_score REAL,
+    output_json     TEXT,
+    confidence      REAL,
+    processing_ms   INTEGER,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_bee_results_mission ON hive_bee_results(mission_id);
+
+-- ─── Citations ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS hive_citations (
+    id                  SERIAL PRIMARY KEY,
+    mission_id          TEXT REFERENCES hive_missions(id),
+    claim               TEXT,
+    source_url          TEXT,
+    source_domain       TEXT,
+    source_title        TEXT,
+    author              TEXT,
+    published_date      TEXT,
+    confidence          DOUBLE PRECISION,
+    cross_validated     BOOLEAN DEFAULT FALSE,
+    supporting_sources  INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_citations_mission ON hive_citations(mission_id);
+
+-- ─── Queen Assessments ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS hive_queen_assessments (
+    id                      TEXT PRIMARY KEY,
+    mission_id              TEXT REFERENCES hive_missions(id),
+    query                   TEXT,
+    queen_json              TEXT,
+    must_know_insight       TEXT,
+    hausdorff_score         REAL,
+    confidence_raw          REAL,
+    confidence_calibrated   REAL,
+    bee_ops_count           INTEGER,
+    rag_chunks_count        INTEGER,
+    created_at              TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_queen_assessments_mission ON hive_queen_assessments(mission_id);
