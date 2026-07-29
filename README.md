@@ -68,7 +68,7 @@ behive serve
 git clone https://github.com/qa10devteam/behive && cd behive
 echo "ANTHROPIC_API_KEY=your-key" > .env
 docker compose up -d
-# API at http://localhost:8333
+# API at http://localhost:8091
 ```
 
 **Full install** (stealth drones, content extraction, NLP processing):
@@ -148,7 +148,7 @@ Priority: `BEHIVE_MODEL_{STAGE}` > `BEHIVE_MODEL` > config.yaml > defaults
 
 | Preset | Model String |
 |--------|-------------|
-| `claude-haiku` | anthropic/claude-3-5-haiku-20241022 |
+| `claude-haiku` | anthropic/claude-haiku-4-5-20251001 |
 | `claude-sonnet` | anthropic/claude-sonnet-4-20250514 |
 | `claude-opus` | anthropic/claude-opus-4-20250514 |
 | `gpt-4o-mini` | openai/gpt-4o-mini |
