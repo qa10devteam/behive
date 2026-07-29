@@ -143,6 +143,7 @@ class PgConnection:
         return self
     
     def fetchone(self):
+        """Execute query and return first row or None."""
         if self._cursor:
             return self._cursor.fetchone()
         return None
@@ -171,6 +172,7 @@ class PgConnection:
         return self
     
     def fetchall(self):
+        """Execute query and return all rows."""
         if self._cursor:
             return self._cursor.fetchall()
         return []
@@ -192,12 +194,15 @@ class PgConnection:
         return None
     
     def commit(self):
+        """Commit the current transaction."""
         self._conn.commit()
     
     def rollback(self):
+        """Rollback the current transaction."""
         self._conn.rollback()
     
     def close(self):
+        """Close the database connection."""
         if self._cursor:
             self._cursor.close()
             self._cursor = None

@@ -1,3 +1,5 @@
+"""HIVE Event Bus — structured event emission, SSE streaming, and pipeline telemetry."""
+
 from __future__ import annotations
 import logging
 """

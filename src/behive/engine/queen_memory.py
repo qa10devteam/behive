@@ -1,3 +1,5 @@
+"""Queen Memory — cross-mission knowledge persistence and operational context injection."""
+
 import logging
 #!/usr/bin/env python3
 """

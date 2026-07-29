@@ -1,3 +1,5 @@
+"""Quality scoring — multi-signal content evaluation, relevance filtering, and metrics."""
+
 from __future__ import annotations
 import logging
 

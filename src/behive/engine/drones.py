@@ -207,6 +207,7 @@ SPECIAL_HANDLERS = {
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class ReconResult:
+    """Domain reconnaissance result: status, content type, headers, timing."""
     def __init__(self, domain: str):
         self.domain        = domain
         self.strategy      = "DIRECT"
@@ -226,6 +227,7 @@ class ReconResult:
         self.notes: list[str] = []
 
     def to_dict(self) -> dict:
+        """Serialize to dictionary."""
         return {
             "domain":          self.domain,
             "strategy":        self.strategy,
@@ -711,6 +713,7 @@ class DroneRecon:
     # ── Main recon loop ────────────────────────────────────────────────────
 
     async def recon(self, domains: list[str]) -> dict[str, ReconResult]:
+        """Perform full domain reconnaissance."""
         log.info(f"[TRUTNIE v2.0] Starting 8-level recon — {len(domains)} domains")
 
         tasks = [self._recon_domain(d) for d in domains]
@@ -744,6 +747,7 @@ class DroneRecon:
     # ── Save to DuckDB ────────────────────────────────────────────────────────
 
     def save_to_db(self):
+        """Persist recon results to database."""
         import hive2_db as _hive_db
         db = _hive_db.connect(read_only=False)
         rows = []
@@ -799,6 +803,7 @@ class DroneRecon:
     # ── Report ────────────────────────────────────────────────────────────────
 
     def report(self) -> dict:
+        """Generate human-readable report."""
         strategy_counts: dict[str, int] = {}
         blocked = []
         for domain, res in self._results.items():

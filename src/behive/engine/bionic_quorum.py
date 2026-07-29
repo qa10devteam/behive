@@ -65,6 +65,7 @@ EXPANSION_QUERIES   = 5      # ile dodatkowych queries per expansion
 
 @dataclass
 class QuorumResult:
+    """Bionic quorum voting result with confidence and expansion queries."""
     mission_id:         str
     harvestable_count:  int
     total_sources:      int
@@ -76,6 +77,7 @@ class QuorumResult:
     report:             str = ""
 
     def summary(self) -> str:
+        """Return human-readable summary of the quorum result."""
         status = "✅ QUORUM MET" if self.quorum_met else "⚠️ QUORUM FAILED"
         exp    = f" → expansion round {self.expansion_round + 1}" if self.needs_expansion else ""
         return (
