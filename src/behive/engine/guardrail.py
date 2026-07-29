@@ -230,7 +230,8 @@ def _is_base64_malicious(b64_str: str) -> bool:
         # Check decoded content with Layer 1 patterns
         result = _layer1_pattern_scan(decoded)
         return result is not None
-    except Exception:
+    except Exception as e:
+        log.debug(f"Suppressed in guardrail.py: {e}")
         return False
 
 

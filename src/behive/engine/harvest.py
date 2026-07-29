@@ -295,7 +295,8 @@ def _domain(url: str) -> str:
     try:
         host = urlparse(url).netloc.lower()
         return host.lstrip("www.")
-    except Exception:
+    except Exception as e:
+        log.debug(f"Suppressed in harvest.py: {e}")
         return ""
 
 
@@ -304,7 +305,8 @@ def _ext(url: str) -> str:
         path = urlparse(url).path.lower()
         _, ext = os.path.splitext(path)
         return ext
-    except Exception:
+    except Exception as e:
+        log.debug(f"Suppressed in harvest.py: {e}")
         return ""
 
 
@@ -327,7 +329,8 @@ def _get_drone_strategy(mission_id: str, domain: str) -> dict:
     try:
         from hive2_drones import get_strategy
         result = get_strategy(mission_id, domain)
-    except Exception:
+    except Exception as e:
+        log.debug(f"Suppressed in harvest.py: {e}")
         result = {"strategy": "DIRECT", "working_ua": USER_AGENT,
                   "delay_ms": 0, "via_jina": False, "via_wayback": False}
     _drone_strategy_cache[cache_key] = result

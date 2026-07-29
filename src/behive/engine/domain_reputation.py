@@ -88,7 +88,8 @@ def _extract_domain(url: str) -> str:
         # strip port
         domain = domain.split(":")[0]
         return domain
-    except Exception:
+    except Exception as e:
+        log.debug(f"Suppressed in domain_reputation.py: {e}")
         return url[:100]
 
 

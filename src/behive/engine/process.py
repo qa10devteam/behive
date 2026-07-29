@@ -200,7 +200,8 @@ def _new_id() -> str:
 def _domain(url: str) -> str:
     try:
         return urlparse(url).netloc.lower().lstrip("www.")
-    except Exception:
+    except Exception as e:
+        log.debug(f"Suppressed in process.py: {e}")
         return ""
 
 
@@ -306,7 +307,8 @@ class SGLangClient:
             url = SGLANG_URL.replace("/v1/chat/completions", "/health")
             with _urllib_request.urlopen(url, timeout=2) as r:
                 self._available = r.status == 200
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in process.py: {e}")
             self._available = False
         self._last_check = _t.time()
         return self._available
@@ -519,7 +521,8 @@ class RelevanceFilter:
                 scores = json.loads(m.group(0))
                 if len(scores) == len(docs):
                     return [max(0.0, min(1.0, float(s))) for s in scores]
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in process.py: {e}")
             # Bedrock fallback
             try:
                 text = await _bedrock_invoke_async(prompt, max_tokens=200)
@@ -743,7 +746,8 @@ class OperationRouter:
             if fitness:
                 log.info(f"  📊 Feedback fitness loaded: {len(fitness)} ops rated")
             return fitness
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in process.py: {e}")
             return {}
 
     def route(self, doc: dict) -> list["BeeOperation"]:
@@ -1400,7 +1404,8 @@ class FactValidationDrone:
                 continue
             try:
                 srcs = json.loads(sources_json) if sources_json else []
-            except Exception:
+            except Exception as e:
+                log.debug(f"Suppressed in process.py: {e}")
                 srcs = []
             for src in srcs:
                 vud[(round(float(value), 4), unit)].add(_domain(str(src)))
@@ -1465,7 +1470,8 @@ class ClaimCrossValidationDrone:
         """Execute the main pipeline loop."""
         try:
             con.execute("ALTER TABLE hive_claims ADD COLUMN IF NOT EXISTS evidence_flags VARCHAR")
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in process.py: {e}")
             pass  # może not wspierać IF NOT EXISTS — ignoruj
 
         try:
@@ -1494,7 +1500,8 @@ class ClaimCrossValidationDrone:
             try:
                 from urllib.parse import urlparse
                 return urlparse(str(url)).netloc.lower().lstrip("www.")
-            except Exception:
+            except Exception as e:
+                log.debug(f"Suppressed in process.py: {e}")
                 return str(url)[:40]
 
         # Buduj indeks: claim_id → (claim_text, domain, confidence)
@@ -1560,7 +1567,8 @@ class GapDrone:
                 GROUP BY value, entity_type
                 ORDER BY cnt DESC LIMIT 20
             """, [mission_id]).fetchall()
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in process.py: {e}")
             entity_rows = []
 
         try:
@@ -1571,7 +1579,8 @@ class GapDrone:
                 ORDER BY confidence DESC
                 LIMIT 10
             """, [mission_id]).fetchall()
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in process.py: {e}")
             fact_rows = []
 
         top_entities    = ", ".join(f"{r[0]} ({r[1]})" for r in entity_rows) or "none"
@@ -2134,7 +2143,8 @@ class ProcessingDrones:
                 [self.mission_id]
             ).fetchone()
             return row[0] if row else "Unknown topic"
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in process.py: {e}")
             return "Unknown topic"
 
     def _finalize(

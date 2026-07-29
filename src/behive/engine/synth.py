@@ -266,7 +266,8 @@ class Queen:
         try:
             pass  # duckdb removed
             self.duckdb = None
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in synth.py: {e}")
             self.duckdb = None  # Not fatal — PostgreSQL is primary
 
     # ── DuckDB connection helper ──────────────────────────────────────────────
@@ -317,7 +318,8 @@ class Queen:
             def safe_query(sql, params=None):
                 try:
                     return con.execute(sql, params or [mid]).fetchall()
-                except Exception:
+                except Exception as e:
+                    log.debug(f"Suppressed in synth.py: {e}")
                     return []
 
             # ── Core mission honey ────────────────────────────────────────────
@@ -377,7 +379,8 @@ class Queen:
                     _cm2 = _clu2.module_from_spec(_cs2)
                     _cs2.loader.exec_module(_cm2)
                     cluster_context_block = _cm2.build_cluster_context(self.mission_id)
-                except Exception:
+                except Exception as e:
+                    log.debug(f"Suppressed in synth.py: {e}")
                     cluster_context_block = None
                 clusters_raw = safe_query(
                     """SELECT cluster_id, topic_label, keywords,
@@ -531,7 +534,8 @@ class Queen:
             conf = rc[4]
             try:
                 conf_f = float(conf)
-            except Exception:
+            except Exception as e:
+                log.debug(f"Suppressed in synth.py: {e}")
                 conf_f = 0.5
             if conf_f < 0.65:
                 continue
@@ -566,7 +570,8 @@ class Queen:
                 seen_claims.add(dedup_key)
                 try:
                     conf_val = f"{float(conf):.2f}"
-                except Exception:
+                except Exception as e:
+                    log.debug(f"Suppressed in synth.py: {e}")
                     conf_val = str(conf)
                 domain = ""
                 if src_url:
@@ -624,7 +629,8 @@ class Queen:
                 conf       = rc[4]
                 try:
                     conf_f = float(conf)
-                except Exception:
+                except Exception as e:
+                    log.debug(f"Suppressed in synth.py: {e}")
                     conf_f = 0.5
                 if conf_f < 0.6:
                     continue
@@ -633,7 +639,8 @@ class Queen:
                     try:
                         from urllib.parse import urlparse as _up
                         domain = _up(src_url).netloc.replace("www.", "")
-                    except Exception:
+                    except Exception as e:
+                        log.debug(f"Suppressed in synth.py: {e}")
                         domain = src_url[:40]
                     for val_str, unit_str in matches[:2]:
                         lines.append(
@@ -744,7 +751,8 @@ class Queen:
                 cv_mark = " ✓" if cross_val else ""
                 try:
                     conf_val = f"{float(conf):.2f}"
-                except Exception:
+                except Exception as e:
+                    log.debug(f"Suppressed in synth.py: {e}")
                     conf_val = str(conf)
                 lines.append(
                     f"• {claim} [{domain}, {year}]{cv_mark} "
@@ -795,7 +803,8 @@ class Queen:
                 seen_claims.add(dedup_key)
                 try:
                     conf_val = f"{float(conf):.2f}"
-                except Exception:
+                except Exception as e:
+                    log.debug(f"Suppressed in synth.py: {e}")
                     conf_val = str(conf)
                 domain = ""
                 if src_url:
@@ -825,7 +834,8 @@ class Queen:
                 op_id, op_name, tier, conf, output_json_raw, bee_mission = row
                 try:
                     oj = json.loads(output_json_raw) if output_json_raw else {}
-                except Exception:
+                except Exception as e:
+                    log.debug(f"Suppressed in synth.py: {e}")
                     oj = {}
 
                 # Extract hypotheses from various output_json shapes
@@ -852,7 +862,8 @@ class Queen:
                         continue
                     try:
                         prob_val = f"P={float(prob):.2f}"
-                    except Exception:
+                    except Exception as e:
+                        log.debug(f"Suppressed in synth.py: {e}")
                         prob_val = f"P=?"
                     lines.append(
                         f"{prob_val} — {str(hyp_text)[:200]} "
@@ -876,7 +887,8 @@ class Queen:
                 fact, domain, confidence, times_confirmed, times_contradicted = row
                 try:
                     conf_val = f"{float(confidence):.2f}"
-                except Exception:
+                except Exception as e:
+                    log.debug(f"Suppressed in synth.py: {e}")
                     conf_val = str(confidence)
                 contra_note = (
                     f" ⚠️ CONTRADICTED {times_contradicted}×"
@@ -897,7 +909,8 @@ class Queen:
                 hypothesis, topic_domain, failure_reason, conf_at_death = row
                 try:
                     conf_val = f"{float(conf_at_death):.2f}"
-                except Exception:
+                except Exception as e:
+                    log.debug(f"Suppressed in synth.py: {e}")
                     conf_val = "?"
                 lines.append(
                     f"✗ [{topic_domain or '?'}] {hypothesis} "
@@ -1083,11 +1096,15 @@ Dla każdego twierdzenia odpowiedz:
                 if len(rc) >= 5:
                     claim_txt, _ev, src, ct, conf = str(rc[0] or "")[:300], rc[1], str(rc[2] or ""), str(rc[3] or "general"), 0.7
                     try: conf = float(rc[4])
-                    except Exception: conf = 0.7
+                    except Exception as e:
+                        log.debug(f"Suppressed in synth.py: {e}")
+                        conf = 0.7
                 elif len(rc) >= 3:
                     claim_txt, src, ct, conf = str(rc[0] or "")[:300], str(rc[1] or ""), "general", 0.7
                     try: conf = float(rc[2])
-                    except Exception: conf = 0.7
+                    except Exception as e:
+                        log.debug(f"Suppressed in synth.py: {e}")
+                        conf = 0.7
                 else:
                     continue
                 ct = str(ct or "general").lower()
@@ -1435,7 +1452,8 @@ Każda pozycja na osobnej linii. Poprzedź je linią nagłówkową: "=FUIR_START
         conf_raw = synthesis.get("confidence_raw", 0.0)
         try:
             conf_str = f"{float(conf_raw):.2f}"
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in synth.py: {e}")
             conf_str = "?"
 
         report = f"""# HIVE 2.0 — Intelligence Brief (Queen 3.0)
@@ -1773,7 +1791,8 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                     pred_conf = pred.get("pred_conf") or conf_raw
                     try:
                         pred_conf = float(pred_conf)
-                    except Exception:
+                    except Exception as e:
+                        log.debug(f"Suppressed in synth.py: {e}")
                         pred_conf = 0.5
 
                     con.execute("""

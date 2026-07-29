@@ -609,7 +609,8 @@ class SwarmScout:
                 "UPDATE hive_missions SET sources_found=?, status='harvest' WHERE id=?",
                 [self._total_saved, self.mission_id],
             )
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in scout.py: {e}")
             try:
                 self.db.execute(
                     "UPDATE hive_missions SET sources_found=?, phase='harvest' WHERE id=?",

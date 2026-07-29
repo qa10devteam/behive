@@ -428,7 +428,8 @@ class DroneRecon:
                 status, body, ms = await loop.run_in_executor(None, _do)
                 if status == 200 and not self._detect_block(status, body):
                     return True, target, status, body, ms
-            except Exception:
+            except Exception as e:
+                log.debug(f"Suppressed in drones.py: {e}")
                 continue
         return False, "", 0, "all cffi failed", 0
 
@@ -462,7 +463,8 @@ class DroneRecon:
                 status, body, ms = await loop.run_in_executor(None, _do)
                 if status == 200 and not self._detect_block(status, body):
                     return True, target, status, body, ms
-            except Exception:
+            except Exception as e:
+                log.debug(f"Suppressed in drones.py: {e}")
                 continue
         return False, "", 0, "all primp failed", 0
 
