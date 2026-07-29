@@ -16,7 +16,7 @@ except ImportError:
 from behive.engine.orchestrator import cmd_run
 
 
-def main():
+def main() -> None:
     """CLI entry point for running research from the command line."""
     if len(sys.argv) < 2:
         print("Usage: python -m behive.engine 'research topic'")

@@ -315,7 +315,7 @@ class Queen:
                 "total_facts": mr[7], "created_at": str(mr[8]),
             }
 
-            def safe_query(sql, params=None):
+            def safe_query(sql, params=None) -> list:
                 try:
                     return con.execute(sql, params or [mid]).fetchall()
                 except Exception as e:
@@ -1556,7 +1556,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
             table_buf = []
             flush_needed = False
 
-            def flush_table(buf):
+            def flush_table(buf) -> None:
                 if not buf:
                     return
                 # Odfiltruj separator (|---|---|)
@@ -1890,7 +1890,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
 
     # ── Main entry point ─────────────────────────────────────────────────────
 
-    def run(self):
+    def run(self) -> dict:
         """Execute the main pipeline loop."""
         t0 = time.time()
         log.debug(f"\n👑 QUEEN 3.0 — synteza misji: {self.mission_id}")

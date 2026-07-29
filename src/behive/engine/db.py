@@ -71,7 +71,7 @@ def get_pg_connection() -> psycopg2.extensions.connection:
 
 
 @contextmanager
-def pg_connection():
+def pg_connection() -> object:
     """Context manager for pooled connections. Auto-returns to pool."""
     pool = get_pg_pool()
     conn = pool.getconn()
@@ -86,7 +86,7 @@ def pg_connection():
 
 
 @contextmanager
-def pg_cursor(commit: bool = True):
+def pg_cursor(commit: bool = True) -> object:
     """Context manager for a cursor with auto-commit/rollback."""
     with pg_connection() as conn:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -142,7 +142,7 @@ class PgConnection:
             raise
         return self
     
-    def fetchone(self):
+    def fetchone(self) -> tuple | None:
         """Execute query and return first row or None."""
         if self._cursor:
             return self._cursor.fetchone()
@@ -171,13 +171,13 @@ class PgConnection:
             raise
         return self
     
-    def fetchall(self):
+    def fetchall(self) -> list:
         """Execute query and return all rows."""
         if self._cursor:
             return self._cursor.fetchall()
         return []
     
-    def fetchdf(self):
+    def fetchdf(self) -> object:
         """DuckDB .fetchdf() compatibility → returns pandas DataFrame."""
         import pandas as pd
         if self._cursor:
@@ -187,21 +187,21 @@ class PgConnection:
         return pd.DataFrame()
     
     @property
-    def description(self):
+    def description(self) -> list | None:
         """Cursor description (column names + types)."""
         if self._cursor:
             return self._cursor.description
         return None
     
-    def commit(self):
+    def commit(self) -> None:
         """Commit the current transaction."""
         self._conn.commit()
     
-    def rollback(self):
+    def rollback(self) -> None:
         """Rollback the current transaction."""
         self._conn.rollback()
     
-    def close(self):
+    def close(self) -> None:
         """Close the database connection."""
         if self._cursor:
             self._cursor.close()
@@ -210,7 +210,7 @@ class PgConnection:
             self._pool.putconn(self._conn)
             self._conn = None
     
-    def cursor(self):
+    def cursor(self) -> object:
         """Return a new cursor (DuckDB .cursor() compat)."""
         return self._conn.cursor()
     
@@ -253,7 +253,7 @@ def connect(database: str = None, read_only: bool = False) -> PgConnection:
 
 # ─── Utility Functions ─────────────────────────────────────────────────────
 
-def insert_batch(table: str, rows: list[dict], on_conflict: str = "DO NOTHING"):
+def insert_batch(table: str, rows: list[dict], on_conflict: str = "DO NOTHING") -> None:
     """Batch insert with ON CONFLICT handling."""
     if not rows:
         return 0
@@ -275,7 +275,7 @@ def insert_batch(table: str, rows: list[dict], on_conflict: str = "DO NOTHING"):
     return len(values)
 
 
-def upsert_batch(table: str, rows: list[dict], conflict_cols: list[str], update_cols: list[str] = None):
+def upsert_batch(table: str, rows: list[dict], conflict_cols: list[str], update_cols: list[str] = None) -> None:
     """Batch upsert (INSERT ... ON CONFLICT ... DO UPDATE)."""
     if not rows:
         return 0

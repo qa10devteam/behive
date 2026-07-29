@@ -748,7 +748,7 @@ class DroneRecon:
 
     # ── Save to DuckDB ────────────────────────────────────────────────────────
 
-    def save_to_db(self):
+    def save_to_db(self) -> None:
         """Persist recon results to database."""
         import hive2_db as _hive_db
         db = _hive_db.connect(read_only=False)
@@ -788,7 +788,7 @@ class DroneRecon:
 
     # ── Retreat — covering tracks ───────────────────────────────────────────
 
-    def retreat(self):
+    def retreat(self) -> None:
         """Trutnie wycofują się — czyszczą identyfikatory."""
         self._cookie_jar.clear()
 

@@ -704,7 +704,7 @@ def generate_standalone_plan(topic: str) -> list[dict]:
 # Entry point
 # ──────────────────────────────────────────────────────────────────────────────
 
-def main():
+def main() -> None:
     """CLI entry point."""
     args = sys.argv[1:]
 
