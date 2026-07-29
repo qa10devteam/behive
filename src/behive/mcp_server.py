@@ -7,7 +7,10 @@ from pydantic import BaseModel
 from typing import Optional
 
 
-app = FastAPI(title="BeHive MCP", version="0.2.0")
+app = FastAPI(title="BeHive MCP", version="0.3.0")
+
+# Alias for user convenience: `from behive.mcp_server import mcp`
+mcp = app
 
 app.add_middleware(
     CORSMiddleware,

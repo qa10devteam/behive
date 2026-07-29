@@ -41,7 +41,7 @@ You ask Perplexity. Better — it cites sources. But the output is still unstruc
 
 ```
 Your AI assistant → BeHive → Verified, structured, scored knowledge
-                              ├── 363 claims (avg quality 0.824)
+                              ├── 363 claims (avg quality 0.77)
                               ├── 42 entities with relationships
                               └── Synthesized report with citations
 ```
@@ -443,7 +443,7 @@ Real results. No cherry-picking. Scale 30 (standard depth).
 
 **Quality score meaning:**
 - `0.90+` — Exceptional: specific numbers, dates, sources, fully verifiable
-- `0.82+` — Excellent: multi-dimensional, publication-ready
+- `0.82+` — Excellent: multi-source corroboration, publication-ready (top 25% of missions)
 - `0.75+` — Good: useful intelligence with some specifics
 - `0.65+` — Acceptable: general facts, entered into DB
 - `<0.55` — Rejected: too vague, not stored
@@ -527,10 +527,10 @@ event: phase
 data: {"phase": "process", "event": "started"}
 
 event: claims
-data: {"count": 142, "avg_quality": 0.791, "above_082": 23, "new_since_last": 18}
+data: {"count": 142, "avg_quality": 0.77, "above_082": 23, "new_since_last": 18}
 
 event: done
-data: {"total_claims": 363, "avg_quality": 0.824, "sources": 64}
+data: {"total_claims": 363, "avg_quality": 0.77, "sources": 64}
 ```
 
 ### Get Report
@@ -720,13 +720,14 @@ No env vars set? DDG is the default. Add any key above to instantly upgrade sear
 
 ## Roadmap
 
-- [x] V4 pipeline (Haiku + Sonnet extraction)
-- [x] Quality scoring (avg 0.82+ achieved)
-- [x] REST API (12 endpoints)
+- [x] V4 pipeline (BYOK — bring your own LLM key, any provider)
+- [x] Quality scoring (avg 0.77, top missions reach 0.82+)
+- [x] REST API (14 endpoints)
 - [x] MCP Server (Streamable HTTP)
 - [x] SSE streaming (real-time progress)
 - [x] Knowledge graph (Neo4j)
-- [x] 70+ API sources (37 free APIs confirmed working, 26 need BYOK keys)
+- [x] 64 API sources (37 free APIs confirmed working, 26 need BYOK keys)
+- [x] Browser search (Chromium/Playwright — scrapes Google/Bing, zero API keys)
 - [x] `pip install behive` ([PyPI](https://pypi.org/project/behive/))
 - [x] Docker Compose one-liner
 - [x] n8n community node ([npm](https://www.npmjs.com/package/n8n-nodes-behive))

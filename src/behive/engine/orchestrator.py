@@ -1142,14 +1142,16 @@ def new_mission_id(topic: str) -> str:
 # Phase runner
 # ---------------------------------------------------------------------------
 
-def run_phase(script: str, args: list[str], phase_name: str) -> float:
+def run_phase(script: str, args: list[str], phase_name: str, 
+              timeout: int = 600) -> float:
     """Run a HIVE bee script as subprocess, return elapsed seconds.
     
-    Używa nohup + PID file żeby proces przeżył utratę sesji Hermes (tracker gubi PID po ~35min).
-    Fazy synth (master_intelligence, synth*) używają detached double-fork żeby hive2.py
-    mógł zakończyć się przed subproces otwiera DuckDB (cross-process write lock conflict).
-    PID file: /tmp/hive_{phase_name}.pid
+    Args:
+        timeout: Max seconds for this phase (default 600 = 10 min).
+                 Synth phases get 900s. Override via BEHIVE_PHASE_TIMEOUT env.
     """
+    # Allow env override for timeout
+    timeout = int(os.environ.get("BEHIVE_PHASE_TIMEOUT", str(timeout)))
     script_path = str(HIVE_DIR / script)
     pid_file = f"/tmp/hive_{phase_name.replace('/', '_')}.pid"
     log_file = f"/tmp/hive_{phase_name.replace('/', '_')}_proc.log"
@@ -1229,6 +1231,7 @@ def run_phase(script: str, args: list[str], phase_name: str) -> float:
         result = subprocess.run(
             ["bash", "-c", nohup_cmd],
             check=False,
+            timeout=timeout,
         )
         # Tail log to stdout to maintain visibility
         subprocess.run(["grep", "-E", "⚙️|Process:|✅|❌|COMPLETE|ERROR", log_file], check=False)
@@ -1237,6 +1240,16 @@ def run_phase(script: str, args: list[str], phase_name: str) -> float:
             raise subprocess.CalledProcessError(result.returncode, cmd)
     except FileNotFoundError:
         log.info(f"[HIVE] UWAGA: Skrypt {script_path} nie istnieje — faza pominięta.")
+    except subprocess.TimeoutExpired:
+        log.warning(f"[HIVE] ⏱️ TIMEOUT: Phase {phase_name} exceeded {timeout}s — killing.")
+        # Try to kill the child process
+        try:
+            with open(pid_file) as _pf:
+                _pid = int(_pf.read().strip())
+            os.kill(_pid, 9)
+        except Exception:
+            pass
+        raise RuntimeError(f"Phase {phase_name} timed out after {timeout}s")
     except subprocess.CalledProcessError as e:
         log.info(f"[HIVE] BŁĄD w fazie {phase_name}: exit code {e.returncode}")
         raise
@@ -1343,6 +1356,41 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     total_t0 = time.time()
     timings: dict[str, float] = {'queen_plan': phase0_elapsed}
 
+    # ─── Mission-level error handler ─────────────────────────────────────────
+    # If ANY phase fails with an unhandled exception, mark mission as 'error'
+    # instead of leaving it stuck in an intermediate state forever.
+    try:
+        _run_pipeline_phases(mission_id, topic, plan, timings, total_t0, think, deep, scale, query, _specificity, plan_file)
+    except KeyboardInterrupt:
+        log.info(f'\n  ⚠️  Mission interrupted by user: {mission_id}')
+        _mark_mission_error(mission_id, "User interrupted (Ctrl+C)")
+        raise
+    except Exception as pipeline_err:
+        log.warning(f'\n  ❌  MISSION FAILED: {mission_id} — {pipeline_err}')
+        _mark_mission_error(mission_id, str(pipeline_err)[:500])
+        _emit(mission_id, 'error', 'error', data={'error': str(pipeline_err)[:200]})
+        return  # Don't re-raise — graceful exit, mission is marked as error
+
+
+def _mark_mission_error(mission_id: str, error_msg: str) -> None:
+    """Mark a mission as error in the database."""
+    try:
+        con = _connect_db()
+        con.execute(
+            "UPDATE hive_missions SET status='error', phase='error' WHERE id=%s AND status NOT IN ('done','cancelled')",
+            [mission_id]
+        )
+        con.commit()
+        con.close()
+    except Exception as e:
+        log.debug(f"Failed to mark mission as error: {e}")
+
+
+def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict, 
+                         total_t0: float, think: bool, deep: bool, scale: int,
+                         query: str, _specificity, plan_file: str) -> None:
+    """Execute all pipeline phases. Raises on unrecoverable failure."""
+
     # ═══ PHASE 1: SCOUT ══════════════════════════════════════════
     log.debug('  ┌─ PHASE 1 · SCOUT SWARM ────────────────────────────┐')
     t1 = time.time()
@@ -1423,9 +1471,10 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     try:
         timings['harvest'] = run_phase('hive2_harvest.py', [mission_id], 'harvest')
     except Exception as e:
-        log.info(f'  ✗ Harvest failed: {e}')
+        log.warning(f'  ⚠️ Harvest failed: {e} — continuing with partial results.')
         _emit(mission_id, 'harvest', 'error', data={'error': str(e)})
-        raise
+        timings['harvest'] = 0.0
+        # Don't raise — proceed with whatever content we scraped before failure
     # Emit harvest completed event
     try:
         # import duckdb as _ddb  # removed — using _connect_db()
@@ -1448,9 +1497,10 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
             process_args.append("--deep")
         timings['process'] = run_phase('hive2_process.py', process_args, 'process')
     except Exception as e:
-        log.info(f'  ✗ Process failed: {e}')
+        log.warning(f'  ⚠️ Process failed: {e} — continuing with available claims.')
         _emit(mission_id, 'process', 'error', data={'error': str(e)})
-        raise
+        timings['process'] = 0.0
+        # Don't raise — synth can work with whatever claims exist
     # Emit process completed event
     try:
         # import duckdb as _ddb  # removed — using _connect_db()
@@ -1955,3 +2005,36 @@ def cmd_synth(mission_id: str) -> None:
         sys.exit(1)
     # Pobierz query misji z DB
     con = _connect_db(read_only=True)
+    row = con.execute("SELECT topic FROM hive_missions WHERE id=%s", [mission_id]).fetchone()
+    con.close()
+    if row:
+        run_phase('hive2_synth.py', [mission_id], 'synth', timeout=900)
+
+
+def cleanup_stuck_missions(max_age_hours: int = 2) -> int:
+    """Mark missions stuck in intermediate states as 'error'.
+    
+    A mission is 'stuck' if it's been in scout/harvest/process/synth/planning/running
+    for longer than max_age_hours without completing.
+    
+    Returns number of missions marked as error.
+    """
+    try:
+        con = _connect_db()
+        cur = con.execute("""
+            UPDATE hive_missions 
+            SET status = 'error', phase = 'timeout'
+            WHERE status IN ('scout', 'harvest', 'process', 'synth', 'planning', 'running')
+            AND created_at < NOW() - make_interval(hours := %s)
+            RETURNING id
+        """, [max_age_hours])
+        stuck = cur.fetchall()
+        con.commit()
+        con.close()
+        count = len(stuck)
+        if count > 0:
+            log.info(f"[HIVE] Cleanup: marked {count} stuck missions as error (older than {max_age_hours}h)")
+        return count
+    except Exception as e:
+        log.debug(f"Cleanup failed: {e}")
+        return 0
