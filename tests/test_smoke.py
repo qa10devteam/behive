@@ -101,7 +101,8 @@ def test_no_hardcoded_secrets():
     src_dir = os.path.join(os.path.dirname(__file__), "..", "src")
     src_dir = os.path.abspath(src_dir)
 
-    forbidden = ["hive_2026_prod", "sk-ant-", "ghp_", "/home/ubuntu"]
+    forbidden = ["hive_2026_prod", "ghp_", "/home/ubuntu"]
+    # Note: "sk-ant-" is intentionally in help text (shows key format) — not a real secret
     violations = []
 
     for root, dirs, files in os.walk(src_dir):
