@@ -1,0 +1,1327 @@
+[
+  {
+    "name": "CoinGecko",
+    "url": "https://api.coingecko.com/api/v3",
+    "category": "crypto",
+    "auth": "none",
+    "query_type": "market_data",
+    "endpoints": [
+      {
+        "path": "/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50",
+        "returns": "Top 50 coins: price, market_cap, volume, 24h change",
+        "use_when": "crypto market overview"
+      },
+      {
+        "path": "/coins/{id}",
+        "returns": "Full coin data: description, links, market data, community stats",
+        "use_when": "deep dive on specific crypto"
+      },
+      {
+        "path": "/coins/{id}/market_chart?vs_currency=usd&days=30",
+        "returns": "Price/volume/market_cap arrays for charting",
+        "use_when": "price history"
+      },
+      {
+        "path": "/search/trending",
+        "returns": "Top 7 trending coins in last 24h",
+        "use_when": "crypto trends"
+      },
+      {
+        "path": "/global",
+        "returns": "Total market cap, volume, BTC dominance",
+        "use_when": "macro crypto metrics"
+      }
+    ],
+    "notes": "Rate limit: 10-30/min free. {id} = 'bitcoin', 'ethereum', etc."
+  },
+  {
+    "name": "CoinCap",
+    "url": "https://api.coincap.io/v2",
+    "category": "crypto",
+    "auth": "none",
+    "query_type": "market_data",
+    "endpoints": [
+      {
+        "path": "/assets",
+        "returns": "Top 100 crypto assets with real-time prices",
+        "use_when": "crypto rankings"
+      },
+      {
+        "path": "/assets/{id}/history?interval=d1",
+        "returns": "Daily price history",
+        "use_when": "crypto price trends"
+      },
+      {
+        "path": "/exchanges",
+        "returns": "Exchange list with volume data",
+        "use_when": "exchange comparison"
+      }
+    ],
+    "notes": "Free tier: 200 req/min. Real-time WebSocket available."
+  },
+  {
+    "name": "Polygon.io",
+    "url": "https://api.polygon.io",
+    "category": "stocks",
+    "auth": "apiKey",
+    "query_type": "market_data",
+    "endpoints": [
+      {
+        "path": "/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}?apiKey={key}",
+        "returns": "OHLCV daily bars",
+        "use_when": "stock price history"
+      },
+      {
+        "path": "/v3/reference/tickers?search={query}&apiKey={key}",
+        "returns": "Ticker search results with company info",
+        "use_when": "find stock tickers"
+      },
+      {
+        "path": "/v2/snapshot/locale/us/markets/stocks/tickers?apiKey={key}",
+        "returns": "Real-time snapshot of all US stocks",
+        "use_when": "market overview"
+      }
+    ],
+    "notes": "Free: 5 API calls/min. Delayed data. {from}/{to} = YYYY-MM-DD"
+  },
+  {
+    "name": "Alpha Vantage",
+    "url": "https://www.alphavantage.co/query",
+    "category": "stocks",
+    "auth": "apiKey",
+    "query_type": "market_data",
+    "endpoints": [
+      {
+        "path": "?function=GLOBAL_QUOTE&symbol={ticker}&apikey={key}",
+        "returns": "Latest price, volume, change for a stock",
+        "use_when": "current stock price"
+      },
+      {
+        "path": "?function=OVERVIEW&symbol={ticker}&apikey={key}",
+        "returns": "Company fundamentals: PE, EPS, revenue, market cap",
+        "use_when": "company valuation"
+      },
+      {
+        "path": "?function=NEWS_SENTIMENT&tickers={ticker}&apikey={key}",
+        "returns": "News articles with sentiment scores",
+        "use_when": "stock sentiment"
+      },
+      {
+        "path": "?function=TIME_SERIES_MONTHLY&symbol={ticker}&apikey={key}",
+        "returns": "Monthly OHLCV for 20+ years",
+        "use_when": "long-term stock analysis"
+      }
+    ],
+    "notes": "Free: 25/day. Key: get free at alphavantage.co/support"
+  },
+  {
+    "name": "FRED (Federal Reserve)",
+    "url": "https://api.stlouisfed.org/fred",
+    "category": "macro",
+    "auth": "apiKey",
+    "query_type": "economic_data",
+    "endpoints": [
+      {
+        "path": "/series/observations?series_id={id}&api_key={key}&file_type=json",
+        "returns": "Time series data points",
+        "use_when": "economic indicators (GDP, CPI, unemployment)"
+      },
+      {
+        "path": "/series/search?search_text={query}&api_key={key}&file_type=json",
+        "returns": "Search for available data series",
+        "use_when": "finding economic data series"
+      }
+    ],
+    "notes": "120 req/min. Key series: GDP, UNRATE, CPIAUCSL, FEDFUNDS, DGS10. Free key at fred.stlouisfed.org"
+  },
+  {
+    "name": "Econdb",
+    "url": "https://www.econdb.com/api/series",
+    "category": "macro",
+    "auth": "none",
+    "query_type": "economic_data",
+    "endpoints": [
+      {
+        "path": "/?ticker=RGDP_{country}&format=json",
+        "returns": "Real GDP time series for a country",
+        "use_when": "GDP data"
+      },
+      {
+        "path": "/?ticker=CPHI_{country}&format=json",
+        "returns": "CPI/inflation data",
+        "use_when": "inflation rates"
+      }
+    ],
+    "notes": "Free, no key. Country codes: US, GB, DE, JP, CN, etc."
+  },
+  {
+    "name": "ExchangeRate-API",
+    "url": "https://open.er-api.com/v6",
+    "category": "forex",
+    "auth": "none",
+    "query_type": "market_data",
+    "endpoints": [
+      {
+        "path": "/latest/{base}",
+        "returns": "Current exchange rates for 160+ currencies",
+        "use_when": "currency conversion, forex rates"
+      }
+    ],
+    "notes": "Free, no key, updated daily."
+  },
+  {
+    "name": "SEC EDGAR",
+    "url": "https://efts.sec.gov/LATEST/search-index",
+    "category": "regulatory",
+    "auth": "none",
+    "query_type": "filings",
+    "endpoints": [
+      {
+        "path": "?q={company}&dateRange=custom&startdt={from}&enddt={to}",
+        "returns": "SEC filings matching query",
+        "use_when": "company filings, 10-K, 10-Q"
+      }
+    ],
+    "notes": "Also: sec.gov/cgi-bin/browse-edgar?action=getcompany&company={name}&type=10-K"
+  },
+  {
+    "name": "Fed Treasury",
+    "url": "https://api.fiscaldata.treasury.gov/services/api/fiscal_service",
+    "category": "government_finance",
+    "auth": "none",
+    "query_type": "fiscal_data",
+    "endpoints": [
+      {
+        "path": "/v2/accounting/od/debt_to_penny?sort=-record_date&page[size]=10",
+        "returns": "US national debt (daily)",
+        "use_when": "US debt data"
+      },
+      {
+        "path": "/v1/accounting/mts/mts_table_5?sort=-record_date",
+        "returns": "Monthly Treasury Statement",
+        "use_when": "government spending/revenue"
+      }
+    ],
+    "notes": "Free, no key. Comprehensive US fiscal data."
+  },
+  {
+    "name": "CongressInvests",
+    "url": "https://congressinvests.com",
+    "category": "political_finance",
+    "auth": "apiKey",
+    "query_type": "insider_trading",
+    "endpoints": [
+      {
+        "path": "/api/trades?ticker={ticker}",
+        "returns": "Congressional stock trades for a ticker",
+        "use_when": "politician trading activity"
+      }
+    ],
+    "notes": "Tracks Senate EFD and House Clerk disclosures."
+  },
+  {
+    "name": "Edgrapi",
+    "url": "https://edgrapi.com",
+    "category": "sec_data",
+    "auth": "apiKey",
+    "query_type": "filings",
+    "endpoints": [
+      {
+        "path": "/api/company/{ticker}/financials",
+        "returns": "Normalized financials from 10-K/10-Q",
+        "use_when": "clean SEC financial data"
+      }
+    ],
+    "notes": "Parsed SEC filings as structured JSON."
+  },
+  {
+    "name": "World Bank",
+    "url": "https://api.worldbank.org/v2",
+    "category": "development",
+    "auth": "none",
+    "query_type": "statistics",
+    "endpoints": [
+      {
+        "path": "/country/{code}/indicator/NY.GDP.MKTP.CD?format=json&date=2020:2024",
+        "returns": "GDP time series for country",
+        "use_when": "country GDP comparison"
+      },
+      {
+        "path": "/country/{code}/indicator/SP.POP.TOTL?format=json",
+        "returns": "Population data",
+        "use_when": "demographic data"
+      },
+      {
+        "path": "/country/all/indicator/{indicator}?format=json&mrnev=1",
+        "returns": "Latest value across all countries",
+        "use_when": "global rankings"
+      }
+    ],
+    "notes": "Free. Can be slow (10-15s). Key indicators: NY.GDP.MKTP.CD (GDP), SP.POP.TOTL (population), SI.POV.GINI (Gini)"
+  },
+  {
+    "name": "IMF Data",
+    "url": "https://dataservices.imf.org/REST/SDMX_JSON.svc",
+    "category": "economics",
+    "auth": "none",
+    "query_type": "statistics",
+    "endpoints": [
+      {
+        "path": "/CompactData/IFS/A.{country}.NGDP_R_XDC.?startPeriod=2020",
+        "returns": "Real GDP growth from IMF IFS",
+        "use_when": "IMF economic forecasts"
+      },
+      {
+        "path": "/Dataflow",
+        "returns": "List all available IMF datasets",
+        "use_when": "discovering IMF data"
+      }
+    ],
+    "notes": "Free. May have DNS issues from some hosts. Alternative: use World Bank API for similar data."
+  },
+  {
+    "name": "OECD",
+    "url": "https://sdmx.oecd.org/public/rest/data",
+    "category": "economics",
+    "auth": "none",
+    "query_type": "statistics",
+    "endpoints": [
+      {
+        "path": "/OECD.SDD.NAD,DSD_NAAG@DF_NAAG_I,1.0/A.{country}.B1GQ.V..?startPeriod=2020",
+        "returns": "GDP and national accounts",
+        "use_when": "OECD country comparisons"
+      }
+    ],
+    "notes": "Free SDMX API. Complex but comprehensive."
+  },
+  {
+    "name": "Frankfurter",
+    "url": "https://api.frankfurter.app",
+    "category": "forex",
+    "auth": "none",
+    "query_type": "market_data",
+    "endpoints": [
+      {
+        "path": "/latest?from={base}",
+        "returns": "Latest exchange rates from ECB",
+        "use_when": "EUR-based forex"
+      },
+      {
+        "path": "/{date}?from={base}",
+        "returns": "Historical rates for specific date",
+        "use_when": "historical forex"
+      }
+    ],
+    "notes": "Free, ECB source, updated ~16:00 CET on weekdays."
+  },
+  {
+    "name": "arXiv",
+    "url": "http://export.arxiv.org/api",
+    "category": "academic",
+    "auth": "none",
+    "query_type": "papers",
+    "endpoints": [
+      {
+        "path": "/query?search_query=all:{topic}&max_results=20&sortBy=submittedDate&sortOrder=descending",
+        "returns": "Paper title, abstract, authors, date, categories",
+        "use_when": "latest research papers"
+      },
+      {
+        "path": "/query?search_query=ti:{title}&max_results=5",
+        "returns": "Search by title",
+        "use_when": "finding specific paper"
+      },
+      {
+        "path": "/query?search_query=au:{author}&max_results=20",
+        "returns": "Papers by author",
+        "use_when": "researcher profile"
+      }
+    ],
+    "notes": "Free, unlimited. Returns Atom XML. Categories: cs.AI, cs.CL, cs.LG, stat.ML, q-fin"
+  },
+  {
+    "name": "Semantic Scholar",
+    "url": "https://api.semanticscholar.org/graph/v1",
+    "category": "academic",
+    "auth": "none",
+    "query_type": "papers",
+    "endpoints": [
+      {
+        "path": "/paper/search?query={topic}&limit=20&fields=title,year,citationCount,authors,abstract,venue",
+        "returns": "Papers with citation counts",
+        "use_when": "highly-cited research"
+      },
+      {
+        "path": "/paper/{paper_id}?fields=title,abstract,citations,references",
+        "returns": "Paper with full citation graph",
+        "use_when": "citation analysis"
+      },
+      {
+        "path": "/author/search?query={name}&fields=name,hIndex,paperCount",
+        "returns": "Researcher profile",
+        "use_when": "researcher metrics"
+      }
+    ],
+    "notes": "100 req/5min without key (429 if exceeded). Wait 60s on rate limit. 5000/5min with free key from semanticscholar.org."
+  },
+  {
+    "name": "OpenAlex",
+    "url": "https://api.openalex.org",
+    "category": "academic",
+    "auth": "none",
+    "query_type": "papers",
+    "endpoints": [
+      {
+        "path": "/works?search={topic}&per-page=25&sort=cited_by_count:desc",
+        "returns": "Most cited papers on topic",
+        "use_when": "seminal works, literature review"
+      },
+      {
+        "path": "/works?filter=publication_year:2024,type:article&search={topic}",
+        "returns": "Recent papers only",
+        "use_when": "latest research"
+      },
+      {
+        "path": "/authors?search={name}",
+        "returns": "Author profiles with h-index",
+        "use_when": "researcher lookup"
+      },
+      {
+        "path": "/institutions?search={name}",
+        "returns": "Institution data",
+        "use_when": "university/lab research output"
+      },
+      {
+        "path": "/concepts?search={topic}",
+        "returns": "Concept hierarchy and related works count",
+        "use_when": "field mapping"
+      }
+    ],
+    "notes": "Free, unlimited with polite pool (add email to User-Agent). 240M+ works indexed."
+  },
+  {
+    "name": "CrossRef",
+    "url": "https://api.crossref.org",
+    "category": "academic",
+    "auth": "none",
+    "query_type": "papers",
+    "endpoints": [
+      {
+        "path": "/works?query={topic}&rows=20&sort=relevance",
+        "returns": "DOI-registered papers with metadata",
+        "use_when": "finding papers by topic"
+      },
+      {
+        "path": "/works/{doi}",
+        "returns": "Full metadata for a paper by DOI",
+        "use_when": "paper details from DOI"
+      },
+      {
+        "path": "/journals?query={name}",
+        "returns": "Journal metadata and metrics",
+        "use_when": "journal research"
+      }
+    ],
+    "notes": "Free. Add Mailto: header for polite pool (50 req/s vs 1 req/s)."
+  },
+  {
+    "name": "PubMed",
+    "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils",
+    "category": "medical",
+    "auth": "none",
+    "query_type": "papers",
+    "endpoints": [
+      {
+        "path": "/esearch.fcgi?db=pubmed&term={topic}&retmode=json&retmax=20&sort=date",
+        "returns": "PubMed IDs for matching papers",
+        "use_when": "medical/biomedical research"
+      },
+      {
+        "path": "/efetch.fcgi?db=pubmed&id={ids}&retmode=xml",
+        "returns": "Full paper metadata",
+        "use_when": "paper abstracts"
+      },
+      {
+        "path": "/esearch.fcgi?db=pubmed&term={topic}&retmode=json&datetype=pdat&mindate={year}",
+        "returns": "Recent papers only",
+        "use_when": "latest medical research"
+      }
+    ],
+    "notes": "Free, 3 req/s without key. 10 req/s with NCBI API key."
+  },
+  {
+    "name": "CORE",
+    "url": "https://api.core.ac.uk/v3",
+    "category": "academic",
+    "auth": "apiKey",
+    "query_type": "papers",
+    "endpoints": [
+      {
+        "path": "/search/works?q={topic}&limit=20",
+        "returns": "Open access papers with full text",
+        "use_when": "need full paper text, not just abstract"
+      }
+    ],
+    "notes": "Free key required. 235M+ papers. Full text available for OA papers."
+  },
+  {
+    "name": "PatentsView (USPTO)",
+    "url": "https://api.patentsview.org",
+    "category": "patents",
+    "auth": "none",
+    "query_type": "patents",
+    "endpoints": [
+      {
+        "path": "/patents/query?q={\"_text_any\":{\"patent_abstract\":\"{topic}\"}}&f=[\"patent_number\",\"patent_title\",\"patent_date\",\"assignee_organization\"]",
+        "returns": "US patents matching topic",
+        "use_when": "patent landscape analysis"
+      }
+    ],
+    "notes": "Free, no key. Full US patent database."
+  },
+  {
+    "name": "Wikipedia",
+    "url": "https://en.wikipedia.org/w/api.php",
+    "category": "encyclopedia",
+    "auth": "none",
+    "query_type": "knowledge",
+    "endpoints": [
+      {
+        "path": "?action=query&list=search&srsearch={topic}&format=json&srlimit=10",
+        "returns": "Wikipedia article titles and snippets",
+        "use_when": "background knowledge, definitions"
+      },
+      {
+        "path": "?action=query&prop=extracts&exintro=true&titles={title}&format=json",
+        "returns": "Article introduction text",
+        "use_when": "quick overview of a topic"
+      }
+    ],
+    "notes": "Free, unlimited. Good for establishing baseline knowledge."
+  },
+  {
+    "name": "Wikidata",
+    "url": "https://www.wikidata.org/w/api.php",
+    "category": "knowledge_graph",
+    "auth": "none",
+    "query_type": "entities",
+    "endpoints": [
+      {
+        "path": "?action=wbsearchentities&search={topic}&language=en&format=json&limit=10",
+        "returns": "Structured entities with IDs and descriptions",
+        "use_when": "entity disambiguation, structured facts"
+      }
+    ],
+    "notes": "Free. Links to DBpedia, Freebase. SPARQL endpoint also available."
+  },
+  {
+    "name": "NASA",
+    "url": "https://api.nasa.gov",
+    "category": "science",
+    "auth": "apiKey",
+    "query_type": "science_data",
+    "endpoints": [
+      {
+        "path": "/planetary/apod?api_key=DEMO_KEY",
+        "returns": "Astronomy Picture of the Day with explanation",
+        "use_when": "space/astronomy topics"
+      },
+      {
+        "path": "/neo/rest/v1/feed?start_date={date}&api_key=DEMO_KEY",
+        "returns": "Near-Earth objects",
+        "use_when": "asteroid tracking"
+      }
+    ],
+    "notes": "DEMO_KEY works for testing (30 req/hr). Free key: 1000/hr."
+  },
+  {
+    "name": "Hacker News",
+    "url": "https://hn.algolia.com/api/v1",
+    "category": "tech_news",
+    "auth": "none",
+    "query_type": "news",
+    "endpoints": [
+      {
+        "path": "/search?query={topic}&tags=story&hitsPerPage=20",
+        "returns": "HN stories matching topic with points and comments",
+        "use_when": "tech community sentiment, startup news"
+      },
+      {
+        "path": "/search_by_date?query={topic}&tags=story&hitsPerPage=20",
+        "returns": "Most recent stories",
+        "use_when": "latest tech news"
+      },
+      {
+        "path": "/search?query={topic}&tags=comment&hitsPerPage=20",
+        "returns": "HN comments discussing topic",
+        "use_when": "developer opinions, technical discussions"
+      }
+    ],
+    "notes": "Free, unlimited. Great for tech/startup/AI/crypto sentiment."
+  },
+  {
+    "name": "Reddit (JSON)",
+    "url": "https://www.reddit.com",
+    "category": "social",
+    "auth": "none",
+    "query_type": "discussions",
+    "endpoints": [
+      {
+        "path": "/search.json?q={topic}&sort=relevance&limit=25",
+        "returns": "Reddit posts matching query",
+        "use_when": "public opinion, community discussions"
+      },
+      {
+        "path": "/r/{subreddit}/top.json?t=month&limit=25",
+        "returns": "Top posts in a subreddit",
+        "use_when": "subreddit trends"
+      },
+      {
+        "path": "/r/{subreddit}/search.json?q={topic}&restrict_sr=on&limit=20",
+        "returns": "Search within subreddit",
+        "use_when": "niche community research"
+      }
+    ],
+    "notes": "Free, add .json to any Reddit URL. Rate: 10 req/min without auth."
+  },
+  {
+    "name": "GDELT",
+    "url": "https://api.gdeltproject.org/api/v2",
+    "category": "geopolitics",
+    "auth": "none",
+    "query_type": "events",
+    "endpoints": [
+      {
+        "path": "/doc/doc?query={topic}&mode=artlist&maxrecords=50&format=json",
+        "returns": "Global news articles with tone/sentiment and source countries",
+        "use_when": "geopolitical events, global media coverage"
+      },
+      {
+        "path": "/doc/doc?query={topic}&mode=timelinevol&format=json",
+        "returns": "Volume timeline \u2014 how much coverage over time",
+        "use_when": "tracking event intensity"
+      }
+    ],
+    "notes": "Free, real-time. Can timeout \u2014 use 20s timeout. Monitors 100+ languages, all countries. Great for geopolitics & conflict."
+  },
+  {
+    "name": "NewsAPI",
+    "url": "https://newsapi.org/v2",
+    "category": "news",
+    "auth": "apiKey",
+    "query_type": "news",
+    "endpoints": [
+      {
+        "path": "/everything?q={topic}&sortBy=publishedAt&pageSize=20&apiKey={key}",
+        "returns": "News articles with title, description, source, date",
+        "use_when": "comprehensive news search"
+      },
+      {
+        "path": "/top-headlines?country=us&category={cat}&apiKey={key}",
+        "returns": "Top headlines by category",
+        "use_when": "current news overview"
+      }
+    ],
+    "notes": "Free: 100 req/day, 1 month history. Categories: business, technology, science, health"
+  },
+  {
+    "name": "GNews",
+    "url": "https://gnews.io/api/v4",
+    "category": "news",
+    "auth": "apiKey",
+    "query_type": "news",
+    "endpoints": [
+      {
+        "path": "/search?q={topic}&lang=en&max=10&apikey={key}",
+        "returns": "News articles with full content snippets",
+        "use_when": "news search alternative to NewsAPI"
+      }
+    ],
+    "notes": "Free: 100 req/day. Good international coverage."
+  },
+  {
+    "name": "Federal Register",
+    "url": "https://www.federalregister.gov/api/v1",
+    "category": "regulatory",
+    "auth": "none",
+    "query_type": "regulations",
+    "endpoints": [
+      {
+        "path": "/documents.json?conditions[term]={topic}&per_page=20",
+        "returns": "US federal regulations, proposed rules, notices",
+        "use_when": "US regulatory environment, compliance"
+      },
+      {
+        "path": "/documents.json?conditions[agencies][]={agency}&conditions[type][]=RULE",
+        "returns": "Rules by agency",
+        "use_when": "agency-specific regulation tracking"
+      }
+    ],
+    "notes": "Free, no key. Full text of Federal Register since 1994."
+  },
+  {
+    "name": "Helium (News + Markets)",
+    "url": "https://heliumtrades.com/mcp-page/",
+    "category": "news_finance",
+    "auth": "none",
+    "query_type": "news",
+    "endpoints": [
+      {
+        "path": "/api/news?query={topic}",
+        "returns": "News with media bias scoring + balanced synthesis",
+        "use_when": "bias-aware news analysis"
+      }
+    ],
+    "notes": "Free. Unique: media bias scoring on articles."
+  },
+  {
+    "name": "MarketAux",
+    "url": "https://api.marketaux.com/v1",
+    "category": "financial_news",
+    "auth": "apiKey",
+    "query_type": "news",
+    "endpoints": [
+      {
+        "path": "/news/all?symbols={ticker}&filter_entities=true&api_token={key}",
+        "returns": "Ticker-tagged financial news with sentiment",
+        "use_when": "stock-specific news sentiment"
+      }
+    ],
+    "notes": "Free: 100 req/day. Sentiment + entity tagging on financial news."
+  },
+  {
+    "name": "NVD (CVE Database)",
+    "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+    "category": "security",
+    "auth": "none",
+    "query_type": "vulnerabilities",
+    "endpoints": [
+      {
+        "path": "?keywordSearch={topic}&resultsPerPage=20",
+        "returns": "CVEs matching keyword with CVSS scores",
+        "use_when": "vulnerability research, security audits"
+      },
+      {
+        "path": "?cveId={cve_id}",
+        "returns": "Full CVE details",
+        "use_when": "specific vulnerability analysis"
+      }
+    ],
+    "notes": "Free, rate-limited without key. Comprehensive US vulnerability database."
+  },
+  {
+    "name": "Shodan",
+    "url": "https://api.shodan.io",
+    "category": "security",
+    "auth": "apiKey",
+    "query_type": "infrastructure",
+    "endpoints": [
+      {
+        "path": "/shodan/host/{ip}?key={key}",
+        "returns": "Open ports, services, vulnerabilities for an IP",
+        "use_when": "infrastructure reconnaissance"
+      },
+      {
+        "path": "/shodan/host/search?key={key}&query={query}",
+        "returns": "Devices matching search (e.g., 'apache country:US')",
+        "use_when": "internet-wide scanning results"
+      }
+    ],
+    "notes": "Free: limited queries. Paid: full access. Scans entire internet."
+  },
+  {
+    "name": "VirusTotal",
+    "url": "https://www.virustotal.com/api/v3",
+    "category": "security",
+    "auth": "apiKey",
+    "query_type": "threat_intel",
+    "endpoints": [
+      {
+        "path": "/domains/{domain}",
+        "returns": "Domain reputation, DNS records, detected malware",
+        "use_when": "domain threat assessment"
+      },
+      {
+        "path": "/ip_addresses/{ip}",
+        "returns": "IP reputation and associated malware",
+        "use_when": "IP threat lookup"
+      }
+    ],
+    "notes": "Free: 4 req/min. 500 req/day."
+  },
+  {
+    "name": "MITRE ATT&CK",
+    "url": "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack",
+    "category": "security",
+    "auth": "none",
+    "query_type": "threat_intel",
+    "endpoints": [
+      {
+        "path": "/enterprise-attack.json",
+        "returns": "Full ATT&CK framework: techniques, tactics, groups, software",
+        "use_when": "threat modeling, adversary profiling"
+      }
+    ],
+    "notes": "Free, static JSON. 200+ techniques, 130+ groups."
+  },
+  {
+    "name": "AbuseIPDB",
+    "url": "https://api.abuseipdb.com/api/v2",
+    "category": "security",
+    "auth": "apiKey",
+    "query_type": "threat_intel",
+    "endpoints": [
+      {
+        "path": "/check?ipAddress={ip}",
+        "returns": "IP abuse reports, confidence score, country",
+        "use_when": "IP reputation check"
+      }
+    ],
+    "notes": "Free: 1000 checks/day."
+  },
+  {
+    "name": "URLScan.io",
+    "url": "https://urlscan.io/api/v1",
+    "category": "security",
+    "auth": "apiKey",
+    "query_type": "threat_intel",
+    "endpoints": [
+      {
+        "path": "/search/?q=domain:{domain}",
+        "returns": "Scan results: screenshots, technologies, IPs, certificates",
+        "use_when": "website analysis, phishing detection"
+      }
+    ],
+    "notes": "Free: 100 scans/day. Passive DNS + screenshots."
+  },
+  {
+    "name": "Open Sanctions",
+    "url": "https://api.opensanctions.org",
+    "category": "compliance",
+    "auth": "apiKey",
+    "query_type": "sanctions",
+    "endpoints": [
+      {
+        "path": "/search/default?q={entity}",
+        "returns": "Sanctioned entities matching query",
+        "use_when": "sanctions screening, compliance checks, PEP verification"
+      }
+    ],
+    "notes": "Free key required at opensanctions.org. Aggregates OFAC, EU, UN, UK sanctions lists."
+  },
+  {
+    "name": "Interpol Red Notices",
+    "url": "https://ws-public.interpol.int/notices/v1",
+    "category": "law_enforcement",
+    "auth": "none",
+    "query_type": "persons",
+    "endpoints": [
+      {
+        "path": "/red?name={name}&resultPerPage=20",
+        "returns": "Interpol Red Notice subjects",
+        "use_when": "international fugitive search"
+      },
+      {
+        "path": "/red?nationality={country_code}&resultPerPage=20",
+        "returns": "Notices by nationality",
+        "use_when": "country-specific wanted persons"
+      }
+    ],
+    "notes": "Free. Public API for Interpol notices."
+  },
+  {
+    "name": "US Census",
+    "url": "https://api.census.gov/data",
+    "category": "demographics",
+    "auth": "none",
+    "query_type": "statistics",
+    "endpoints": [
+      {
+        "path": "/2022/acs/acs1?get=NAME,B01001_001E&for=state:*",
+        "returns": "Population by state",
+        "use_when": "US demographics"
+      },
+      {
+        "path": "/2022/acs/acs1?get=NAME,B19013_001E&for=county:*&in=state:{fips}",
+        "returns": "Median income by county",
+        "use_when": "income/economic data"
+      }
+    ],
+    "notes": "Free, optional key. Thousands of variables available."
+  },
+  {
+    "name": "data.gov (US)",
+    "url": "https://catalog.data.gov/api/3",
+    "category": "government",
+    "auth": "none",
+    "query_type": "datasets",
+    "endpoints": [
+      {
+        "path": "/action/package_search?q={topic}&rows=20",
+        "returns": "US government datasets matching query",
+        "use_when": "finding government data sources"
+      }
+    ],
+    "notes": "Free. Catalog of 300K+ US gov datasets."
+  },
+  {
+    "name": "EU Open Data Portal",
+    "url": "https://data.europa.eu/api/hub/search",
+    "category": "government",
+    "auth": "none",
+    "query_type": "datasets",
+    "endpoints": [
+      {
+        "path": "/datasets?q={topic}&limit=20",
+        "returns": "EU datasets matching query",
+        "use_when": "European government data"
+      }
+    ],
+    "notes": "Free. 1.6M+ EU datasets from 36 countries."
+  },
+  {
+    "name": "TED (EU Tenders)",
+    "url": "https://ted.europa.eu",
+    "category": "procurement",
+    "auth": "none",
+    "query_type": "tenders",
+    "endpoints": [
+      {
+        "path": "/en/search/result?q={topic}",
+        "returns": "EU procurement notices HTML (need scraping)",
+        "use_when": "EU tender search \u2014 not API-accessible, fallback to web scout"
+      }
+    ],
+    "notes": "TED REST API broken/gated. Use web scraping or OJEU via EUR-Lex instead."
+  },
+  {
+    "name": "SAM.gov",
+    "url": "https://api.sam.gov/opportunities/v2",
+    "category": "procurement",
+    "auth": "apiKey",
+    "query_type": "tenders",
+    "endpoints": [
+      {
+        "path": "/search?api_key={key}&keyword={topic}&postedFrom={date}",
+        "returns": "US federal contract opportunities",
+        "use_when": "US government contracts, defense spending"
+      }
+    ],
+    "notes": "Free key required. All US federal procurement."
+  },
+  {
+    "name": "USAspending.gov",
+    "url": "https://api.usaspending.gov/api/v2",
+    "category": "government_spending",
+    "auth": "none",
+    "query_type": "fiscal_data",
+    "endpoints": [
+      {
+        "path": "/search/spending_by_agency/",
+        "returns": "Federal spending by agency",
+        "use_when": "US government budget analysis"
+      },
+      {
+        "path": "/search/spending_by_category/",
+        "returns": "Spending categories breakdown",
+        "use_when": "where tax money goes"
+      }
+    ],
+    "notes": "Free. $50T+ in spending data. POST requests with filters."
+  },
+  {
+    "name": "dane.gov.pl",
+    "url": "https://api.dane.gov.pl/1.4",
+    "category": "government",
+    "auth": "none",
+    "query_type": "datasets",
+    "endpoints": [
+      {
+        "path": "/datasets?q={topic}&per_page=20",
+        "returns": "Polish government open datasets",
+        "use_when": "Polish market research, regulations"
+      }
+    ],
+    "notes": "Free. Polish government data portal."
+  },
+  {
+    "name": "UK Companies House",
+    "url": "https://api.company-information.service.gov.uk",
+    "category": "business",
+    "auth": "apiKey",
+    "query_type": "company_data",
+    "endpoints": [
+      {
+        "path": "/search/companies?q={name}",
+        "returns": "UK company search: name, number, status, address",
+        "use_when": "UK company research"
+      },
+      {
+        "path": "/company/{number}",
+        "returns": "Full company profile",
+        "use_when": "specific UK company details"
+      },
+      {
+        "path": "/company/{number}/filing-history",
+        "returns": "Company filings",
+        "use_when": "UK corporate filings"
+      }
+    ],
+    "notes": "Free key. Official UK company registry."
+  },
+  {
+    "name": "OpenCorporates",
+    "url": "https://api.opencorporates.com/v0.4",
+    "category": "business",
+    "auth": "apiKey",
+    "query_type": "company_data",
+    "endpoints": [
+      {
+        "path": "/companies/search?q={name}",
+        "returns": "Companies across 140+ jurisdictions",
+        "use_when": "international company search"
+      }
+    ],
+    "notes": "Limited free. 200M+ companies worldwide."
+  },
+  {
+    "name": "OpenMercantil (Spain)",
+    "url": "https://openmercantil.es/api",
+    "category": "business",
+    "auth": "none",
+    "query_type": "company_data",
+    "endpoints": [
+      {
+        "path": "/companies/search?q={name}",
+        "returns": "Spanish company public data and BORME events",
+        "use_when": "Spanish market research"
+      }
+    ],
+    "notes": "Free. Spanish company registry data."
+  },
+  {
+    "name": "GitHub",
+    "url": "https://api.github.com",
+    "category": "development",
+    "auth": "none",
+    "query_type": "repositories",
+    "endpoints": [
+      {
+        "path": "/search/repositories?q={topic}&sort=stars&per_page=20",
+        "returns": "Top repos by stars with descriptions",
+        "use_when": "open source landscape, tool comparison"
+      },
+      {
+        "path": "/search/repositories?q={topic}+created:>{date}&sort=stars",
+        "returns": "New repos since date",
+        "use_when": "emerging tools/frameworks"
+      },
+      {
+        "path": "/repos/{owner}/{repo}",
+        "returns": "Repo details: stars, forks, language, license",
+        "use_when": "specific project analysis"
+      }
+    ],
+    "notes": "Free: 10 req/min unauthenticated, 30/min with token. Good for tech landscape."
+  },
+  {
+    "name": "NPM Registry",
+    "url": "https://registry.npmjs.org",
+    "category": "development",
+    "auth": "none",
+    "query_type": "packages",
+    "endpoints": [
+      {
+        "path": "/-/v1/search?text={topic}&size=20",
+        "returns": "NPM packages with downloads, description",
+        "use_when": "JavaScript ecosystem research"
+      },
+      {
+        "path": "/{package}",
+        "returns": "Full package metadata, versions, maintainers",
+        "use_when": "specific package analysis"
+      }
+    ],
+    "notes": "Free, unlimited. 2M+ packages."
+  },
+  {
+    "name": "PyPI",
+    "url": "https://pypi.org",
+    "category": "development",
+    "auth": "none",
+    "query_type": "packages",
+    "endpoints": [
+      {
+        "path": "/pypi/{package}/json",
+        "returns": "Package metadata, releases, downloads",
+        "use_when": "Python package research"
+      }
+    ],
+    "notes": "Free. For search use: https://pypi.org/search/?q={topic} (HTML only)."
+  },
+  {
+    "name": "Libraries.io",
+    "url": "https://libraries.io/api",
+    "category": "development",
+    "auth": "apiKey",
+    "query_type": "packages",
+    "endpoints": [
+      {
+        "path": "/search?q={topic}&api_key={key}",
+        "returns": "Packages across all managers with dependency info",
+        "use_when": "cross-platform dependency research"
+      }
+    ],
+    "notes": "Free key: 60 req/min. Covers NPM, PyPI, Maven, NuGet, etc."
+  },
+  {
+    "name": "StackExchange",
+    "url": "https://api.stackexchange.com/2.3",
+    "category": "development",
+    "auth": "none",
+    "query_type": "discussions",
+    "endpoints": [
+      {
+        "path": "/search/advanced?order=desc&sort=votes&q={topic}&site=stackoverflow",
+        "returns": "Top-voted Q&A on topic",
+        "use_when": "technical best practices, common problems"
+      },
+      {
+        "path": "/questions?order=desc&sort=activity&tagged={tag}&site=stackoverflow&pagesize=20",
+        "returns": "Recent questions with specific tag",
+        "use_when": "technology adoption trends"
+      }
+    ],
+    "notes": "Free: 300 req/day without key. Great for developer sentiment."
+  },
+  {
+    "name": "Docker Hub",
+    "url": "https://hub.docker.com/v2",
+    "category": "development",
+    "auth": "none",
+    "query_type": "containers",
+    "endpoints": [
+      {
+        "path": "/search/repositories/?query={topic}&page_size=20",
+        "returns": "Container images with pull counts, stars",
+        "use_when": "infrastructure/devops tool comparison"
+      }
+    ],
+    "notes": "Free. Pull count = proxy for adoption."
+  },
+  {
+    "name": "Crates.io (Rust)",
+    "url": "https://crates.io/api/v1",
+    "category": "development",
+    "auth": "none",
+    "query_type": "packages",
+    "endpoints": [
+      {
+        "path": "/crates?q={topic}&per_page=20&sort=downloads",
+        "returns": "Rust crates with download counts",
+        "use_when": "Rust ecosystem research"
+      }
+    ],
+    "notes": "Free. Useful for systems programming landscape."
+  },
+  {
+    "name": "Product Hunt (unofficial)",
+    "url": "https://www.producthunt.com/frontend/graphql",
+    "category": "startups",
+    "auth": "none",
+    "query_type": "products",
+    "endpoints": [
+      {
+        "path": "",
+        "returns": "GraphQL \u2014 search products, upvotes, makers",
+        "use_when": "startup/product launches, competitor discovery"
+      }
+    ],
+    "notes": "Unofficial. OAuth needed for full access. Alternative: scrape."
+  },
+  {
+    "name": "UN Comtrade",
+    "url": "https://comtradeapi.un.org/data/v1/get",
+    "category": "trade",
+    "auth": "none",
+    "query_type": "trade_data",
+    "endpoints": [
+      {
+        "path": "/C/A/HS?reporterCode={country}&period={year}&partnerCode=0&cmdCode={hs_code}",
+        "returns": "Import/export data between countries",
+        "use_when": "bilateral trade analysis, supply chains"
+      }
+    ],
+    "notes": "Free: 100 req/hr. Country codes: 840=US, 156=CN, 276=DE. HS codes for product categories."
+  },
+  {
+    "name": "REST Countries",
+    "url": "https://restcountries.com/v3.1",
+    "category": "geo",
+    "auth": "none",
+    "query_type": "country_data",
+    "endpoints": [
+      {
+        "path": "/name/{country}",
+        "returns": "Country data: population, GDP, region, languages, currencies",
+        "use_when": "country profiles"
+      },
+      {
+        "path": "/region/{region}",
+        "returns": "All countries in a region",
+        "use_when": "regional analysis"
+      },
+      {
+        "path": "/all?fields=name,population,gdp,region",
+        "returns": "All countries basic data",
+        "use_when": "global comparisons"
+      }
+    ],
+    "notes": "Free, unlimited. Good for quick country context."
+  },
+  {
+    "name": "ACLED",
+    "url": "https://api.acleddata.com/acled/read",
+    "category": "conflict",
+    "auth": "apiKey",
+    "query_type": "conflict_data",
+    "endpoints": [
+      {
+        "path": "?event_type=Battles&country={country}&limit=50&key={key}&email={email}",
+        "returns": "Armed conflict events with dates, actors, fatalities",
+        "use_when": "conflict monitoring, political risk assessment"
+      }
+    ],
+    "notes": "Free academic/media key. Premier conflict data source."
+  },
+  {
+    "name": "FBI Wanted",
+    "url": "https://api.fbi.gov/wanted/v1",
+    "category": "law_enforcement",
+    "auth": "none",
+    "query_type": "persons",
+    "endpoints": [
+      {
+        "path": "/list?title={name}",
+        "returns": "FBI wanted persons matching name",
+        "use_when": "criminal investigations, security research"
+      }
+    ],
+    "notes": "Free. FBI most wanted list + fugitives."
+  },
+  {
+    "name": "EPA (US Environment)",
+    "url": "https://www.epa.gov/enviro/envirofacts-data-service-api",
+    "category": "environment",
+    "auth": "none",
+    "query_type": "environmental_data",
+    "endpoints": [
+      {
+        "path": "",
+        "returns": "Environmental facility data, violations, emissions",
+        "use_when": "environmental compliance, pollution data"
+      }
+    ],
+    "notes": "Free. Tracks facilities with environmental permits."
+  },
+  {
+    "name": "OpenWeather",
+    "url": "https://api.openweathermap.org/data/2.5",
+    "category": "weather",
+    "auth": "apiKey",
+    "query_type": "weather_data",
+    "endpoints": [
+      {
+        "path": "/weather?q={city}&appid={key}",
+        "returns": "Current weather conditions",
+        "use_when": "weather context for logistics/agriculture research"
+      }
+    ],
+    "notes": "Free: 60 req/min. Useful for supply chain/agriculture context."
+  },
+  {
+    "name": "Hugging Face",
+    "url": "https://huggingface.co/api",
+    "category": "ml",
+    "auth": "none",
+    "query_type": "models",
+    "endpoints": [
+      {
+        "path": "/models?search={topic}&sort=downloads&direction=-1&limit=20",
+        "returns": "ML models with downloads, likes, tags",
+        "use_when": "AI/ML model landscape, adoption metrics"
+      },
+      {
+        "path": "/datasets?search={topic}&sort=downloads&direction=-1&limit=20",
+        "returns": "Datasets available for training",
+        "use_when": "dataset discovery for ML"
+      }
+    ],
+    "notes": "Free. 800K+ models, 200K+ datasets. Downloads = adoption proxy."
+  },
+  {
+    "name": "Papers With Code",
+    "url": "https://paperswithcode.com/api/v1",
+    "category": "ml",
+    "auth": "none",
+    "query_type": "benchmarks",
+    "endpoints": [
+      {
+        "path": "/papers/?q={topic}",
+        "returns": "Papers with linked code implementations",
+        "use_when": "reproducible research, SOTA tracking"
+      },
+      {
+        "path": "/tasks/",
+        "returns": "ML task taxonomy with SOTA results",
+        "use_when": "benchmark comparison"
+      }
+    ],
+    "notes": "Free. Links papers to code repos. SOTA leaderboards."
+  },
+  {
+    "name": "Replicate",
+    "url": "https://api.replicate.com/v1",
+    "category": "ml",
+    "auth": "apiKey",
+    "query_type": "models",
+    "endpoints": [
+      {
+        "path": "/models?cursor=&query={topic}",
+        "returns": "Deployable ML models with run counts",
+        "use_when": "production ML model discovery"
+      }
+    ],
+    "notes": "Token needed for full access. Run counts = real usage data."
+  },
+  {
+    "name": "Ollama Registry",
+    "url": "https://ollama.com/api",
+    "category": "ml",
+    "auth": "none",
+    "query_type": "models",
+    "endpoints": [
+      {
+        "path": "/models",
+        "returns": "Available local LLM models",
+        "use_when": "local/open-source LLM options"
+      }
+    ],
+    "notes": "Public model list. Useful for open-source AI research."
+  },
+  {
+    "name": "OpenRouter",
+    "url": "https://openrouter.ai/api/v1",
+    "category": "ml",
+    "auth": "none",
+    "query_type": "models",
+    "endpoints": [
+      {
+        "path": "/models",
+        "returns": "All available LLMs with pricing, context length, capabilities",
+        "use_when": "LLM comparison, pricing analysis"
+      }
+    ],
+    "notes": "Free model listing. Great for AI market landscape."
+  }
+]
