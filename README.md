@@ -634,8 +634,7 @@ export BEHIVE_DB_URL="postgresql://user:pass@localhost:5432/hive"
 export BEHIVE_LLM=bedrock  # or openai, local
 
 # Start services
-behive api start      # REST API on :8091
-behive mcp start      # MCP server on :8090
+behive serve              # Starts both REST API (:8091) + MCP (:8090)
 ```
 
 ### Minimum Requirements

@@ -43,7 +43,7 @@ async def mcp_endpoint(request: MCPRequest):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "behive", "version": "0.2.0"},
+                "serverInfo": {"name": "behive", "version": "0.3.0"},
             }
         }
 
