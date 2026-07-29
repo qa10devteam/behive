@@ -193,8 +193,28 @@ def complete(
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         
-        response = litellm.completion(**kwargs)
-        return response.choices[0].message.content or ""
+        # Retry with exponential backoff (handles rate limits, transient failures)
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = litellm.completion(**kwargs)
+                return response.choices[0].message.content or ""
+            except Exception as retry_err:
+                last_error = retry_err
+                err_str = str(retry_err).lower()
+                # Don't retry on auth errors or invalid model
+                if any(k in err_str for k in ('auth', 'invalid_api_key', 'permission', 'not found')):
+                    raise
+                # Retry on rate limit, timeout, server error
+                if attempt < 2:
+                    wait = (attempt + 1) * 2  # 2s, 4s
+                    log.debug(f"LLM retry {attempt+1}/3 after {wait}s: {retry_err}")
+                    import time as _time
+                    _time.sleep(wait)
+        
+        # All retries exhausted
+        if last_error:
+            raise last_error
         
     except ImportError:
         log.warning("litellm not installed. Falling back to direct API calls.")
