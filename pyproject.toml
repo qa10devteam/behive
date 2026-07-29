@@ -5,6 +5,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+behive = ["init-db.sql"]
+
 [project]
 name = "behive"
 version = "0.3.0"
