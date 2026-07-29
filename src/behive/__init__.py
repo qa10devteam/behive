@@ -10,7 +10,7 @@ Usage:
     print(result.report)  # Synthesized markdown report
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from behive.client import research, BeHiveClient
 from behive.models import ResearchResult, Claim, Entity
