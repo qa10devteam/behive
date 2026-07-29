@@ -337,7 +337,8 @@ class QueenCalibrator:
             blocked = [r[0] for r in rows if r[2] == "SKIP"]
             cloudflare = [r[0] for r in rows if r[1] == "cloudflare"]
             return blocked, cloudflare
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in queen_calibrator.py: {e}")
             return [], []  # drone_map nie istnieje lub pusta — ignoruj
 
     def _analyze_operations(

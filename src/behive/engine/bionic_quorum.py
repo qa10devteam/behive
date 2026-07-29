@@ -119,7 +119,8 @@ class QuorumChecker:
             ).fetchone()
             con.close()
             return row[0] if row else ""
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in bionic_quorum.py: {e}")
             return ""
 
     def _load_expansion_count(self) -> int:
@@ -132,7 +133,8 @@ class QuorumChecker:
             """, [self.mission_id]).fetchone()
             con.close()
             return row[0] if row else 0
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in bionic_quorum.py: {e}")
             return 0
 
     def check(self) -> QuorumResult:
@@ -159,7 +161,8 @@ class QuorumChecker:
                     WHERE mission_id = ?
                       AND routing_decision = 'skip'
                 """, [self.mission_id]).fetchone()[0]
-            except Exception:
+            except Exception as e:
+                log.debug(f"Suppressed in bionic_quorum.py: {e}")
                 skip_count = 0
 
             con.close()

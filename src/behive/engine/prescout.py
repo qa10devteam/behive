@@ -121,7 +121,8 @@ def classify_domain(url: str) -> dict:
         domain = parsed.netloc.lower().lstrip("www.")
         path   = parsed.path.lower()
         url_l  = url.lower()
-    except Exception:
+    except Exception as e:
+        log.debug(f"Suppressed in prescout.py: {e}")
         return {"tier": "MEDIUM", "paywall": False, "api_likely": False, "spa_likely": False}
 
     # Tier
@@ -540,7 +541,8 @@ class PreScoutDancer:
             ).fetchone()
             con.close()
             self.topic = row[0] if row else ""
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in prescout.py: {e}")
             self.topic = ""
 
     def _get_sources(self) -> list[dict]:
@@ -753,7 +755,8 @@ class BeeMasterGate:
                 if isinstance(raw_flags, str):
                     try:
                         flag_list = json.loads(raw_flags)
-                    except Exception:
+                    except Exception as e:
+                        log.debug(f"Suppressed in prescout.py: {e}")
                         flag_list = []
                 else:
                     flag_list = list(raw_flags)
@@ -798,7 +801,8 @@ class BeeMasterGate:
                 if isinstance(raw, str):
                     try:
                         flag_list = json.loads(raw)
-                    except Exception:
+                    except Exception as e:
+                        log.debug(f"Suppressed in prescout.py: {e}")
                         flag_list = []
                 else:
                     flag_list = list(raw)
@@ -1095,7 +1099,8 @@ class TrueScout:
                         "extraction_method":    "pymupdf",
                         "extraction_confidence": 0.9,
                     }
-            except Exception:
+            except Exception as e:
+                log.debug(f"Suppressed in prescout.py: {e}")
                 return {
                     "data_volume_words":    1000,
                     "pdf_pages":            None,
@@ -1159,7 +1164,8 @@ class TrueScout:
                     "extraction_method":    "rss_bee",
                     "extraction_confidence": 0.9,
                 }
-            except Exception:
+            except Exception as e:
+                log.debug(f"Suppressed in prescout.py: {e}")
                 return {
                     "data_volume_words":    300,
                     "content_preview":      "RSS",

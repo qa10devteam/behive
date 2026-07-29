@@ -95,7 +95,8 @@ def ensure_events_table(db_path: str = DB_PATH) -> None:
                 if col not in existing:
                     con.execute(f"ALTER TABLE hive_missions ADD COLUMN IF NOT EXISTS {col} FLOAT DEFAULT NULL")
             con.commit()
-        except Exception:
+        except Exception as e:
+            log.debug(f"Suppressed in events.py: {e}")
             pass  # hive_missions may not exist yet — that's fine
 
     finally:
