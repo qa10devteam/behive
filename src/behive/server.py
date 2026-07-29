@@ -12,6 +12,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 
+# Install legacy import shims
+try:
+    from behive.compat.shims import install_shims, install_ops_shim
+    install_shims()
+    install_ops_shim()
+except ImportError:
+    pass
+
 
 # ─── DB connection ────────────────────────────────────────────────────────────
 
@@ -187,6 +195,7 @@ async def start_research(req: ResearchRequest):
     """Start a new research mission. Returns job_id for polling."""
     import hashlib
     import time
+    from asyncio import get_event_loop
 
     # Generate mission ID
     slug = req.query[:40].lower().replace(" ", "_")
@@ -208,13 +217,77 @@ async def start_research(req: ResearchRequest):
     except Exception as e:
         raise HTTPException(500, f"DB error: {e}")
 
+    # Launch pipeline in background
+    import asyncio
+    asyncio.create_task(_run_pipeline(mission_id, req.query, req.depth))
+
     return {
         "mission_id": mission_id,
-        "status": "queued",
+        "status": "running",
         "topic": req.query,
         "depth": req.depth,
-        "message": f"Research queued. Poll GET /research/{mission_id}/status for progress.",
+        "message": f"Research started. Poll GET /research/{mission_id}/status for progress.",
     }
+
+
+async def _run_pipeline(mission_id: str, topic: str, depth: int):
+    """Run the full research pipeline in background."""
+    import subprocess
+    import sys
+
+    try:
+        # Update status to running
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE hive_missions SET status = 'running', phase = 'scout' WHERE id = %s",
+            (mission_id,)
+        )
+        conn.commit()
+        conn.close()
+
+        # Run orchestrator as subprocess (isolates heavy pipeline)
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "behive.engine.orchestrator",
+            "run", topic,
+            "--mission-id", mission_id,
+            "--depth", str(depth),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, "BEHIVE_MISSION_ID": mission_id},
+        )
+
+        stdout, stderr = await proc.communicate()
+
+        # Update final status
+        conn = get_db()
+        cur = conn.cursor()
+        if proc.returncode == 0:
+            cur.execute(
+                "UPDATE hive_missions SET status = 'done', phase = 'done' WHERE id = %s",
+                (mission_id,)
+            )
+        else:
+            error_msg = stderr.decode()[-500:] if stderr else "Unknown error"
+            cur.execute(
+                "UPDATE hive_missions SET status = 'error', phase = 'error' WHERE id = %s",
+                (mission_id,)
+            )
+        conn.commit()
+        conn.close()
+
+    except Exception as e:
+        try:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE hive_missions SET status = 'error', phase = 'error' WHERE id = %s",
+                (mission_id,)
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
 
 
 @app.get("/research/{mission_id}/status")

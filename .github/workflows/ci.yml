@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install package
+      run: |
+        pip install -e ".[all]"
+        pip install pytest
+    
+    - name: Verify CLI
+      run: |
+        behive version
+        behive --help
+    
+    - name: Run smoke tests
+      run: |
+        pytest tests/test_smoke.py -v -k "not integration"
+    
+    - name: Check no secrets
+      run: |
+        ! grep -r "hive_2026_prod\|sk-ant-\|ghp_\|/home/ubuntu" src/ --include="*.py"
+    
+    - name: Syntax check all engine modules
+      run: |
+        python -c "
+        import ast, os
+        errors = []
+        for root, dirs, files in os.walk('src/behive'):
+            for f in files:
+                if f.endswith('.py'):
+                    path = os.path.join(root, f)
+                    with open(path) as fh:
+                        try:
+                            ast.parse(fh.read())
+                        except SyntaxError as e:
+                            errors.append(f'{path}: {e}')
+        assert not errors, f'Syntax errors: {errors}'
+        print('✅ All modules parse OK')
+        "
