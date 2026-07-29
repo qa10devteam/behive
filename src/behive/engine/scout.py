@@ -295,50 +295,42 @@ class SwarmScout:
             log.debug(f"  [save_source] error for {url[:80]}: {e}")
             return False
 
-    # ── Scout method: DDG text ────────────────────────────────────────────────
+    # ── Scout method: web search (multi-backend) ────────────────────────────────
 
     async def _ddg_text(self, query: str, region: str = "en-us",
                         max_results: int = 40) -> list[dict]:
+        """Web search using best available backend (Brave/Serper/SearXNG/DDG)."""
         async with self._ddg_sem:
             try:
-                try:
-                    from ddgs import DDGS
-                except ImportError:
-                    from duckduckgo_search import DDGS
-                results = await asyncio.get_event_loop().run_in_executor(
-                    self._executor,
-                    lambda: DDGS().text(query, region=region, max_results=max_results),
-                )
+                from behive.engine.search_backends import get_engine
+                engine = get_engine()
+                results = await engine.search(query, max_results)
                 return [
-                    {"url": r.get("href", ""), "title": r.get("title", ""),
-                     "snippet": r.get("body", "")}
+                    {"url": r.get("url", ""), "title": r.get("title", ""),
+                     "snippet": r.get("snippet", "")}
                     for r in (results or [])
                 ]
             except Exception as e:
-                log.debug(f"  [ddg_text] '{query[:60]}': {e}")
+                log.debug(f"  [web_search] '{query[:60]}': {e}")
                 return []
 
-    # ── Scout method: DDG news ────────────────────────────────────────────────
+    # ── Scout method: news search (multi-backend) ──────────────────────────────
 
     async def _ddg_news(self, query: str, region: str = "en-us",
                         max_results: int = 40) -> list[dict]:
+        """News search using best available backend."""
         async with self._ddg_sem:
             try:
-                try:
-                    from ddgs import DDGS
-                except ImportError:
-                    from duckduckgo_search import DDGS
-                results = await asyncio.get_event_loop().run_in_executor(
-                    self._executor,
-                    lambda: DDGS().news(query, region=region, max_results=max_results),
-                )
+                from behive.engine.search_backends import get_engine
+                engine = get_engine()
+                results = await engine.search_news(query, max_results)
                 return [
                     {"url": r.get("url", ""), "title": r.get("title", ""),
-                     "snippet": r.get("body", "") or r.get("excerpt", "")}
+                     "snippet": r.get("snippet", "")}
                     for r in (results or [])
                 ]
             except Exception as e:
-                log.debug(f"  [ddg_news] '{query[:60]}': {e}")
+                log.debug(f"  [news_search] '{query[:60]}': {e}")
                 return []
 
     # ── Scout method: DDG site: ───────────────────────────────────────────────

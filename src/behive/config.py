@@ -30,22 +30,22 @@ STAGES = {
     "scout": {
         "description": "Source discovery & query generation",
         "role": "Fast, cheap — generates search queries and scores URL relevance",
-        "default": "claude-haiku",
+        "suggested": "fast model (Haiku, GPT-4o-mini, Llama-3.3-70B, Gemini Flash)",
     },
     "harvest": {
         "description": "Content extraction & relevance filtering",
         "role": "Fast, cheap — filters irrelevant content, detects language",
-        "default": "claude-haiku",
+        "suggested": "fast model (Haiku, GPT-4o-mini, Llama-3.3-70B, Gemini Flash)",
     },
     "process": {
         "description": "Claim extraction & quality scoring",
         "role": "Medium — extracts structured claims from text, scores quality",
-        "default": "claude-haiku",
+        "suggested": "balanced model (Haiku, GPT-4o-mini, or Sonnet for quality)",
     },
     "synth": {
         "description": "Report synthesis & cross-referencing",
         "role": "Smart, thorough — synthesizes final report, deduplicates, verifies",
-        "default": "claude-sonnet",
+        "suggested": "smart model (Sonnet, GPT-4o, Gemini Pro, Opus for max quality)",
     },
 }
 
@@ -72,14 +72,15 @@ MODEL_PRESETS = {
     "ollama": "ollama/llama3.1",
 }
 
-# Recommended combos
+# Recommended combos (provider-agnostic names that map via MODEL_PRESETS)
 RECOMMENDED_COMBOS = {
     "budget": {
-        "description": "Cheapest — Haiku/GPT-4o-mini everywhere (~$0.30/mission)",
+        "description": "Cheapest — fast model everywhere (~$0.30/mission)",
         "scout": "claude-haiku",
         "harvest": "claude-haiku",
         "process": "claude-haiku",
         "synth": "claude-haiku",
+        "openai_alt": {"scout": "gpt-4o-mini", "harvest": "gpt-4o-mini", "process": "gpt-4o-mini", "synth": "gpt-4o-mini"},
     },
     "balanced": {
         "description": "Best value — cheap collection, smart synthesis (~$1.50/mission)",
@@ -87,13 +88,15 @@ RECOMMENDED_COMBOS = {
         "harvest": "claude-haiku",
         "process": "claude-haiku",
         "synth": "claude-sonnet",
+        "openai_alt": {"scout": "gpt-4o-mini", "harvest": "gpt-4o-mini", "process": "gpt-4o-mini", "synth": "gpt-4o"},
     },
     "quality": {
-        "description": "Maximum quality — Sonnet everywhere (~$4.00/mission)",
+        "description": "Maximum quality — smart model everywhere (~$4.00/mission)",
         "scout": "claude-sonnet",
         "harvest": "claude-haiku",
         "process": "claude-sonnet",
         "synth": "claude-sonnet",
+        "openai_alt": {"scout": "gpt-4o", "harvest": "gpt-4o-mini", "process": "gpt-4o", "synth": "gpt-4o"},
     },
     "local": {
         "description": "Fully local — requires running LLM server ($0.00/mission)",
@@ -181,9 +184,9 @@ def get_model_for_stage(stage: str) -> str:
     if model_name:
         return MODEL_PRESETS.get(model_name, model_name)
     
-    # Hardcoded default
-    model_name = STAGES[stage]["default"]
-    return MODEL_PRESETS.get(model_name, model_name)
+    # Hardcoded default — return empty string to let llm.py auto-detect
+    # from available API keys. We don't assume any provider here.
+    return ""
 
 
 def get_all_stage_models() -> dict:

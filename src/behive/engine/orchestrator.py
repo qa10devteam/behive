@@ -1060,22 +1060,8 @@ _hive_db = None
 
 def _ensure_pg():
     """Lazy PostgreSQL availability check."""
-    global _pg_available, _hive_db
-    if _pg_available is not None:
-        return _pg_available
-    try:
-        import hive2_db
-        _hive_db = hive2_db
-        _pg_available = (hive2_db.DB_BACKEND == "postgres")
-    except Exception:
-        # Try direct import
-        try:
-            from behive.engine import db as _db_mod
-            _hive_db = _db_mod
-            _pg_available = (_db_mod.DB_BACKEND == "postgres")
-        except Exception:
-            _pg_available = False
-    return _pg_available
+    from behive.engine.db_helpers import _ensure_pg as _ep
+    return _ep()
 
 
 def _get_duckdb():
@@ -1085,101 +1071,20 @@ def _get_duckdb():
 
 def _connect_db(read_only: bool = False):
     """Connect to the active database backend (PostgreSQL only)."""
-    _ensure_pg()
-    if _pg_available and _hive_db:
-        return _hive_db.connect(read_only=read_only)
-    raise RuntimeError(
-        "PostgreSQL not available. Ensure PostgreSQL is running and configured.\n"
-        "Set: HIVE_PG_HOST, HIVE_PG_PORT, HIVE_PG_USER, HIVE_PG_PASSWORD, HIVE_PG_DATABASE\n"
-        "Or: BEHIVE_DB_URL=postgresql://user:pass@host:5432/dbname\n"
-        "For Docker: docker compose up -d"
-    )
+    from behive.engine.db_helpers import _connect_db as _cdb
+    return _cdb(read_only=read_only)
 
 
 def _strip_sql_comments(sql: str) -> str:
     """Strip leading/inline -- comments from a SQL statement block."""
-    lines = []
-    for line in sql.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("--"):
-            continue   # skip pure comment lines
-        lines.append(line)
-    return "\n".join(lines).strip()
+    from behive.engine.db_helpers import _strip_sql_comments as _ssc
+    return _ssc(sql)
 
 
 def _init_db(con=None):
     """Ensure HIVE schema exists. PostgreSQL schema already created during migration."""
-    _ensure_pg()
-    if _pg_available:
-        return
-    raise RuntimeError(
-        "PostgreSQL required but not available.\n"
-        "Quick start: docker compose up -d\n"
-        "Or set BEHIVE_DB_URL=postgresql://user:***@host:5432/dbname"
-    )
-    con = _connect_db()
-    try:
-        raw_stmts = SCHEMA_SQL.split(";")
-        statements = []
-        for s in raw_stmts:
-            cleaned = _strip_sql_comments(s)
-            if cleaned:
-                statements.append(cleaned)
-
-        for stmt in statements:
-            try:
-                con.execute(stmt)
-            except Exception as e:
-                errmsg = str(e).lower()
-                if "already exists" not in errmsg:
-                    log.info(f"[HIVE] Schema warning: {e}")
-
-        # ── Migrate hive_missions v1 → v2 (add missing columns) ─────────────
-        existing_cols = {
-            row[0].lower()
-            for row in con.execute("DESCRIBE hive_missions").fetchall()
-        }
-        migrations = [
-            ("status",            "VARCHAR DEFAULT 'scout'"),
-            ("think_mode",        "BOOLEAN DEFAULT FALSE"),
-            ("created_at",        "TIMESTAMP DEFAULT NOW()"),
-            ("scout_done_at",     "TIMESTAMP"),
-            ("harvest_done_at",   "TIMESTAMP"),
-            ("process_done_at",   "TIMESTAMP"),
-            ("synth_done_at",     "TIMESTAMP"),
-            ("sources_processed", "INTEGER DEFAULT 0"),
-            ("total_entities",    "INTEGER DEFAULT 0"),
-            ("total_facts",       "INTEGER DEFAULT 0"),
-            ("config",            "JSON"),
-            # Quality metrics (v2.1 — aitmpl research-orchestrator pattern)
-            ("quality_coverage",   "FLOAT"),
-            ("quality_depth",      "FLOAT"),
-            ("quality_confidence", "FLOAT"),
-            ("specificity_score",  "FLOAT"),
-        ]
-        for col, col_def in migrations:
-            if col not in existing_cols:
-                try:
-                    con.execute(f"ALTER TABLE hive_missions ADD COLUMN {col} {col_def}")
-                except Exception as e:
-                    log.info(f"[HIVE] Migration warning ({col}): {e}")
-
-        # ── Migrate quality_metrics columns (hive_events infrastructure) ──────
-        quality_cols = [
-            ("quality_coverage",   "FLOAT DEFAULT NULL"),
-            ("quality_depth",      "FLOAT DEFAULT NULL"),
-            ("quality_confidence", "FLOAT DEFAULT NULL"),
-        ]
-        for col, col_def in quality_cols:
-            if col not in existing_cols:
-                try:
-                    con.execute(f"ALTER TABLE hive_missions ADD COLUMN IF NOT EXISTS {col} {col_def}")
-                except Exception as e:
-                    log.info(f"[HIVE] Quality column migration ({col}): {e}")
-
-        con.commit()
-    finally:
-        con.close()
+    from behive.engine.db_helpers import _init_db as _idb
+    return _idb(con)
 
 
 def _get_mission(mission_id: str) -> dict | None:

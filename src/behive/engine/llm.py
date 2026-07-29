@@ -1,10 +1,14 @@
 """
 Unified LLM abstraction for BeHive engine.
 
-All pipeline stages call through this module. It respects:
-1. `behive config` settings (per-stage model routing)
-2. Environment variables: OPENAI_API_KEY, ANTHROPIC_API_KEY, AWS credentials
-3. Fallback chain: configured model → litellm → error with clear message
+BeHive is BYOK (Bring Your Own Key). All pipeline stages call through this module.
+It routes to whatever LLM the user configured — never assumes a specific provider.
+
+Resolution order:
+1. BEHIVE_MODEL env var (explicit: "anthropic/claude-sonnet-4-20250514", "openai/gpt-4o", etc.)
+2. Per-stage override: BEHIVE_MODEL_SCOUT, BEHIVE_MODEL_PROCESS, BEHIVE_MODEL_SYNTH
+3. Auto-detect from available API keys (first found wins)
+4. Clear error message with setup instructions
 
 Usage:
     from behive.engine.llm import complete, complete_async
@@ -19,91 +23,107 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-# ─── Configuration ──────────────────────────────────────────────────────────
+
+# ─── Model Resolution ────────────────────────────────────────────────────────
+
+# Suggested models per provider (used ONLY for auto-detection, never hardcoded)
+_PROVIDER_SUGGESTIONS = {
+    "anthropic": "anthropic/claude-sonnet-4-20250514",
+    "openai": "openai/gpt-4o",
+    "groq": "groq/llama-3.3-70b-versatile",
+    "together": "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "mistral": "mistral/mistral-large-latest",
+    "deepseek": "deepseek/deepseek-chat",
+    "bedrock": "bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0",
+    "local": "openai/local-model",
+}
+
+# API key env vars → provider name
+_KEY_TO_PROVIDER = {
+    "ANTHROPIC_API_KEY": "anthropic",
+    "OPENAI_API_KEY": "openai",
+    "GROQ_API_KEY": "groq",
+    "TOGETHER_API_KEY": "together",
+    "MISTRAL_API_KEY": "mistral",
+    "DEEPSEEK_API_KEY": "deepseek",
+}
+
 
 def _get_configured_model(stage: str) -> str:
-    """Get model for a pipeline stage from behive config."""
+    """Get model for a pipeline stage. Provider-agnostic resolution."""
+    
+    # 1. Per-stage override (e.g. BEHIVE_MODEL_SYNTH=openai/gpt-4o)
+    stage_model = os.environ.get(f"BEHIVE_MODEL_{stage.upper()}")
+    if stage_model:
+        return stage_model
+    
+    # 2. Global model setting
+    global_model = os.environ.get("BEHIVE_MODEL")
+    if global_model:
+        return global_model
+    
+    # 3. Try behive config file
     try:
         from behive.config import get_model_for_stage
-        return get_model_for_stage(stage)
+        configured = get_model_for_stage(stage)
+        if configured:
+            return configured
     except (ImportError, Exception):
         pass
     
-    # Fallback: check env vars
-    env_model = os.environ.get(f"BEHIVE_MODEL_{stage.upper()}")
-    if env_model:
-        return env_model
+    # 4. Auto-detect from available API keys (first found wins)
+    for env_var, provider in _KEY_TO_PROVIDER.items():
+        if os.environ.get(env_var):
+            model = _PROVIDER_SUGGESTIONS[provider]
+            log.debug(f"Auto-detected provider '{provider}' from {env_var}")
+            return model
     
-    # Global fallback
-    env_model = os.environ.get("BEHIVE_MODEL")
-    if env_model:
-        return env_model
-    
-    # Auto-detect from available API keys
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return "anthropic/claude-sonnet-4-20250514"
-    if os.environ.get("OPENAI_API_KEY"):
-        return "openai/gpt-4o"
-    if os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_PROFILE"):
-        return "bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0"
-    
-    # Check ~/.aws/credentials file
-    aws_creds = os.path.expanduser("~/.aws/credentials")
-    if os.path.exists(aws_creds):
-        return "bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0"
-    
-    # Check for AWS instance role (EC2/ECS)
-    try:
-        import boto3
-        session = boto3.Session()
-        creds = session.get_credentials()
-        if creds is not None:
-            return "bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0"
-    except Exception:
-        pass
-    
-    # Local LLM fallback
-    local_url = os.environ.get("BEHIVE_LOCAL_LLM_URL") or os.environ.get("BEHIVE_SGLANG_URL")
+    # 5. Check for local LLM endpoint
+    local_url = os.environ.get("BEHIVE_LLM_URL") or os.environ.get("BEHIVE_LOCAL_LLM_URL")
     if local_url:
-        return "openai/local"  # litellm uses openai compat for local
+        return _PROVIDER_SUGGESTIONS["local"]
+    
+    # 6. Check for AWS Bedrock (last resort — most complex setup)
+    if _has_aws_credentials():
+        return _PROVIDER_SUGGESTIONS["bedrock"]
     
     return ""
 
 
-def _check_keys() -> str:
-    """Return error message if no LLM credentials are configured."""
-    if any([
-        os.environ.get("ANTHROPIC_API_KEY"),
-        os.environ.get("OPENAI_API_KEY"),
-        os.environ.get("AWS_ACCESS_KEY_ID"),
-        os.environ.get("AWS_PROFILE"),
-        os.environ.get("BEHIVE_LOCAL_LLM_URL"),
-        os.environ.get("BEHIVE_SGLANG_URL"),
-    ]):
-        return ""
-    
-    # Check for AWS credentials file
-    aws_creds = os.path.expanduser("~/.aws/credentials")
-    if os.path.exists(aws_creds):
-        return ""
-    
-    # Check for AWS instance role (EC2/ECS)
+def _has_aws_credentials() -> bool:
+    """Check if AWS credentials are available (env, file, or instance role)."""
+    if os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_PROFILE"):
+        return True
+    if os.path.exists(os.path.expanduser("~/.aws/credentials")):
+        return True
     try:
         import boto3
         session = boto3.Session()
         creds = session.get_credentials()
-        if creds is not None:
-            return ""
+        return creds is not None
     except Exception:
-        pass
+        return False
+
+
+def _check_keys() -> str:
+    """Return error message if no LLM credentials are configured."""
+    model = _get_configured_model("process")
+    if model:
+        return ""
     
     return (
-        "No LLM API key configured. BeHive uses YOUR OWN LLM subscription.\n"
+        "No LLM configured. BeHive uses YOUR OWN LLM key (BYOK).\n\n"
         "Set one of:\n"
-        "  export ANTHROPIC_API_KEY=your-key-here\n"
-        "  export OPENAI_API_KEY=your-key-here\n"
-        "  export AWS_ACCESS_KEY_ID=... (for Bedrock)\n"
-        "  export BEHIVE_LOCAL_LLM_URL=http://localhost:11434/v1 (for Ollama/vLLM)\n"
+        "  export ANTHROPIC_API_KEY=sk-ant-...    (Anthropic Claude)\n"
+        "  export OPENAI_API_KEY=sk-...           (OpenAI GPT-4o)\n"
+        "  export GROQ_API_KEY=gsk_...            (Groq, free tier)\n"
+        "  export MISTRAL_API_KEY=...             (Mistral)\n"
+        "  export DEEPSEEK_API_KEY=...            (DeepSeek)\n"
+        "  export BEHIVE_LLM_URL=http://localhost:11434/v1  (Ollama/vLLM/SGLang)\n"
+        "  export AWS_PROFILE=default             (Bedrock)\n\n"
+        "Or set model explicitly:\n"
+        "  export BEHIVE_MODEL=anthropic/claude-sonnet-4-20250514\n\n"
+        "All 100+ litellm providers supported. See: https://docs.litellm.ai/docs/providers\n"
     )
 
 
@@ -118,11 +138,11 @@ def complete(
     json_mode: bool = False,
 ) -> str:
     """
-    Synchronous LLM completion. Routes to configured model for the given stage.
+    Synchronous LLM completion. Routes to user's configured model.
     
     Args:
         prompt: User message / main prompt
-        stage: Pipeline stage (scout, harvest, process, synth) — determines model
+        stage: Pipeline stage (scout, harvest, process, synth) — for per-stage model routing
         system: System prompt (optional)
         max_tokens: Max output tokens
         temperature: Sampling temperature
@@ -139,12 +159,12 @@ def complete(
     if not model:
         raise RuntimeError(
             f"No model configured for stage '{stage}'. "
-            "Run: behive config --preset balanced"
+            "Set BEHIVE_MODEL or an API key env var."
         )
     
     log.debug(f"LLM call: stage={stage} model={model} tokens={max_tokens}")
     
-    # Try litellm first (supports 100+ providers)
+    # litellm handles ALL providers (100+) — it's the primary path
     try:
         import litellm
         litellm.set_verbose = False
@@ -161,18 +181,14 @@ def complete(
             "temperature": temperature,
         }
         
-        # Handle local LLM URL
-        if model == "openai/local" or model.startswith("ollama"):
-            local_url = (
-                os.environ.get("BEHIVE_LOCAL_LLM_URL") or 
-                os.environ.get("BEHIVE_SGLANG_URL") or
-                "http://localhost:11434/v1"
-            )
+        # Local LLM: set api_base
+        local_url = os.environ.get("BEHIVE_LLM_URL") or os.environ.get("BEHIVE_LOCAL_LLM_URL")
+        if local_url and ("local" in model or "ollama" in model):
             kwargs["api_base"] = local_url
             kwargs["api_key"] = "not-needed"
-            # Strip prefix for local
-            if model == "openai/local":
-                kwargs["model"] = "local-model"
+            # For local models, strip provider prefix
+            model_name = model.split("/")[-1] if "/" in model else model
+            kwargs["model"] = f"openai/{model_name}"
         
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
@@ -182,11 +198,12 @@ def complete(
         
     except ImportError:
         log.warning("litellm not installed. Falling back to direct API calls.")
+        log.warning("Install litellm for 100+ provider support: pip install litellm")
     except Exception as e:
-        log.error(f"litellm call failed: {e}")
-        # Fall through to direct calls
+        log.error(f"LLM call failed (model={model}): {e}")
+        # Fall through to direct calls as last resort
     
-    # Fallback: direct API calls without litellm
+    # Fallback: direct API calls (supports Anthropic, OpenAI, Bedrock only)
     return _direct_call(model, prompt, system, max_tokens, temperature)
 
 
@@ -224,16 +241,12 @@ async def complete_async(
             "temperature": temperature,
         }
         
-        if model == "openai/local" or model.startswith("ollama"):
-            local_url = (
-                os.environ.get("BEHIVE_LOCAL_LLM_URL") or
-                os.environ.get("BEHIVE_SGLANG_URL") or
-                "http://localhost:11434/v1"
-            )
+        local_url = os.environ.get("BEHIVE_LLM_URL") or os.environ.get("BEHIVE_LOCAL_LLM_URL")
+        if local_url and ("local" in model or "ollama" in model):
             kwargs["api_base"] = local_url
             kwargs["api_key"] = "not-needed"
-            if model == "openai/local":
-                kwargs["model"] = "local-model"
+            model_name = model.split("/")[-1] if "/" in model else model
+            kwargs["model"] = f"openai/{model_name}"
         
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
@@ -242,11 +255,10 @@ async def complete_async(
         return response.choices[0].message.content or ""
         
     except ImportError:
-        # Sync fallback
         import asyncio
         return await asyncio.to_thread(complete, prompt, stage, system, max_tokens, temperature, json_mode)
     except Exception as e:
-        log.error(f"Async LLM call failed: {e}")
+        log.error(f"Async LLM call failed (model={model}): {e}")
         return ""
 
 
@@ -259,37 +271,31 @@ def _direct_call(
     max_tokens: int,
     temperature: float,
 ) -> str:
-    """Direct API call without litellm. Supports OpenAI, Anthropic, Bedrock."""
+    """Direct API call without litellm. Limited to Anthropic, OpenAI, Bedrock."""
     
-    # If model says anthropic but no API key → try Bedrock
-    if "anthropic" in model and "bedrock" not in model:
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            return _call_anthropic(prompt, system, max_tokens, temperature)
-        else:
-            # Fallback to Bedrock for Anthropic models
-            return _call_bedrock(model, prompt, system, max_tokens, temperature)
+    if "anthropic" in model and os.environ.get("ANTHROPIC_API_KEY"):
+        return _call_anthropic(model, prompt, system, max_tokens, temperature)
     elif "openai" in model or "gpt" in model:
         return _call_openai(model, prompt, system, max_tokens, temperature)
-    elif "bedrock" in model or os.environ.get("AWS_ACCESS_KEY_ID"):
+    elif "bedrock" in model or _has_aws_credentials():
         return _call_bedrock(model, prompt, system, max_tokens, temperature)
     else:
-        # Last resort — try Bedrock (instance role)
-        try:
-            return _call_bedrock(model, prompt, system, max_tokens, temperature)
-        except Exception:
-            raise RuntimeError(
-                f"Cannot call model '{model}' without litellm installed. "
-                "Install: pip install litellm"
-            )
+        raise RuntimeError(
+            f"Cannot call model '{model}' without litellm. "
+            "Install: pip install litellm"
+        )
 
 
-def _call_anthropic(prompt: str, system: str, max_tokens: int, temperature: float) -> str:
+def _call_anthropic(model: str, prompt: str, system: str, max_tokens: int, temperature: float) -> str:
     """Direct Anthropic API call."""
     import httpx
     
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY not set")
+    
+    # Extract model name (strip provider prefix)
+    model_name = model.split("/")[-1] if "/" in model else model
     
     response = httpx.post(
         "https://api.anthropic.com/v1/messages",
@@ -299,7 +305,7 @@ def _call_anthropic(prompt: str, system: str, max_tokens: int, temperature: floa
             "content-type": "application/json",
         },
         json={
-            "model": "claude-sonnet-4-20250514",
+            "model": model_name,
             "max_tokens": max_tokens,
             "temperature": temperature,
             "system": system or "You are a research assistant.",
@@ -320,10 +326,8 @@ def _call_openai(model: str, prompt: str, system: str, max_tokens: int, temperat
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not set")
     
-    # Strip provider prefix
+    # Extract model name
     model_name = model.split("/")[-1] if "/" in model else model
-    if model_name == "local":
-        model_name = "gpt-4o"
     
     messages = []
     if system:
@@ -353,24 +357,15 @@ def _call_bedrock(model: str, prompt: str, system: str, max_tokens: int, tempera
     """Direct AWS Bedrock call."""
     import boto3
     
-    # Map model names to Bedrock model IDs
     model_id = model.replace("bedrock/", "") if model.startswith("bedrock/") else model
     
-    # Convert anthropic/ or plain model names to Bedrock format
-    BEDROCK_MAP = {
-        "anthropic/claude-sonnet-4-20250514": "us.anthropic.claude-sonnet-4-20250514-v1:0",
-        "anthropic/claude-haiku-4-5-20251001": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        "anthropic/claude-3-5-haiku-20241022": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        "anthropic/claude-3-5-sonnet-20241022": "us.anthropic.claude-sonnet-4-20250514-v1:0",
-        "claude-sonnet-4-20250514": "us.anthropic.claude-sonnet-4-20250514-v1:0",
-        "claude-haiku-4-5-20251001": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    }
-    model_id = BEDROCK_MAP.get(model_id, model_id)
+    # If model_id still has provider prefix or looks wrong, use inference profile
+    if "/" in model_id and not model_id.startswith(("us.", "eu.", "global.")):
+        # e.g. "anthropic/claude-sonnet-4-20250514" → need Bedrock inference profile
+        model_id = f"us.{model_id.replace('/', '.')}-v1:0"
     
-    if not model_id or "/" in model_id:
-        model_id = "us.anthropic.claude-sonnet-4-20250514-v1:0"
-    
-    client = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    client = boto3.client("bedrock-runtime", region_name=region)
     
     body = json.dumps({
         "anthropic_version": "bedrock-2023-05-31",
