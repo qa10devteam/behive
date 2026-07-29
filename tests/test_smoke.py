@@ -18,7 +18,7 @@ def test_import_behive():
     """behive package imports without error."""
     import behive
     assert hasattr(behive, "__version__")
-    assert behive.__version__ == "0.2.1"
+    assert behive.__version__ == "0.2.2"
 
 
 def test_import_client():
@@ -78,7 +78,7 @@ def test_cli_version():
         timeout=10,
     )
     assert result.returncode == 0
-    assert "0.2.1" in result.stdout
+    assert "0.2.2" in result.stdout
 
 
 def test_cli_help():
