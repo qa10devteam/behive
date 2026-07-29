@@ -57,6 +57,15 @@ def main():
     # ─── version ──────────────────────────────────────────────────────────
     sub.add_parser("version", help="Show version")
 
+    # ─── db ────────────────────────────────────────────────────────────────
+    db_p = sub.add_parser("db", help="Database management")
+    db_sub = db_p.add_subparsers(dest="db_action")
+    db_sub.add_parser("init", help="Initialize database schema")
+
+    # ─── missions ──────────────────────────────────────────────────────────
+    missions_p = sub.add_parser("missions", help="List recent research missions")
+    missions_p.add_argument("--limit", type=int, default=10, help="Number of missions to show")
+
     args = parser.parse_args()
 
     if args.command == "serve":
@@ -67,6 +76,10 @@ def main():
         cmd_status(args)
     elif args.command == "config":
         cmd_config(args)
+    elif args.command == "db":
+        cmd_db(args)
+    elif args.command == "missions":
+        cmd_missions(args)
     elif args.command == "version":
         from behive import __version__
         print(f"behive {__version__}")
@@ -128,7 +141,7 @@ def cmd_serve(args):
 
     print(f"""
 \033[33m  ╔══════════════════════════════════════╗
-  ║   🐝 BeHive Research Engine v0.2.0   ║
+  ║   🐝 BeHive Research Engine v0.3.0   ║
   ╚══════════════════════════════════════╝\033[0m
 
   API:  http://{args.host}:{args.port}
@@ -280,6 +293,133 @@ def cmd_status(args):
         print(f"\033[31m✗ Cannot reach BeHive at {args.api}\033[0m")
         print(f"  Error: {e}")
         print(f"  Run: behive serve")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DB — database management
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cmd_db(args):
+    """Database management commands."""
+    if args.db_action == "init":
+        _db_init()
+    else:
+        print("Usage: behive db init")
+        print("  Initialize the BeHive database schema.")
+
+
+def _db_init():
+    """Create all tables in PostgreSQL from bundled schema."""
+    import importlib.resources
+    import psycopg2
+
+    # Find init-db.sql bundled with the package
+    sql_path = None
+    try:
+        # Python 3.9+
+        ref = importlib.resources.files("behive").joinpath("init-db.sql")
+        sql_content = ref.read_text(encoding="utf-8")
+    except (AttributeError, FileNotFoundError):
+        # Fallback: look relative to this file
+        this_dir = os.path.dirname(os.path.abspath(__file__))
+        candidate = os.path.join(this_dir, "init-db.sql")
+        if not os.path.exists(candidate):
+            # Try docker/ directory (development)
+            candidate = os.path.join(this_dir, "..", "..", "docker", "init-db.sql")
+        if os.path.exists(candidate):
+            with open(candidate) as f:
+                sql_content = f.read()
+        else:
+            print("\033[31m✗ Cannot find init-db.sql\033[0m")
+            print("  Expected at: src/behive/init-db.sql or docker/init-db.sql")
+            sys.exit(1)
+
+    # Connect to database
+    db_url = os.environ.get("BEHIVE_DB_URL") or os.environ.get("DATABASE_URL")
+    if not db_url:
+        user = os.environ.get("HIVE_PG_USER", "behive")
+        password = os.environ.get("HIVE_PG_PASSWORD", "behive")
+        host = os.environ.get("HIVE_PG_HOST", "localhost")
+        port = os.environ.get("HIVE_PG_PORT", "5432")
+        db = os.environ.get("HIVE_PG_DATABASE", "behive")
+        db_url = f"postgresql://{user}:***@{host}:{port}/{db}"
+
+    print(f"  Connecting to: {db_url.split('@')[-1] if '@' in db_url else db_url}")
+
+    try:
+        conn = psycopg2.connect(db_url)
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute(sql_content)
+        # Count tables created
+        cur.execute("""
+            SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+        """)
+        table_count = cur.fetchone()[0]
+        conn.close()
+        print(f"\033[32m✓ Database initialized — {table_count} tables ready\033[0m")
+    except psycopg2.OperationalError as e:
+        print(f"\033[31m✗ Cannot connect to database\033[0m")
+        print(f"  {e}")
+        print(f"\n  Set BEHIVE_DB_URL or HIVE_PG_* environment variables.")
+        print(f"  Example: export BEHIVE_DB_URL=postgresql://user:***@localhost:5432/behive")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\033[31m✗ Schema error: {e}\033[0m")
+        sys.exit(1)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MISSIONS — list recent missions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cmd_missions(args):
+    """List recent research missions from the database."""
+    import psycopg2
+
+    db_url = os.environ.get("BEHIVE_DB_URL") or os.environ.get("DATABASE_URL")
+    if not db_url:
+        user = os.environ.get("HIVE_PG_USER", "behive")
+        password = os.environ.get("HIVE_PG_PASSWORD", "behive")
+        host = os.environ.get("HIVE_PG_HOST", "localhost")
+        port = os.environ.get("HIVE_PG_PORT", "5432")
+        db = os.environ.get("HIVE_PG_DATABASE", "behive")
+        db_url = f"postgresql://{user}:***@{host}:{port}/{db}"
+
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT m.id, m.topic, m.status, m.phase, m.created_at,
+                   COALESCE(c.cnt, 0), COALESCE(c.avg_q, 0)
+            FROM hive_missions m
+            LEFT JOIN (
+                SELECT mission_id, COUNT(*) as cnt, AVG(quality_score) as avg_q
+                FROM hive_claims WHERE is_garbage = false OR is_garbage IS NULL
+                GROUP BY mission_id
+            ) c ON c.mission_id = m.id
+            ORDER BY m.created_at DESC
+            LIMIT %s
+        """, (args.limit,))
+        rows = cur.fetchall()
+        conn.close()
+
+        if not rows:
+            print("  No missions found. Run: behive research \"your topic\"")
+            return
+
+        print(f"\033[33m🐝 Recent Missions ({len(rows)})\033[0m\n")
+        print(f"  {'ID':<28} {'Status':<8} {'Claims':>6} {'Quality':>8}  Topic")
+        print(f"  {'─'*28} {'─'*8} {'─'*6} {'─'*8}  {'─'*30}")
+        for row in rows:
+            mid, topic, status, phase, created, claims, avg_q = row
+            status_icon = {"done": "✓", "running": "⟳", "error": "✗", "queued": "◌"}.get(status, "?")
+            topic_short = (topic or "")[:40]
+            print(f"  {mid:<28} {status_icon} {status:<6} {claims:>6} {avg_q:>7.3f}  {topic_short}")
+    except Exception as e:
+        print(f"\033[31m✗ Cannot connect to database: {e}\033[0m")
+        print(f"  Set BEHIVE_DB_URL or run: behive db init")
 
 
 if __name__ == "__main__":

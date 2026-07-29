@@ -1,17 +1,19 @@
 """BeHive API Server — FastAPI app for research missions."""
 
 import os
+import re
 import time
 import json
 import hashlib
-from collections import defaultdict
+import asyncio
+from collections import defaultdict, Counter
 from contextlib import asynccontextmanager
+from typing import Optional, AsyncGenerator
 
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from typing import Optional
 
 # Install legacy import shims
 try:
@@ -25,10 +27,17 @@ except ImportError:
 # ─── DB connection ────────────────────────────────────────────────────────────
 
 def get_db_url():
-    return os.environ.get(
-        "DATABASE_URL",
-        os.environ.get("BEHIVE_DB_URL", "postgresql://localhost:5432/behive")
-    )
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
+    if os.environ.get("BEHIVE_DB_URL"):
+        return os.environ["BEHIVE_DB_URL"]
+    # Construct from individual vars
+    user = os.environ.get("HIVE_PG_USER", "behive")
+    password = os.environ.get("HIVE_PG_PASSWORD", "behive")
+    host = os.environ.get("HIVE_PG_HOST", "localhost")
+    port = os.environ.get("HIVE_PG_PORT", "5432")
+    db = os.environ.get("HIVE_PG_DATABASE", "behive")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
 def get_db():
@@ -36,57 +45,43 @@ def get_db():
     return psycopg2.connect(get_db_url())
 
 
-# ─── Security: Rate Limiter ──────────────────────────────────────────────────
+# ─── Auth ─────────────────────────────────────────────────────────────────────
 
-class RateLimiter:
-    """Simple in-memory rate limiter (per-IP, sliding window)."""
-    
-    def __init__(self, max_requests: int = 60, window_seconds: int = 60):
-        self.max_requests = max_requests
-        self.window = window_seconds
-        self.requests: dict[str, list[float]] = defaultdict(list)
-    
+def verify_auth(request: Request):
+    """Check API key if BEHIVE_API_KEY is set."""
+    api_key = os.environ.get("BEHIVE_API_KEY")
+    if not api_key:
+        return  # No auth required
+    auth = request.headers.get("Authorization", "")
+    if auth == f"Bearer {api_key}":
+        return
+    # Also check X-API-Key header
+    if request.headers.get("X-API-Key") == api_key:
+        return
+    raise HTTPException(401, "Invalid or missing API key")
+
+
+# ─── Rate Limiting ────────────────────────────────────────────────────────────
+
+class TokenBucket:
+    def __init__(self, rate: int, per: int = 60):
+        self.rate = rate
+        self.per = per
+        self.buckets: dict[str, list] = defaultdict(list)
+
     def is_allowed(self, key: str) -> bool:
         now = time.time()
-        window_start = now - self.window
-        # Clean old entries
-        self.requests[key] = [t for t in self.requests[key] if t > window_start]
-        if len(self.requests[key]) >= self.max_requests:
+        bucket = self.buckets[key]
+        # Remove old entries
+        self.buckets[key] = [t for t in bucket if now - t < self.per]
+        if len(self.buckets[key]) >= self.rate:
             return False
-        self.requests[key].append(now)
+        self.buckets[key].append(now)
         return True
 
 
-# Global rate limiters
-_rate_limiter = RateLimiter(max_requests=60, window_seconds=60)  # 60 req/min general
-_research_limiter = RateLimiter(max_requests=5, window_seconds=60)  # 5 research/min
-
-
-# ─── Security: API Key Auth ──────────────────────────────────────────────────
-
-def get_api_key() -> Optional[str]:
-    """Get configured API key (if any). None = open access."""
-    return os.environ.get("BEHIVE_API_KEY")
-
-
-async def verify_auth(request: Request):
-    """Verify API key if BEHIVE_API_KEY is set."""
-    api_key = get_api_key()
-    if not api_key:
-        return  # No key configured = open access (self-hosted default)
-    
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        if token == api_key:
-            return
-    
-    # Also check X-API-Key header
-    x_key = request.headers.get("X-API-Key", "")
-    if x_key == api_key:
-        return
-    
-    raise HTTPException(status_code=401, detail="Invalid or missing API key")
+_rate_limiter = TokenBucket(rate=60, per=60)
+_research_limiter = TokenBucket(rate=5, per=60)
 
 
 # ─── App ──────────────────────────────────────────────────────────────────────
@@ -101,7 +96,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BeHive Research Engine",
     description="Deep research with structured knowledge extraction",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -114,39 +109,42 @@ app.add_middleware(
 )
 
 
+# ─── SSE Event Bus ────────────────────────────────────────────────────────────
+
+_mission_events: dict[str, list[dict]] = defaultdict(list)
+_mission_subscribers: dict[str, list[asyncio.Queue]] = defaultdict(list)
+
+
+def _emit_event(mission_id: str, event: str, data: dict):
+    """Push SSE event to store and notify subscribers."""
+    entry = {"event": event, "data": data, "ts": time.time()}
+    events = _mission_events[mission_id]
+    events.append(entry)
+    if len(events) > 500:
+        _mission_events[mission_id] = events[-500:]
+    for q in _mission_subscribers.get(mission_id, []):
+        try:
+            q.put_nowait(entry)
+        except asyncio.QueueFull:
+            pass
+
+
+# ─── Security Middleware ──────────────────────────────────────────────────────
+
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
-    """Rate limiting + security headers."""
-    # Get client IP
     client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
-    
-    # Rate limit check
     if not _rate_limiter.is_allowed(client_ip):
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Too many requests. Max 60/min."},
-            headers={"Retry-After": "60"},
-        )
-    
-    # Stricter rate limit for research endpoints
+        return JSONResponse(status_code=429, content={"detail": "Too many requests. Max 60/min."}, headers={"Retry-After": "60"})
     if request.url.path == "/research" and request.method == "POST":
         if not _research_limiter.is_allowed(client_ip):
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "Research rate limit: max 5/min."},
-                headers={"Retry-After": "60"},
-            )
-    
+            return JSONResponse(status_code=429, content={"detail": "Research rate limit: max 5/min."}, headers={"Retry-After": "60"})
     response = await call_next(request)
-    
-    # Security headers
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    
     return response
 
 
@@ -161,14 +159,46 @@ class ResearchRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = "0.2.0"
+    version: str = "0.3.0"
     missions_total: int = 0
     claims_total: int = 0
     avg_quality: float = 0.0
     db: str = ""
 
 
-# ─── Endpoints ────────────────────────────────────────────────────────────────
+# ─── Entity Extraction (lightweight NLP) ─────────────────────────────────────
+
+_ENTITY_PATTERN = re.compile(
+    r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+(?:Inc|Corp|Ltd|LLC|AG|SA|GmbH|Co|plc)\.?)?)\b'
+    r'|'
+    r'\b([A-Z]{2,}(?:\s+[A-Z]{2,})*)\b'  # ALL CAPS (acronyms like NVIDIA, EU, AI)
+    r'|'
+    r'\$[\d,.]+\s*(?:billion|million|trillion|B|M|T)\b'  # Money amounts
+)
+
+_STOP_ENTITIES = {
+    "The", "This", "That", "These", "Those", "However", "Although",
+    "According", "Furthermore", "Additionally", "Meanwhile", "Moreover",
+    "January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December",
+}
+
+
+def extract_entities(text: str) -> list[str]:
+    """Extract entity names from claim text."""
+    entities = set()
+    for match in _ENTITY_PATTERN.finditer(text):
+        entity = match.group(0).strip()
+        if entity and len(entity) > 1 and entity not in _STOP_ENTITIES:
+            entities.add(entity)
+    return sorted(entities)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── 1. Health ────────────────────────────────────────────────────────────────
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
@@ -177,34 +207,29 @@ async def health():
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM hive_missions")
         missions = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*), AVG(quality_score) FROM hive_claims WHERE is_garbage = false")
+        cur.execute("SELECT COUNT(*), COALESCE(AVG(quality_score), 0) FROM hive_claims WHERE is_garbage = false")
         row = cur.fetchone()
         claims, avg_q = row[0], row[1] or 0
         conn.close()
         return HealthResponse(
             missions_total=missions,
             claims_total=claims,
-            avg_quality=round(avg_q, 4),
-            db=get_db_url().split("@")[-1] if "@" in get_db_url() else get_db_url(),
+            avg_quality=round(float(avg_q), 4),
+            db=get_db_url().split("@")[-1] if "@" in get_db_url() else "connected",
         )
     except Exception as e:
-        return HealthResponse(status="degraded", db=str(e))
+        return HealthResponse(status="degraded", db=str(e)[:200])
 
+
+# ─── 2. Start Research ────────────────────────────────────────────────────────
 
 @app.post("/research", dependencies=[Depends(verify_auth)])
 async def start_research(req: ResearchRequest):
     """Start a new research mission. Returns job_id for polling."""
-    import hashlib
-    import time
-    from asyncio import get_event_loop
-
-    # Generate mission ID
-    slug = req.query[:40].lower().replace(" ", "_")
     ts = str(int(time.time()))
     h = hashlib.md5(f"{req.query}{ts}".encode()).hexdigest()[:6]
     mission_id = f"hive_{ts}_{h}"
 
-    # Insert mission record
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -218,148 +243,45 @@ async def start_research(req: ResearchRequest):
     except Exception as e:
         raise HTTPException(500, f"DB error: {e}")
 
-    # Launch pipeline in background
-    import asyncio
     asyncio.create_task(_run_pipeline(mission_id, req.query, req.depth))
 
     return {
-        "mission_id": mission_id,
+        "job_id": mission_id,
         "status": "running",
         "topic": req.query,
         "depth": req.depth,
-        "message": f"Research started. Poll GET /research/{mission_id}/status for progress.",
+        "message": f"Research started. Poll GET /research/{mission_id}/status or stream GET /research/{mission_id}/events",
     }
 
 
-async def _run_pipeline(mission_id: str, topic: str, depth: int):
-    """Run the full research pipeline in background."""
-    import subprocess
-    import sys
-
-    try:
-        # Update status to running
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE hive_missions SET status = 'running', phase = 'scout' WHERE id = %s",
-            (mission_id,)
-        )
-        conn.commit()
-        conn.close()
-
-        # Run orchestrator as subprocess (isolates heavy pipeline)
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "behive.engine",
-            "run", topic,
-            "--mission-id", mission_id,
-            "--depth", str(depth),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "BEHIVE_MISSION_ID": mission_id},
-        )
-
-        stdout, stderr = await proc.communicate()
-
-        # Update final status
-        conn = get_db()
-        cur = conn.cursor()
-        if proc.returncode == 0:
-            cur.execute(
-                "UPDATE hive_missions SET status = 'done', phase = 'done' WHERE id = %s",
-                (mission_id,)
-            )
-        else:
-            error_msg = stderr.decode()[-500:] if stderr else "Unknown error"
-            cur.execute(
-                "UPDATE hive_missions SET status = 'error', phase = 'error' WHERE id = %s",
-                (mission_id,)
-            )
-        conn.commit()
-        conn.close()
-
-    except Exception as e:
-        try:
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute(
-                "UPDATE hive_missions SET status = 'error', phase = 'error' WHERE id = %s",
-                (mission_id,)
-            )
-            conn.commit()
-            conn.close()
-        except Exception:
-            pass
-
+# ─── 3. Research Status ──────────────────────────────────────────────────────
 
 @app.get("/research/{mission_id}/status")
 async def research_status(mission_id: str):
-    """Get mission status."""
+    """Get mission status and progress."""
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute(
-            "SELECT status, phase FROM hive_missions WHERE id = %s",
-            (mission_id,)
-        )
-        row = cur.fetchone()
-        conn.close()
-        if not row:
-            raise HTTPException(404, f"Mission {mission_id} not found")
-        return {"mission_id": mission_id, "status": row[0], "phase": row[1]}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-@app.get("/research/{mission_id}")
-async def get_research(mission_id: str):
-    """Get completed research results."""
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-
-        # Mission info
-        cur.execute(
-            "SELECT topic, status, synthesis FROM hive_missions WHERE id = %s",
-            (mission_id,)
-        )
+        cur.execute("SELECT status, phase, topic FROM hive_missions WHERE id = %s", (mission_id,))
         row = cur.fetchone()
         if not row:
+            conn.close()
             raise HTTPException(404, f"Mission {mission_id} not found")
-
-        topic, status, report = row
-
-        # Claims
-        cur.execute("""
-            SELECT claim, confidence, quality_score, source_url, claim_type
-            FROM hive_claims
-            WHERE mission_id = %s AND (is_garbage = false OR is_garbage IS NULL)
-            ORDER BY quality_score DESC
-            LIMIT 500
-        """, (mission_id,))
-        claims = [
-            {
-                "text": r[0], "confidence": r[1], "quality_score": r[2],
-                "source_url": r[3], "type": r[4]
-            }
-            for r in cur.fetchall()
-        ]
-
+        status, phase, topic = row
+        # Get current claims count
+        cur.execute(
+            "SELECT COUNT(*), COALESCE(AVG(quality_score), 0) FROM hive_claims WHERE mission_id = %s AND (is_garbage = false OR is_garbage IS NULL)",
+            (mission_id,)
+        )
+        crow = cur.fetchone()
         conn.close()
-
-        avg_q = sum(c["quality_score"] or 0 for c in claims) / max(1, len(claims))
-
         return {
             "mission_id": mission_id,
-            "topic": topic,
             "status": status,
-            "report": report or "",
-            "claims": claims,
-            "metrics": {
-                "total_claims": len(claims),
-                "avg_quality": round(avg_q, 4),
-            }
+            "phase": phase,
+            "topic": topic,
+            "claims_so_far": crow[0] or 0,
+            "avg_quality": round(float(crow[1] or 0), 4),
         }
     except HTTPException:
         raise
@@ -367,24 +289,454 @@ async def get_research(mission_id: str):
         raise HTTPException(500, str(e))
 
 
+# ─── 4. SSE Events Stream ────────────────────────────────────────────────────
+
+@app.get("/research/{mission_id}/events")
+async def research_events(mission_id: str):
+    """Server-Sent Events stream for a research mission."""
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        _mission_subscribers[mission_id].append(queue)
+        try:
+            # Send any existing events first (replay)
+            for entry in _mission_events.get(mission_id, []):
+                yield f"event: {entry['event']}\ndata: {json.dumps(entry['data'])}\n\n"
+
+            # Stream new events
+            while True:
+                try:
+                    entry = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"event: {entry['event']}\ndata: {json.dumps(entry['data'])}\n\n"
+                    if entry["event"] in ("done", "error"):
+                        break
+                except asyncio.TimeoutError:
+                    # Send keepalive
+                    yield f": keepalive\n\n"
+        finally:
+            _mission_subscribers[mission_id].remove(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+# ─── 5. Get Full Research Results ─────────────────────────────────────────────
+
+@app.get("/research/{mission_id}")
+async def get_research(mission_id: str):
+    """Get completed research results with claims."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT topic, status, phase, synthesis FROM hive_missions WHERE id = %s", (mission_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(404, f"Mission {mission_id} not found")
+        topic, status, phase, report = row
+        cur.execute("""
+            SELECT claim, confidence, quality_score, source_url, claim_type
+            FROM hive_claims
+            WHERE mission_id = %s AND (is_garbage = false OR is_garbage IS NULL)
+            ORDER BY quality_score DESC LIMIT 500
+        """, (mission_id,))
+        claims = [
+            {"text": r[0], "confidence": r[1], "quality_score": r[2], "source_url": r[3], "type": r[4]}
+            for r in cur.fetchall()
+        ]
+        conn.close()
+        avg_q = sum(c["quality_score"] or 0 for c in claims) / max(1, len(claims))
+        return {
+            "mission_id": mission_id,
+            "topic": topic,
+            "status": status,
+            "phase": phase,
+            "report": report or "",
+            "claims": claims,
+            "metrics": {"total_claims": len(claims), "avg_quality": round(avg_q, 4)},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ─── 6. Get Report Only ──────────────────────────────────────────────────────
+
+@app.get("/research/{mission_id}/report")
+async def get_report(mission_id: str):
+    """Get synthesized report for a completed mission (no claims array)."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT topic, status, synthesis FROM hive_missions WHERE id = %s", (mission_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(404, f"Mission {mission_id} not found")
+        topic, status, synthesis = row
+        cur.execute(
+            "SELECT COUNT(*), COALESCE(AVG(quality_score), 0) FROM hive_claims WHERE mission_id = %s AND (is_garbage = false OR is_garbage IS NULL)",
+            (mission_id,)
+        )
+        crow = cur.fetchone()
+        conn.close()
+        if status != "done":
+            raise HTTPException(202, f"Mission still in progress (status={status})")
+        return {
+            "mission_id": mission_id,
+            "topic": topic,
+            "synthesis": synthesis or "",
+            "claims_count": crow[0] or 0,
+            "avg_quality": round(float(crow[1] or 0), 4),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ─── 7. Search Claims (primary path) ─────────────────────────────────────────
+
 @app.get("/claims/search")
-async def search_claims(q: str, limit: int = 20):
-    """Search claims across all missions."""
+async def search_claims(q: str, limit: int = Query(20, ge=1, le=100)):
+    """Full-text search across all mission claims."""
     try:
         conn = get_db()
         cur = conn.cursor()
         cur.execute("""
-            SELECT claim, quality_score, source_url, mission_id
+            SELECT claim, quality_score, source_url, mission_id, claim_type, confidence
             FROM hive_claims
             WHERE claim ILIKE %s AND (is_garbage = false OR is_garbage IS NULL)
             ORDER BY quality_score DESC
             LIMIT %s
         """, (f"%{q}%", limit))
         results = [
-            {"text": r[0], "quality_score": r[1], "source_url": r[2], "mission_id": r[3]}
+            {"text": r[0], "quality_score": r[1], "source_url": r[2], "mission_id": r[3], "type": r[4], "confidence": r[5]}
             for r in cur.fetchall()
         ]
         conn.close()
         return {"query": q, "results": results, "total": len(results)}
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# ─── 8. Search alias ─────────────────────────────────────────────────────────
+
+@app.get("/search")
+async def search_alias(query: str = Query(..., alias="query"), limit: int = Query(20, ge=1, le=100)):
+    """Alias for /claims/search."""
+    return await search_claims(q=query, limit=limit)
+
+
+# ─── 9. List Missions ────────────────────────────────────────────────────────
+
+@app.get("/missions")
+async def list_missions(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
+    """List all research missions, newest first."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT m.id, m.topic, m.status, m.phase, m.created_at,
+                   COALESCE(c.cnt, 0) as claims_count,
+                   COALESCE(c.avg_q, 0) as avg_quality
+            FROM hive_missions m
+            LEFT JOIN (
+                SELECT mission_id, COUNT(*) as cnt, AVG(quality_score) as avg_q
+                FROM hive_claims WHERE is_garbage = false OR is_garbage IS NULL
+                GROUP BY mission_id
+            ) c ON c.mission_id = m.id
+            ORDER BY m.created_at DESC
+            LIMIT %s OFFSET %s
+        """, (limit, offset))
+        missions = [
+            {
+                "id": r[0], "topic": r[1], "status": r[2], "phase": r[3],
+                "created_at": r[4].isoformat() if r[4] else None,
+                "claims_count": r[5], "avg_quality": round(float(r[6] or 0), 4),
+            }
+            for r in cur.fetchall()
+        ]
+        cur.execute("SELECT COUNT(*) FROM hive_missions")
+        total = cur.fetchone()[0]
+        conn.close()
+        return {"missions": missions, "total": total, "limit": limit, "offset": offset}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ─── 10. Intelligence: Entity ────────────────────────────────────────────────
+
+@app.get("/intelligence/entity/{name}")
+async def intelligence_entity(name: str, limit: int = Query(50, ge=1, le=200)):
+    """Get intelligence about a specific entity — claims mentioning it, co-occurring entities."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        # Find claims mentioning this entity (case-insensitive)
+        cur.execute("""
+            SELECT claim, quality_score, source_url, mission_id, claim_type, confidence
+            FROM hive_claims
+            WHERE claim ILIKE %s AND (is_garbage = false OR is_garbage IS NULL)
+            ORDER BY quality_score DESC
+            LIMIT %s
+        """, (f"%{name}%", limit))
+        claims = [
+            {"text": r[0], "quality_score": r[1], "source_url": r[2], "mission_id": r[3], "type": r[4], "confidence": r[5]}
+            for r in cur.fetchall()
+        ]
+        conn.close()
+
+        # Extract co-occurring entities from these claims
+        co_entities: Counter = Counter()
+        for claim in claims:
+            entities = extract_entities(claim["text"])
+            for e in entities:
+                if e.lower() != name.lower():
+                    co_entities[e] += 1
+
+        top_related = [{"entity": e, "co_occurrences": c} for e, c in co_entities.most_common(20)]
+        avg_q = sum(c["quality_score"] or 0 for c in claims) / max(1, len(claims))
+
+        return {
+            "entity": name,
+            "mentions": len(claims),
+            "avg_quality": round(avg_q, 4),
+            "related_entities": top_related,
+            "claims": claims[:30],  # Top 30 by quality
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ─── 11. Intelligence: Network ───────────────────────────────────────────────
+
+@app.get("/intelligence/network/{name}")
+async def intelligence_network(name: str, depth: int = Query(2, ge=1, le=3)):
+    """Entity relationship network — find co-occurring entities (N-hop neighborhood)."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        nodes = set()
+        edges = []
+        nodes.add(name)
+
+        # Hop 1: entities co-occurring with target
+        cur.execute("""
+            SELECT claim FROM hive_claims
+            WHERE claim ILIKE %s AND (is_garbage = false OR is_garbage IS NULL)
+            ORDER BY quality_score DESC LIMIT 100
+        """, (f"%{name}%",))
+        hop1_claims = [r[0] for r in cur.fetchall()]
+
+        hop1_entities: Counter = Counter()
+        for claim_text in hop1_claims:
+            for e in extract_entities(claim_text):
+                if e.lower() != name.lower():
+                    hop1_entities[e] += 1
+
+        # Add hop1 edges
+        for entity, weight in hop1_entities.most_common(15):
+            nodes.add(entity)
+            edges.append({"source": name, "target": entity, "weight": weight})
+
+        # Hop 2 (if depth >= 2): for each hop1 entity, find THEIR co-occurring entities
+        if depth >= 2:
+            for hop1_entity, _ in hop1_entities.most_common(8):  # Limit to top 8 for performance
+                cur.execute("""
+                    SELECT claim FROM hive_claims
+                    WHERE claim ILIKE %s AND (is_garbage = false OR is_garbage IS NULL)
+                    ORDER BY quality_score DESC LIMIT 50
+                """, (f"%{hop1_entity}%",))
+                hop2_claims = [r[0] for r in cur.fetchall()]
+                hop2_entities: Counter = Counter()
+                for claim_text in hop2_claims:
+                    for e in extract_entities(claim_text):
+                        if e.lower() != hop1_entity.lower() and e.lower() != name.lower():
+                            hop2_entities[e] += 1
+                for entity, weight in hop2_entities.most_common(5):
+                    nodes.add(entity)
+                    edges.append({"source": hop1_entity, "target": entity, "weight": weight})
+
+        conn.close()
+        return {
+            "center": name,
+            "depth": depth,
+            "nodes": sorted(nodes),
+            "edges": edges,
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ─── 12. Intelligence: Stats ─────────────────────────────────────────────────
+
+@app.get("/intelligence/stats")
+async def intelligence_stats():
+    """System-wide intelligence statistics."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        # Missions
+        cur.execute("SELECT COUNT(*) FROM hive_missions")
+        total_missions = cur.fetchone()[0]
+        cur.execute("SELECT status, COUNT(*) FROM hive_missions GROUP BY status")
+        missions_by_status = {r[0]: r[1] for r in cur.fetchall()}
+
+        # Claims
+        cur.execute("SELECT COUNT(*), COALESCE(AVG(quality_score), 0) FROM hive_claims WHERE is_garbage = false OR is_garbage IS NULL")
+        row = cur.fetchone()
+        total_claims, avg_quality = row[0], float(row[1] or 0)
+
+        cur.execute("""
+            SELECT claim_type, COUNT(*) FROM hive_claims
+            WHERE is_garbage = false OR is_garbage IS NULL
+            GROUP BY claim_type ORDER BY COUNT(*) DESC LIMIT 20
+        """)
+        claims_by_type = {r[0] or "unknown": r[1] for r in cur.fetchall()}
+
+        # Top entities (sample recent claims, extract entities)
+        cur.execute("""
+            SELECT claim FROM hive_claims
+            WHERE is_garbage = false OR is_garbage IS NULL
+            ORDER BY quality_score DESC LIMIT 500
+        """)
+        entity_counter: Counter = Counter()
+        for (claim_text,) in cur.fetchall():
+            for e in extract_entities(claim_text):
+                entity_counter[e] += 1
+
+        top_entities = [{"entity": e, "mentions": c} for e, c in entity_counter.most_common(30)]
+
+        # Quality distribution
+        cur.execute("""
+            SELECT
+                COUNT(*) FILTER (WHERE quality_score >= 0.90) as excellent,
+                COUNT(*) FILTER (WHERE quality_score >= 0.82 AND quality_score < 0.90) as great,
+                COUNT(*) FILTER (WHERE quality_score >= 0.75 AND quality_score < 0.82) as good,
+                COUNT(*) FILTER (WHERE quality_score >= 0.55 AND quality_score < 0.75) as acceptable,
+                COUNT(*) FILTER (WHERE quality_score < 0.55) as rejected
+            FROM hive_claims WHERE is_garbage = false OR is_garbage IS NULL
+        """)
+        qrow = cur.fetchone()
+        quality_distribution = {
+            "excellent_090+": qrow[0], "great_082+": qrow[1],
+            "good_075+": qrow[2], "acceptable_055+": qrow[3], "rejected": qrow[4],
+        }
+
+        conn.close()
+        return {
+            "total_missions": total_missions,
+            "total_claims": total_claims,
+            "avg_quality": round(avg_quality, 4),
+            "missions_by_status": missions_by_status,
+            "claims_by_type": claims_by_type,
+            "quality_distribution": quality_distribution,
+            "top_entities": top_entities,
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PIPELINE RUNNER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _run_pipeline(mission_id: str, topic: str, depth: int):
+    """Run research pipeline as subprocess, stream progress via SSE events."""
+    import sys
+
+    try:
+        _emit_event(mission_id, "start", {"topic": topic, "status": "scout"})
+
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("UPDATE hive_missions SET status = 'running', phase = 'scout' WHERE id = %s", (mission_id,))
+        conn.commit()
+        conn.close()
+
+        _emit_event(mission_id, "phase", {"phase": "scout", "event": "started"})
+
+        # Run orchestrator as subprocess with line-buffered output for SSE
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "behive.engine",
+            "run", topic,
+            "--mission-id", mission_id,
+            "--depth", str(depth),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env={**os.environ, "BEHIVE_MISSION_ID": mission_id, "PYTHONUNBUFFERED": "1"},
+        )
+
+        # Parse subprocess output for phase transitions and progress
+        current_phase = "scout"
+        async for line in proc.stdout:
+            text = line.decode(errors="replace").strip()
+            # Detect phase transitions
+            if "Scout done" in text or "scout.*done" in text.lower():
+                current_phase = "harvest"
+                _emit_event(mission_id, "phase", {"phase": "harvest", "event": "started"})
+                _update_phase(mission_id, "harvest")
+            elif "Harvest" in text and "done" in text.lower():
+                current_phase = "process"
+                _emit_event(mission_id, "phase", {"phase": "process", "event": "started"})
+                _update_phase(mission_id, "process")
+            elif "Process" in text and "done" in text.lower():
+                current_phase = "synth"
+                _emit_event(mission_id, "phase", {"phase": "synth", "event": "started"})
+                _update_phase(mission_id, "synth")
+            # Detect claims progress
+            elif "claims" in text.lower() and any(c.isdigit() for c in text):
+                nums = re.findall(r'\d+', text)
+                if nums:
+                    _emit_event(mission_id, "claims", {"count": int(nums[0]), "phase": current_phase})
+
+        await proc.wait()
+
+        # Gather final results
+        conn = get_db()
+        cur = conn.cursor()
+        if proc.returncode == 0:
+            cur.execute("UPDATE hive_missions SET status = 'done', phase = 'done' WHERE id = %s", (mission_id,))
+            cur.execute(
+                "SELECT COUNT(*), COALESCE(AVG(quality_score), 0) FROM hive_claims WHERE mission_id = %s AND (is_garbage = false OR is_garbage IS NULL)",
+                (mission_id,)
+            )
+            row = cur.fetchone()
+            _emit_event(mission_id, "done", {"total_claims": row[0] or 0, "avg_quality": round(float(row[1] or 0), 4)})
+        else:
+            cur.execute("UPDATE hive_missions SET status = 'error', phase = 'error' WHERE id = %s", (mission_id,))
+            _emit_event(mission_id, "error", {"message": f"Pipeline exited with code {proc.returncode}"})
+        conn.commit()
+        conn.close()
+
+    except Exception as e:
+        _emit_event(mission_id, "error", {"message": str(e)})
+        try:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute("UPDATE hive_missions SET status = 'error', phase = 'error' WHERE id = %s", (mission_id,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+
+def _update_phase(mission_id: str, phase: str):
+    """Update mission phase in DB."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("UPDATE hive_missions SET phase = %s WHERE id = %s", (phase, mission_id))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass

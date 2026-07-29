@@ -99,6 +99,17 @@ async def mcp_endpoint(request: MCPRequest):
                             "required": ["job_id"],
                         }
                     },
+                    {
+                        "name": "list_missions",
+                        "description": "List recent research missions with status and quality scores.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "limit": {"type": "integer", "description": "Max missions to return (default 10, max 50)", "default": 10},
+                            },
+                            "required": [],
+                        }
+                    },
                 ]
             }
         }
@@ -115,6 +126,8 @@ async def mcp_endpoint(request: MCPRequest):
             return await _tool_get_report(request.id, arguments)
         elif tool_name == "mission_status":
             return await _tool_mission_status(request.id, arguments)
+        elif tool_name == "list_missions":
+            return await _tool_list_missions(request.id, arguments)
         else:
             return _error(request.id, -32601, f"Unknown tool: {tool_name}")
 
@@ -215,6 +228,43 @@ async def _tool_mission_status(req_id, args):
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async def _tool_list_missions(req_id, args):
+    """List recent research missions."""
+    limit = min(args.get("limit", 10), 50)
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT m.id, m.topic, m.status, m.phase, m.created_at,
+                   COALESCE(c.cnt, 0), COALESCE(c.avg_q, 0)
+            FROM hive_missions m
+            LEFT JOIN (
+                SELECT mission_id, COUNT(*) as cnt, AVG(quality_score) as avg_q
+                FROM hive_claims WHERE is_garbage = false OR is_garbage IS NULL
+                GROUP BY mission_id
+            ) c ON c.mission_id = m.id
+            ORDER BY m.created_at DESC
+            LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+        conn.close()
+
+        if not rows:
+            return _tool_result(req_id, "No research missions found yet.")
+
+        lines = [f"Found {len(rows)} mission(s):\n"]
+        for row in rows:
+            mid, topic, status, phase, created, claims_count, avg_q = row
+            created_str = created.strftime("%Y-%m-%d %H:%M") if created else "?"
+            lines.append(
+                f"• [{status}] {topic[:60]}\n"
+                f"  ID: {mid} | Claims: {claims_count} | Quality: {avg_q:.3f} | {created_str}"
+            )
+        return _tool_result(req_id, "\n".join(lines))
+    except Exception as e:
+        return _tool_result(req_id, f"Error: {e}", True)
+
 
 def _tool_result(req_id, text, is_error=False):
     return {

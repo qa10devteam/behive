@@ -242,7 +242,7 @@ Or manually add this schema:
 openapi: 3.1.0
 info:
   title: BeHive Research API
-  version: 0.2.0
+  version: 0.3.0
 servers:
   - url: https://*** paths:
   /research:
@@ -709,7 +709,7 @@ behive mcp start      # MCP server on :8090
 
 - [x] V4 pipeline (Haiku + Sonnet extraction)
 - [x] Quality scoring (avg 0.82+ achieved)
-- [x] REST API (27 endpoints)
+- [x] REST API (12 endpoints)
 - [x] MCP Server (Streamable HTTP)
 - [x] SSE streaming (real-time progress)
 - [x] Knowledge graph (Neo4j)
