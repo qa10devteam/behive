@@ -1,4 +1,8 @@
-"""Pipeline orchestrator — Queen-first planning, phase coordination, and full research execution."""
+"""Pipeline orchestrator — Queen-first planning, phase coordination, and full research execution.
+
+Refactored: QueenPlanner → behive.engine.queen, run_phase → behive.engine.runner.
+This module remains the entry point (cmd_run, cmd_scout, etc.) for backward compatibility.
+"""
 
 import logging
 
@@ -1204,6 +1208,17 @@ def run_phase(script: str, args: list[str], phase_name: str,
         # Show last lines of log
         subprocess.run(["tail", "-20", log_file], check=False)
         elapsed = time.time() - t0
+        
+        # If deadline exceeded and no EXIT marker → kill orphan and raise timeout
+        if _exit_code is None:
+            log.warning(f"  ⚠️  [{phase_name.upper()}] TIMEOUT after {elapsed:.0f}s — killing PID {child_pid_str}")
+            try:
+                if child_pid_str:
+                    os.kill(int(child_pid_str), 9)
+            except (ProcessLookupError, ValueError):
+                pass
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        
         log.info(f"✅  [{phase_name.upper()}] Zakończono w {elapsed:.1f}s (exit={_exit_code})")
         if _exit_code and _exit_code != 0:
             raise subprocess.CalledProcessError(_exit_code, cmd)
