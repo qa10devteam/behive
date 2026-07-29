@@ -685,6 +685,20 @@ behive serve              # Starts both REST API (:8091) + MCP (:8090)
 | `AWS_PROFILE` | `default` | For Bedrock authentication |
 | `OPENAI_API_KEY` | — | For OpenAI mode |
 
+### Search Backends (priority order)
+
+BeHive tries search backends in priority order and falls through on failure:
+
+| Priority | Backend | Env Variable | Free Tier |
+|:---:|---------|-------------|-----------|
+| 1 | SearXNG (self-hosted) | `SEARXNG_URL=http://localhost:8080` | Unlimited |
+| 2 | Brave Search | `BRAVE_SEARCH_API_KEY=***` | 2,000 req/month |
+| 3 | Serper.dev (Google) | `SERPER_API_KEY=***` | 2,500 credits |
+| 4 | Tavily | `TAVILY_API_KEY=***` | 1,000 req/month |
+| 5 | DuckDuckGo | *(always available)* | Unlimited (slow) |
+
+No env vars set? DDG is the default. Add any key above to instantly upgrade search quality.
+
 ---
 
 ## Comparison
