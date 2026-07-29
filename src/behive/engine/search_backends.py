@@ -1,11 +1,12 @@
 """Multi-backend web search for BeHive Scout.
 
 Priority order (first available wins):
-1. SearXNG (self-hosted, no rate limits, no blocking)
-2. Brave Search (fast, generous free tier: 2000 req/month)  
-3. Serper.dev (Google results via API, 2500 free credits)
-4. Tavily (research-optimized, 1000 free/month)
-5. DuckDuckGo (always available, slow, rate-limited, easy to block)
+1. Chromium/Playwright (Google/Bing scraping — FREE, unlimited, built into Docker)
+2. SearXNG (self-hosted, no rate limits, no blocking)
+3. Brave Search (fast, generous free tier: 2000 req/month)  
+4. Serper.dev (Google results via API, 2500 free credits)
+5. Tavily (research-optimized, 1000 free/month)
+6. DuckDuckGo (always available, slow, rate-limited, easy to block)
 
 Usage:
     from behive.engine.search_backends import SearchEngine, search
@@ -39,6 +40,147 @@ class SearchBackend:
     async def search(self, query: str, max_results: int = 30, 
                      session: Optional[aiohttp.ClientSession] = None) -> list[dict]:
         raise NotImplementedError
+
+
+class PlaywrightBackend(SearchBackend):
+    """Chromium/Playwright — scrapes Google/Bing directly. FREE, unlimited.
+    
+    Available when playwright is installed (included in Docker image).
+    No API keys needed. Rotates between Google and Bing to avoid rate limits.
+    Set BEHIVE_BROWSER_SEARCH=0 to disable.
+    """
+    name = "chromium"
+    priority = 0  # Highest priority
+    
+    def _check_available(self) -> bool:
+        if os.environ.get("BEHIVE_BROWSER_SEARCH", "1") == "0":
+            return False
+        try:
+            import playwright  # noqa: F401
+            return True
+        except ImportError:
+            return False
+    
+    async def search(self, query: str, max_results: int = 30,
+                     session: Optional[aiohttp.ClientSession] = None) -> list[dict]:
+        """Search Google/Bing via headless Chromium."""
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return []
+        
+        results = []
+        
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
+            )
+            try:
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    locale="en-US",
+                    extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
+                )
+                page = await context.new_page()
+                page.set_default_timeout(15000)
+                
+                # Try Google first, fallback to Bing
+                try:
+                    results = await self._scrape_google(page, query, max_results)
+                except Exception as e:
+                    log.debug(f"Google scrape failed: {e}, trying Bing")
+                    try:
+                        results = await self._scrape_bing(page, query, max_results)
+                    except Exception as e2:
+                        log.debug(f"Bing scrape also failed: {e2}")
+                
+            finally:
+                await browser.close()
+        
+        return results[:max_results]
+    
+    async def _scrape_google(self, page, query: str, max_results: int) -> list[dict]:
+        """Scrape Google search results."""
+        url = f"https://www.google.com/search?q={quote_plus(query)}&num={min(max_results, 50)}&hl=en"
+        await page.goto(url, wait_until="domcontentloaded")
+        
+        # Wait for results
+        await page.wait_for_selector("div#search", timeout=10000)
+        
+        results = await page.evaluate("""() => {
+            const results = [];
+            // Standard search results
+            const items = document.querySelectorAll('div.g, div[data-sokoban-container]');
+            items.forEach(item => {
+                const link = item.querySelector('a[href^="http"]');
+                const title = item.querySelector('h3');
+                const snippet = item.querySelector('[data-sncf], .VwiC3b, [style*="-webkit-line-clamp"]');
+                if (link && title) {
+                    results.push({
+                        url: link.href,
+                        title: title.textContent.trim(),
+                        snippet: snippet ? snippet.textContent.trim() : '',
+                        source: 'google_chromium'
+                    });
+                }
+            });
+            return results;
+        }""")
+        
+        if not results:
+            raise ValueError("No results extracted from Google")
+        
+        return results
+    
+    async def _scrape_bing(self, page, query: str, max_results: int) -> list[dict]:
+        """Scrape Bing search results."""
+        url = f"https://www.bing.com/search?q={quote_plus(query)}&count={min(max_results, 50)}&mkt=en-US&setlang=en"
+        
+        # Bing may redirect (language/consent) — wait for final load
+        await page.goto(url, wait_until="networkidle", timeout=20000)
+        
+        # Wait for results container (may appear after redirect)
+        try:
+            await page.wait_for_selector("#b_results li.b_algo", timeout=10000)
+        except Exception:
+            # Try without b_algo class (different layout)
+            await page.wait_for_selector("#b_results li", timeout=5000)
+        
+        results = await page.evaluate("""() => {
+            const results = [];
+            document.querySelectorAll('#b_results > li.b_algo').forEach(item => {
+                const linkEl = item.querySelector('h2 a');
+                const snippet = item.querySelector('.b_caption p');
+                if (!linkEl) return;
+                
+                let url = linkEl.href;
+                // Bing wraps URLs in /ck/a tracking redirect — extract real URL from cite
+                if (url.includes('/ck/a') || url.includes('bing.com')) {
+                    const cite = item.querySelector('cite');
+                    if (cite) {
+                        let citeUrl = cite.textContent.trim()
+                            .replace(/\\s*›\\s*/g, '/')
+                            .replace(/\\.\\.\\.$/, '');
+                        if (!citeUrl.startsWith('http')) citeUrl = 'https://' + citeUrl;
+                        url = citeUrl;
+                    }
+                }
+                
+                results.push({
+                    url: url,
+                    title: linkEl.textContent.trim(),
+                    snippet: snippet ? snippet.textContent.trim() : '',
+                    source: 'bing_chromium'
+                });
+            });
+            return results;
+        }""")
+        
+        if not results:
+            raise ValueError("No results extracted from Bing")
+        
+        return results
 
 
 class SearXNGBackend(SearchBackend):
@@ -296,6 +438,7 @@ class DuckDuckGoBackend(SearchBackend):
 # ─── Search Engine (auto-selects best backend) ────────────────────────────────
 
 ALL_BACKENDS = [
+    PlaywrightBackend,
     SearXNGBackend,
     BraveBackend,
     SerperBackend,
@@ -308,7 +451,9 @@ class SearchEngine:
     """Multi-backend search engine. Tries backends in priority order.
     
     Falls through to next backend on failure/empty results.
-    Set env vars to enable backends:
+    Chromium (Playwright) is top priority — scrapes Google/Bing for free.
+    Set env vars to enable additional backends:
+        BEHIVE_BROWSER_SEARCH=0               (disable Chromium)
         SEARXNG_URL=http://localhost:8080     (self-hosted, unlimited)
         BRAVE_SEARCH_API_KEY=BSA...           (2000 free/month)
         SERPER_API_KEY=...                    (2500 free credits)

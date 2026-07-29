@@ -7,6 +7,9 @@ pydantic>=2.0
 litellm>=1.40
 feedparser>=6.0
 
+# Browser-based search (Google/Bing scraping — included in Docker)
+playwright>=1.40
+
 # API server (included in pip install behive[api])
 fastapi>=0.100
 uvicorn>=0.20
