@@ -80,6 +80,76 @@ That's it. BeHive is now running:
 
 ---
 
+## 🧠 Model Routing — Use Cheap Models to Collect, Smart Models to Analyze
+
+BeHive doesn't force you into one model. You choose what runs each pipeline stage:
+
+| Stage | Role | Recommended |
+|-------|------|-------------|
+| **scout** | Query generation, source discovery | Haiku / GPT-4o-mini / local |
+| **harvest** | Relevance filtering, content triage | Haiku / GPT-4o-mini / local |
+| **process** | Claim extraction, quality scoring | Haiku or Sonnet |
+| **synth** | Report synthesis, deduplication | Sonnet / Opus / GPT-4o |
+
+### Quick Setup (one command)
+
+```bash
+# Apply a preset
+behive config --preset balanced   # Haiku collects, Sonnet synthesizes (~$1.50/mission)
+behive config --preset budget     # Haiku everywhere (~$0.30/mission)
+behive config --preset quality    # Sonnet everywhere (~$4.00/mission)
+behive config --preset local      # Your own LLM server ($0.00/mission)
+```
+
+### Interactive Setup
+
+```bash
+behive config --quick    # Pick one model for everything
+behive config --full     # Choose model per stage (interactive)
+```
+
+### Fine-grained Control
+
+```bash
+# Set a single stage
+behive config --stage synth --model claude-opus
+behive config --stage scout --model ollama/deepseek-r1
+
+# Check current config
+behive config --show
+```
+
+### Environment Variable Override (Docker/CI)
+
+```bash
+export BEHIVE_MODEL_SCOUT=ollama/llama3.1
+export BEHIVE_MODEL_SYNTH=anthropic/claude-sonnet-4-20250514
+behive serve
+```
+
+Priority: `BEHIVE_MODEL_{STAGE}` > `BEHIVE_MODEL` > config.yaml > defaults
+
+### Available Model Presets
+
+| Preset | Model String |
+|--------|-------------|
+| `claude-haiku` | anthropic/claude-3-5-haiku-20241022 |
+| `claude-sonnet` | anthropic/claude-sonnet-4-20250514 |
+| `claude-opus` | anthropic/claude-opus-4-20250514 |
+| `gpt-4o-mini` | openai/gpt-4o-mini |
+| `gpt-4o` | openai/gpt-4o |
+| `gpt-4.1` | openai/gpt-4.1 |
+| `gemini-flash` | google/gemini-2.5-flash |
+| `gemini-pro` | google/gemini-2.5-pro |
+| `bedrock-haiku` | bedrock/us.anthropic.claude-haiku-4-5-... |
+| `bedrock-sonnet` | bedrock/us.anthropic.claude-sonnet-4-6-... |
+| `local` | openai/local-model (any OpenAI-compatible server) |
+| `ollama` | ollama/llama3.1 |
+
+Or pass any [litellm-compatible](https://docs.litellm.ai/docs/providers) model string directly.
+
+---
+
 ## 🔌 Setup with Claude Desktop (30 seconds)
 
 > **You bring your Claude subscription. BeHive adds research superpowers. No extra cost from us.**

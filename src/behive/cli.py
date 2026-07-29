@@ -44,6 +44,16 @@ def main():
     status_p = sub.add_parser("status", help="Check server status")
     status_p.add_argument("--api", default="http://127.0.0.1:8091", help="API URL")
 
+    # ─── config ────────────────────────────────────────────────────────────
+    config_p = sub.add_parser("config", help="Configure model routing per pipeline stage")
+    config_mode = config_p.add_mutually_exclusive_group()
+    config_mode.add_argument("--quick", action="store_true", help="Quick setup: one model for all stages")
+    config_mode.add_argument("--full", action="store_true", help="Full setup: pick model per stage")
+    config_mode.add_argument("--show", action="store_true", help="Show current configuration")
+    config_mode.add_argument("--preset", choices=["budget", "balanced", "quality", "local"], help="Apply a named preset")
+    config_p.add_argument("--stage", choices=["scout", "harvest", "process", "synth"], help="Set model for single stage")
+    config_p.add_argument("--model", help="Model name or litellm string (use with --stage)")
+
     # ─── version ──────────────────────────────────────────────────────────
     sub.add_parser("version", help="Show version")
 
@@ -55,11 +65,54 @@ def main():
         asyncio.run(cmd_research(args))
     elif args.command == "status":
         cmd_status(args)
+    elif args.command == "config":
+        cmd_config(args)
     elif args.command == "version":
         from behive import __version__
         print(f"behive {__version__}")
     else:
         parser.print_help()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONFIG — model routing configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cmd_config(args):
+    """Configure model routing per pipeline stage."""
+    from behive.config import (
+        run_quick_config, run_full_config, show_config,
+        load_config, save_config, RECOMMENDED_COMBOS,
+        MODEL_PRESETS, STAGES, CONFIG_FILE,
+    )
+
+    if args.preset:
+        # Non-interactive preset application
+        combo = RECOMMENDED_COMBOS[args.preset]
+        cfg = load_config()
+        cfg["models"] = {stage: combo[stage] for stage in STAGES}
+        save_config(cfg)
+        print(f"\n✅ Applied '{args.preset}' preset: {combo['description']}")
+        for stage in STAGES:
+            resolved = MODEL_PRESETS.get(combo[stage], combo[stage])
+            print(f"   {stage:10s} → {resolved}")
+        print(f"\n   Config: {CONFIG_FILE}\n")
+    elif args.stage and args.model:
+        # Set single stage model
+        cfg = load_config()
+        if "models" not in cfg:
+            cfg["models"] = {}
+        cfg["models"][args.stage] = args.model
+        save_config(cfg)
+        resolved = MODEL_PRESETS.get(args.model, args.model)
+        print(f"\n✅ {args.stage} → {resolved}")
+        print(f"   Config: {CONFIG_FILE}\n")
+    elif args.quick:
+        run_quick_config()
+    elif args.full:
+        run_full_config()
+    else:
+        show_config()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
