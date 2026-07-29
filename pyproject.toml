@@ -7,7 +7,7 @@ where = ["src"]
 
 [project]
 name = "behive"
-version = "0.2.2"
+version = "0.3.0"
 description = "Research engine that builds structured knowledge graphs from any topic"
 readme = "README.md"
 license = "MIT"
@@ -28,10 +28,10 @@ classifiers = [
 
 dependencies = [
     "aiohttp>=3.9",
-    "boto3>=1.28",
+    "httpx>=0.25",
     "psycopg2-binary>=2.9",
     "pydantic>=2.0",
-    "httpx>=0.25",
+    "litellm>=1.40",
     "feedparser>=6.0",
 ]
 
@@ -64,7 +64,7 @@ science = [
 mcp = ["fastmcp>=3.0"]
 api = ["fastapi>=0.100", "uvicorn>=0.20"]
 qdrant = ["qdrant-client>=1.7", "sentence-transformers>=2.2"]
-all = ["behive[stealth,harvest,process,science,mcp,api,qdrant]"]
+all = ["behive[stealth,harvest,process,science,mcp,api]"]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "ruff>=0.3"]
 
 [project.scripts]
