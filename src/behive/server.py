@@ -473,11 +473,20 @@ async def list_missions(limit: int = Query(20, ge=1, le=100), offset: int = Quer
 
 @app.get("/intelligence/entity/{name}")
 async def intelligence_entity(name: str, limit: int = Query(50, ge=1, le=200)):
-    """Get intelligence about a specific entity — claims mentioning it, co-occurring entities."""
+    """Get intelligence about a specific entity — from knowledge graph or claims."""
+    # Try Neo4j first
+    try:
+        from behive.knowledge_graph import entity_lookup
+        neo4j_result = entity_lookup(name, limit=limit)
+        if neo4j_result:
+            return neo4j_result
+    except ImportError:
+        pass
+
+    # Fallback to PostgreSQL ILIKE
     try:
         conn = get_db()
         cur = conn.cursor()
-        # Find claims mentioning this entity (case-insensitive)
         cur.execute("""
             SELECT claim, quality_score, source_url, mission_id, claim_type, confidence
             FROM hive_claims
@@ -491,7 +500,6 @@ async def intelligence_entity(name: str, limit: int = Query(50, ge=1, le=200)):
         ]
         conn.close()
 
-        # Extract co-occurring entities from these claims
         co_entities: Counter = Counter()
         for claim in claims:
             entities = extract_entities(claim["text"])
@@ -507,7 +515,8 @@ async def intelligence_entity(name: str, limit: int = Query(50, ge=1, le=200)):
             "mentions": len(claims),
             "avg_quality": round(avg_q, 4),
             "related_entities": top_related,
-            "claims": claims[:30],  # Top 30 by quality
+            "claims": claims[:30],
+            "source": "postgresql",
         }
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -517,7 +526,17 @@ async def intelligence_entity(name: str, limit: int = Query(50, ge=1, le=200)):
 
 @app.get("/intelligence/network/{name}")
 async def intelligence_network(name: str, depth: int = Query(2, ge=1, le=3)):
-    """Entity relationship network — find co-occurring entities (N-hop neighborhood)."""
+    """Entity relationship network — from knowledge graph or claim co-occurrence."""
+    # Try Neo4j first
+    try:
+        from behive.knowledge_graph import entity_network
+        neo4j_result = entity_network(name, depth=depth)
+        if neo4j_result:
+            return neo4j_result
+    except ImportError:
+        pass
+
+    # Fallback to PostgreSQL co-occurrence
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -580,7 +599,18 @@ async def intelligence_network(name: str, depth: int = Query(2, ge=1, le=3)):
 
 @app.get("/intelligence/stats")
 async def intelligence_stats():
-    """System-wide intelligence statistics."""
+    """System-wide intelligence statistics including knowledge graph."""
+    result = {}
+    
+    # Neo4j graph stats
+    try:
+        from behive.knowledge_graph import graph_stats
+        gs = graph_stats()
+        if gs:
+            result["knowledge_graph"] = gs
+    except ImportError:
+        pass
+
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -633,7 +663,7 @@ async def intelligence_stats():
         }
 
         conn.close()
-        return {
+        result.update({
             "total_missions": total_missions,
             "total_claims": total_claims,
             "avg_quality": round(avg_quality, 4),
@@ -641,7 +671,8 @@ async def intelligence_stats():
             "claims_by_type": claims_by_type,
             "quality_distribution": quality_distribution,
             "top_entities": top_entities,
-        }
+        })
+        return result
     except Exception as e:
         raise HTTPException(500, str(e))
 
