@@ -2,6 +2,7 @@
 
 import os
 import time
+import json
 import hashlib
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -208,10 +209,10 @@ async def start_research(req: ResearchRequest):
         conn = get_db()
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO hive_missions (id, topic, status, depth, created_at)
-            VALUES (%s, %s, 'queued', %s, NOW())
+            INSERT INTO hive_missions (id, topic, status, phase, config, created_at)
+            VALUES (%s, %s, 'queued', 'queued', %s::jsonb, NOW())
             ON CONFLICT (id) DO NOTHING
-        """, (mission_id, req.query, req.depth))
+        """, (mission_id, req.query, json.dumps({"depth": req.depth, "scale": req.scale})))
         conn.commit()
         conn.close()
     except Exception as e:
