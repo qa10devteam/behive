@@ -12,6 +12,11 @@ services:
       - "${BEHIVE_MCP_PORT:-8090}:8090"
     environment:
       - BEHIVE_DB_URL=postgresql://behive:${POSTGRES_PASSWORD:-behive2026}@postgres:5432/behive
+      - HIVE_PG_HOST=postgres
+      - HIVE_PG_PORT=5432
+      - HIVE_PG_USER=behive
+      - HIVE_PG_PASSWORD=${POSTGRES_PASSWORD:-behive2026}
+      - HIVE_PG_DATABASE=behive
       - BEHIVE_LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}

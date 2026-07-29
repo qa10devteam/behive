@@ -50,7 +50,13 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional
 
-import boto3
+try:
+    import boto3
+except ImportError:
+    from behive.engine.bedrock_compat import get_bedrock_compat_client as _get_bcc
+    class boto3:
+        @staticmethod
+        def client(*a, **kw): return _get_bcc(stage="process")
 import hive2_db as _hive_db  # PostgreSQL via unified layer
 
 log = logging.getLogger(__name__)

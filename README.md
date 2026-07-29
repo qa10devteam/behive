@@ -54,16 +54,31 @@ Your AI assistant → BeHive → Verified, structured, scored knowledge
 pip install behive
 
 # Set your LLM API key (you use YOUR OWN subscription — BeHive costs nothing)
-export ANTHROPIC_API_KEY=*** # or OPENAI_API_KEY
+export ANTHROPIC_API_KEY=your-key  # or OPENAI_API_KEY, or AWS creds for Bedrock
+
+# PostgreSQL required for storage (or use Docker below)
+export BEHIVE_DB_URL=postgresql://user:***@localhost:5432/behive
 
 # Start the server
 behive serve
+```
+
+**Fastest path — Docker Compose (PostgreSQL included):**
+```bash
+git clone https://github.com/qa10devteam/behive && cd behive
+echo "ANTHROPIC_API_KEY=your-key" > .env
+docker compose up -d
+# API at http://localhost:8333
 ```
 
 **Full install** (stealth drones, content extraction, NLP processing):
 ```bash
 pip install "behive[all]"
 ```
+
+> **⚠️ GPU/CUDA note:** `behive[all]` does NOT include GPU dependencies. If you need vector embeddings (Qdrant), install separately:
+> `pip install "behive[qdrant]"` — this pulls PyTorch + sentence-transformers (~4GB with CUDA).
+> For CPU-only machines, install torch CPU-only first: `pip install torch --index-url https://download.pytorch.org/whl/cpu`
 
 Or pick what you need:
 ```bash

@@ -52,7 +52,7 @@ STAGES = {
 # Known model presets (user can also pass any litellm-compatible model string)
 MODEL_PRESETS = {
     # Anthropic
-    "claude-haiku": "anthropic/claude-3-5-haiku-20241022",
+    "claude-haiku": "anthropic/claude-haiku-4-5-20251001",
     "claude-sonnet": "anthropic/claude-sonnet-4-20250514",
     "claude-opus": "anthropic/claude-opus-4-20250514",
     # OpenAI

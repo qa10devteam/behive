@@ -32,12 +32,33 @@ from contextlib import contextmanager
 from typing import Optional, Any
 
 # ─── Configuration ──────────────────────────────────────────────────────────
+# Priority: BEHIVE_DB_URL (connection string) > individual HIVE_PG_* vars > defaults
 
-PG_HOST = os.environ.get("HIVE_PG_HOST", "127.0.0.1")
-PG_PORT = int(os.environ.get("HIVE_PG_PORT", "5432"))
-PG_USER = os.environ.get("HIVE_PG_USER", "behive")
-PG_PASSWORD = os.environ.get("HIVE_PG_PASSWORD", "***")
-PG_DATABASE = os.environ.get("HIVE_PG_DATABASE", "hive")
+_db_url = os.environ.get("BEHIVE_DB_URL", "")
+
+if _db_url and _db_url.startswith("postgresql://"):
+    # Parse: postgresql://user:password@host:port/dbname
+    import re as _re
+    _m = _re.match(r'postgresql://([^:]+):([^@]*)@([^:]+):(\d+)/(.+)', _db_url)
+    if _m:
+        PG_USER = _m.group(1)
+        PG_PASSWORD = _m.group(2)
+        PG_HOST = _m.group(3)
+        PG_PORT = int(_m.group(4))
+        PG_DATABASE = _m.group(5)
+    else:
+        # Fallback to individual vars
+        PG_HOST = os.environ.get("HIVE_PG_HOST", "127.0.0.1")
+        PG_PORT = int(os.environ.get("HIVE_PG_PORT", "5432"))
+        PG_USER = os.environ.get("HIVE_PG_USER", "behive")
+        PG_PASSWORD = os.environ.get("HIVE_PG_PASSWORD", "behive2026")
+        PG_DATABASE = os.environ.get("HIVE_PG_DATABASE", "behive")
+else:
+    PG_HOST = os.environ.get("HIVE_PG_HOST", "127.0.0.1")
+    PG_PORT = int(os.environ.get("HIVE_PG_PORT", "5432"))
+    PG_USER = os.environ.get("HIVE_PG_USER", "behive")
+    PG_PASSWORD = os.environ.get("HIVE_PG_PASSWORD", "behive2026")
+    PG_DATABASE = os.environ.get("HIVE_PG_DATABASE", "behive")
 
 DSN = f"host={PG_HOST} port={PG_PORT} user={PG_USER} password={PG_PASSWORD} dbname={PG_DATABASE}"
 

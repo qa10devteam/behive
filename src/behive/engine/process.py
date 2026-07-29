@@ -248,7 +248,7 @@ SGLANG_MODEL      = "Qwen2.5-7B-Instruct"
 MAX_LLM_CALLS     = 40   # SGLang continuous batching — 40 parallel bez problemu
 
 class SGLangClient:
-    """HTTP client for SGLang OpenAI-compatible API. Thread-safe, stateless."""
+    """HTTP client for SGLang OpenAI-compatible API. Falls back to behive.engine.llm."""
 
     def invoke(
         self,
@@ -258,6 +258,32 @@ class SGLangClient:
         max_tokens: int = 1024,
     ) -> str:
         """Invoke a single bee operation on content."""
+        # Try SGLang first if available
+        if self.is_available():
+            return self._invoke_sglang(prompt, system_prompt, model, max_tokens)
+        
+        # Fallback to unified LLM layer
+        try:
+            from behive.engine.llm import complete
+            return complete(
+                prompt=prompt,
+                stage="process",
+                system=system_prompt or "",
+                max_tokens=max_tokens,
+                temperature=0.1,
+            )
+        except Exception as e:
+            log.error(f"LLM fallback also failed: {e}")
+            raise RuntimeError(f"No LLM available: SGLang offline, fallback failed: {e}")
+
+    def _invoke_sglang(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        max_tokens: int = 1024,
+    ) -> str:
+        """Direct SGLang HTTP call."""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -319,7 +345,13 @@ class SGLangClient:
 
 
 # Bedrock fallback client (used when SGLang is unavailable)
-import boto3 as _boto3
+try:
+    import boto3 as _boto3
+except ImportError:
+    from behive.engine.bedrock_compat import get_bedrock_compat_client as _get_bcc
+    class _boto3:
+        @staticmethod
+        def client(*a, **kw): return _get_bcc(stage="process")
 import json as _json_b
 
 class _BedrockFallbackClient:

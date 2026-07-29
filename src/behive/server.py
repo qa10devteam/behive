@@ -249,7 +249,7 @@ async def _run_pipeline(mission_id: str, topic: str, depth: int):
 
         # Run orchestrator as subprocess (isolates heavy pipeline)
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "behive.engine.orchestrator",
+            sys.executable, "-m", "behive.engine",
             "run", topic,
             "--mission-id", mission_id,
             "--depth", str(depth),

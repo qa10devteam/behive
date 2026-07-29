@@ -1,23 +1,8 @@
 """Pipeline orchestrator — Queen-first planning, phase coordination, and full research execution."""
 
 import logging
-#!/usr/bin/env python3
-"""
-HIVE 2.0 — hive2.py
-The ORCHESTRATOR: CLI entry point for the full HIVE intelligence pipeline.
-
 
 log = logging.getLogger(__name__)
-Usage:
-  python3 hive2.py run "topic" [--think]   # full pipeline (Queen plans first)
-  python3 hive2.py scout "topic"           # scout only (Queen plans first)
-  python3 hive2.py plan "topic"            # Queen planning only — inspect the JSON
-  python3 hive2.py harvest <mission_id>    # harvest existing mission
-  python3 hive2.py process <mission_id>    # process existing mission
-  python3 hive2.py synth <mission_id>      # synthesize existing mission
-  python3 hive2.py status <mission_id>     # show mission status from DB
-  python3 hive2.py list                    # list last 10 missions
-"""
 
 import sys
 import os
@@ -404,7 +389,14 @@ class QueenPlanner:
     # ------------------------------------------------------------------
     def _bedrock_batch(self, batch_id: int, focus: str, ctx: dict, id_offset: int) -> list[dict]:
         """Single Bedrock call — Queen thinks deeply about ONE research axis."""
-        import boto3 as _boto3
+        try:
+            import boto3 as _boto3
+        except ImportError:
+            from behive.engine.bedrock_compat import get_bedrock_compat_client as _bcc
+            class _boto3:
+                @staticmethod
+                def client(*a, **kw):
+                    return _bcc(stage="scout")
         client = _boto3.client('bedrock-runtime', region_name=self.BEDROCK_REGION)
 
         type_cfg = self.TASK_TYPES.get(self.task_type, self.TASK_TYPES['geopolitical_osint'])
@@ -860,7 +852,14 @@ Be factual for the profile. For competitor list — use domain knowledge about t
         a distinct viewpoint, motivation, and targeted query strategy.
         This mirrors Stanford STORM's 'diverse perspectives' pattern (+25% breadth).
         """
-        import boto3 as _boto3
+        try:
+            import boto3 as _boto3
+        except ImportError:
+            from behive.engine.bedrock_compat import get_bedrock_compat_client as _bcc
+            class _boto3:
+                @staticmethod
+                def client(*a, **kw):
+                    return _bcc(stage="scout")
         client = _boto3.client('bedrock-runtime', region_name=self.BEDROCK_REGION)
 
         memory_section = ''
@@ -1055,12 +1054,28 @@ Return ONLY the JSON array."""
 # DuckDB/PostgreSQL helpers
 # ---------------------------------------------------------------------------
 
-# PostgreSQL backend (preferred)
-try:
-    import hive2_db as _hive_db
-    _pg_available = (_hive_db.DB_BACKEND == "postgres")
-except ImportError:
-    _pg_available = False
+# PostgreSQL backend (preferred) — checked lazily to avoid import-order issues
+_pg_available = None  # Will be set on first use
+_hive_db = None
+
+def _ensure_pg():
+    """Lazy PostgreSQL availability check."""
+    global _pg_available, _hive_db
+    if _pg_available is not None:
+        return _pg_available
+    try:
+        import hive2_db
+        _hive_db = hive2_db
+        _pg_available = (hive2_db.DB_BACKEND == "postgres")
+    except Exception:
+        # Try direct import
+        try:
+            from behive.engine import db as _db_mod
+            _hive_db = _db_mod
+            _pg_available = (_db_mod.DB_BACKEND == "postgres")
+        except Exception:
+            _pg_available = False
+    return _pg_available
 
 
 def _get_duckdb():
@@ -1070,9 +1085,15 @@ def _get_duckdb():
 
 def _connect_db(read_only: bool = False):
     """Connect to the active database backend (PostgreSQL only)."""
-    if _pg_available:
+    _ensure_pg()
+    if _pg_available and _hive_db:
         return _hive_db.connect(read_only=read_only)
-    raise RuntimeError("PostgreSQL backend not available. Set HIVE_DB_BACKEND=postgres and ensure hive2_pg.py is accessible.")
+    raise RuntimeError(
+        "PostgreSQL not available. Ensure PostgreSQL is running and configured.\n"
+        "Set: HIVE_PG_HOST, HIVE_PG_PORT, HIVE_PG_USER, HIVE_PG_PASSWORD, HIVE_PG_DATABASE\n"
+        "Or: BEHIVE_DB_URL=postgresql://user:pass@host:5432/dbname\n"
+        "For Docker: docker compose up -d"
+    )
 
 
 def _strip_sql_comments(sql: str) -> str:
@@ -1088,9 +1109,14 @@ def _strip_sql_comments(sql: str) -> str:
 
 def _init_db(con=None):
     """Ensure HIVE schema exists. PostgreSQL schema already created during migration."""
+    _ensure_pg()
     if _pg_available:
         return
-    raise RuntimeError("PostgreSQL required. DuckDB support removed.")
+    raise RuntimeError(
+        "PostgreSQL required but not available.\n"
+        "Quick start: docker compose up -d\n"
+        "Or set BEHIVE_DB_URL=postgresql://user:***@host:5432/dbname"
+    )
     con = _connect_db()
     try:
         raw_stmts = SCHEMA_SQL.split(";")
@@ -1347,11 +1373,11 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     except ImportError:
         _specificity = None
 
-    mission_id = new_mission_id(topic)
+    mission_id = os.environ.get("BEHIVE_MISSION_ID") or new_mission_id(topic)
     query = topic
 
     # Track active mission for SIGINT handler
-    main._active_mission_id = mission_id
+    cmd_run._active_mission_id = mission_id
     log.debug(f'  🐝  HIVE 3.0  ·  {mission_id}')
     log.debug(f'  📋  {topic[:55]}{"…" if len(topic)>55 else ""}')
     flags = []
@@ -1566,7 +1592,15 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
             ).fetchall()
             _con2.close()
             if _gaps:
-                import boto3 as _b3, json as _jj
+                try:
+                    import boto3 as _b3
+                except ImportError:
+                    from behive.engine.bedrock_compat import get_bedrock_compat_client as _bcc3
+                    class _b3:
+                        @staticmethod
+                        def client(*a, **kw):
+                            return _bcc3(stage="scout")
+                import json as _jj
                 _bc = _b3.client('bedrock-runtime', region_name='eu-central-1')
                 _gap_list = "\n".join(f"- {g[0]}" for g in _gaps)
                 _gfp = f"""You are a research director. These intelligence gaps remain after initial research:

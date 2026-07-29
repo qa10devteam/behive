@@ -291,7 +291,7 @@ class QueenPrimer:
                        primer_quality, created_at
                 FROM hive_queen_primers
                 WHERE mission_id != ?
-                  AND created_at >= NOW() - INTERVAL (?) DAY
+                  AND created_at >= NOW() - INTERVAL '45 days'
                 ORDER BY created_at DESC
                 LIMIT 50
             """, [self.mission_id, max_age_days]).fetchall()
