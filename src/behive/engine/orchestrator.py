@@ -1356,20 +1356,32 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     total_t0 = time.time()
     timings: dict[str, float] = {'queen_plan': phase0_elapsed}
 
-    # ─── Mission-level error handler ─────────────────────────────────────────
-    # If ANY phase fails with an unhandled exception, mark mission as 'error'
-    # instead of leaving it stuck in an intermediate state forever.
-    try:
-        _run_pipeline_phases(mission_id, topic, plan, timings, total_t0, think, deep, scale, query, _specificity, plan_file)
-    except KeyboardInterrupt:
-        log.info(f'\n  ⚠️  Mission interrupted by user: {mission_id}')
-        _mark_mission_error(mission_id, "User interrupted (Ctrl+C)")
-        raise
-    except Exception as pipeline_err:
-        log.warning(f'\n  ❌  MISSION FAILED: {mission_id} — {pipeline_err}')
-        _mark_mission_error(mission_id, str(pipeline_err)[:500])
-        _emit(mission_id, 'error', 'error', data={'error': str(pipeline_err)[:200]})
-        return  # Don't re-raise — graceful exit, mission is marked as error
+    # ─── Mission-level error handler with auto-retry ────────────────────────────
+    # If ANY phase fails with an unhandled exception, retry ONCE.
+    # If retry also fails, mark mission as 'error'.
+    max_attempts = int(os.environ.get("BEHIVE_MAX_RETRIES", "2"))  # 2 = first try + 1 retry
+    
+    for attempt in range(max_attempts):
+        try:
+            _run_pipeline_phases(mission_id, topic, plan, timings, total_t0, think, deep, scale, query, _specificity, plan_file)
+            return  # Success — exit
+        except KeyboardInterrupt:
+            log.info(f'\n  ⚠️  Mission interrupted by user: {mission_id}')
+            _mark_mission_error(mission_id, "User interrupted (Ctrl+C)")
+            raise
+        except Exception as pipeline_err:
+            if attempt < max_attempts - 1:
+                log.warning(f'\n  ⚠️  ATTEMPT {attempt+1} FAILED: {pipeline_err} — retrying...')
+                time.sleep(5)  # Brief pause before retry
+                # Reset timings for retry
+                timings.clear()
+                timings['queen_plan'] = 0.0
+                total_t0 = time.time()
+            else:
+                log.warning(f'\n  ❌  MISSION FAILED after {max_attempts} attempts: {mission_id} — {pipeline_err}')
+                _mark_mission_error(mission_id, str(pipeline_err)[:500])
+                _emit(mission_id, 'error', 'error', data={'error': str(pipeline_err)[:200]})
+                return  # Don't re-raise — graceful exit
 
 
 def _mark_mission_error(mission_id: str, error_msg: str) -> None:

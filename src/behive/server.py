@@ -151,10 +151,15 @@ async def security_middleware(request: Request, call_next):
 # ─── Models ───────────────────────────────────────────────────────────────────
 
 class ResearchRequest(BaseModel):
-    query: str = Field(..., description="Research topic or question")
-    depth: int = Field(3, ge=1, le=5, description="1=quick, 3=standard, 5=deep")
-    scale: Optional[int] = Field(None, ge=10, le=500, description="Task count override")
+    query: str = Field(default="", description="Research topic or question")
+    topic: str = Field(default="", description="Alias for query (backward compat)")
+    depth: int = Field(default=3, ge=1, le=5, description="1=quick, 3=standard, 5=deep")
+    scale: int = Field(default=200, ge=10, le=500, description="Max sources to scout")
     force: bool = Field(True, description="Skip dedup check")
+    
+    @property
+    def effective_query(self) -> str:
+        return self.query or self.topic
 
 
 class HealthResponse(BaseModel):
@@ -226,8 +231,10 @@ async def health():
 @app.post("/research", dependencies=[Depends(verify_auth)])
 async def start_research(req: ResearchRequest):
     """Start a new research mission. Returns job_id for polling."""
+    if not req.effective_query:
+        raise HTTPException(status_code=422, detail="Either 'query' or 'topic' must be provided")
     ts = str(int(time.time()))
-    h = hashlib.md5(f"{req.query}{ts}".encode()).hexdigest()[:6]
+    h = hashlib.md5(f"{req.effective_query}{ts}".encode()).hexdigest()[:6]
     mission_id = f"hive_{ts}_{h}"
 
     try:
@@ -237,18 +244,18 @@ async def start_research(req: ResearchRequest):
             INSERT INTO hive_missions (id, topic, status, phase, config, created_at)
             VALUES (%s, %s, 'queued', 'queued', %s::jsonb, NOW())
             ON CONFLICT (id) DO NOTHING
-        """, (mission_id, req.query, json.dumps({"depth": req.depth, "scale": req.scale})))
+        """, (mission_id, req.effective_query, json.dumps({"depth": req.depth, "scale": req.scale})))
         conn.commit()
         conn.close()
     except Exception as e:
         raise HTTPException(500, f"DB error: {e}")
 
-    asyncio.create_task(_run_pipeline(mission_id, req.query, req.depth))
+    asyncio.create_task(_run_pipeline(mission_id, req.effective_query, req.depth))
 
     return {
         "job_id": mission_id,
         "status": "running",
-        "topic": req.query,
+        "topic": req.effective_query,
         "depth": req.depth,
         "message": f"Research started. Poll GET /research/{mission_id}/status or stream GET /research/{mission_id}/events",
     }
