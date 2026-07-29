@@ -12,6 +12,7 @@ DB: configured via BEHIVE_DB_PATH env var (read_only)
 
 from __future__ import annotations
 
+import os
 import json
 import logging
 from dataclasses import dataclass, field

@@ -9,6 +9,7 @@ services:
     container_name: behive-api
     ports:
       - "${BEHIVE_PORT:-8091}:8091"
+      - "${BEHIVE_MCP_PORT:-8090}:8090"
     environment:
       - BEHIVE_DB_URL=postgresql://behive:${POSTGRES_PASSWORD:-behive2026}@postgres:5432/behive
       - BEHIVE_LLM_PROVIDER=${LLM_PROVIDER:-openai}
