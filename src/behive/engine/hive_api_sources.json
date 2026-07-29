@@ -36,24 +36,24 @@
   },
   {
     "name": "CoinCap",
-    "url": "https://api.coincap.io/v2",
+    "url": "https://api.coincap.io",
     "category": "crypto",
     "auth": "none",
     "query_type": "market_data",
     "endpoints": [
       {
-        "path": "/assets",
-        "returns": "Top 100 crypto assets with real-time prices",
+        "path": "/v2/assets?limit=20",
+        "returns": "Top crypto assets with market cap, volume, change",
         "use_when": "crypto rankings"
       },
       {
-        "path": "/assets/{id}/history?interval=d1",
-        "returns": "Daily price history",
-        "use_when": "crypto price trends"
+        "path": "/v2/assets?search={topic}&limit=10",
+        "returns": "Crypto assets matching search",
+        "use_when": "specific crypto research"
       },
       {
-        "path": "/exchanges",
-        "returns": "Exchange list with volume data",
+        "path": "/v2/exchanges?limit=10",
+        "returns": "Crypto exchange volumes and rankings",
         "use_when": "exchange comparison"
       }
     ],
@@ -563,26 +563,21 @@
     "name": "Reddit (JSON)",
     "url": "https://www.reddit.com",
     "category": "social",
-    "auth": "none",
+    "auth": "OAuth",
     "query_type": "discussions",
     "endpoints": [
       {
-        "path": "/search.json?q={topic}&sort=relevance&limit=25",
-        "returns": "Reddit posts matching query",
-        "use_when": "public opinion, community discussions"
+        "path": "/r/{subreddit}/search.json?q={topic}&sort=relevance&limit=25&restrict_sr=on&t=year",
+        "returns": "Reddit posts with scores, comments, and titles",
+        "use_when": "community opinions, public discussions, developer sentiment"
       },
       {
-        "path": "/r/{subreddit}/top.json?t=month&limit=25",
-        "returns": "Top posts in a subreddit",
-        "use_when": "subreddit trends"
-      },
-      {
-        "path": "/r/{subreddit}/search.json?q={topic}&restrict_sr=on&limit=20",
-        "returns": "Search within subreddit",
-        "use_when": "niche community research"
+        "path": "/search.json?q={topic}&sort=relevance&limit=25&t=year",
+        "returns": "Reddit search results across all subreddits",
+        "use_when": "broad public opinion, community discussions"
       }
     ],
-    "notes": "Free, add .json to any Reddit URL. Rate: 10 req/min without auth."
+    "notes": "Requires OAuth since 2023. Unauthenticated access returns 403."
   },
   {
     "name": "GDELT",
@@ -592,14 +587,14 @@
     "query_type": "events",
     "endpoints": [
       {
-        "path": "/doc/doc?query={topic}&mode=artlist&maxrecords=50&format=json",
-        "returns": "Global news articles with tone/sentiment and source countries",
+        "path": "/api/v2/doc/doc?query={topic}&mode=artlist&maxrecords=25&format=json",
+        "returns": "News articles from global media monitoring",
         "use_when": "geopolitical events, global media coverage"
       },
       {
-        "path": "/doc/doc?query={topic}&mode=timelinevol&format=json",
-        "returns": "Volume timeline \u2014 how much coverage over time",
-        "use_when": "tracking event intensity"
+        "path": "/api/v2/doc/doc?query={topic}&mode=timelinevol&format=json",
+        "returns": "Media volume timeline for a topic",
+        "use_when": "trend analysis, media attention over time"
       }
     ],
     "notes": "Free, real-time. Can timeout \u2014 use 20s timeout. Monitors 100+ languages, all countries. Great for geopolitics & conflict."
@@ -811,23 +806,23 @@
   },
   {
     "name": "Interpol Red Notices",
-    "url": "https://ws-public.interpol.int/notices/v1",
+    "url": "https://ws-public.interpol.int",
     "category": "law_enforcement",
     "auth": "none",
     "query_type": "persons",
     "endpoints": [
       {
-        "path": "/red?name={name}&resultPerPage=20",
-        "returns": "Interpol Red Notice subjects",
-        "use_when": "international fugitive search"
+        "path": "/notices/v1/red?name={topic}&resultPerPage=20",
+        "returns": "Interpol Red Notice subjects (wanted persons)",
+        "use_when": "international fugitive search, wanted persons"
       },
       {
-        "path": "/red?nationality={country_code}&resultPerPage=20",
-        "returns": "Notices by nationality",
-        "use_when": "country-specific wanted persons"
+        "path": "/notices/v1/red?nationality={country_code}&resultPerPage=20",
+        "returns": "Red Notices by nationality",
+        "use_when": "country-specific fugitive data"
       }
     ],
-    "notes": "Free. Public API for Interpol notices."
+    "notes": "Public API but may block non-browser User-Agents. Try with Accept: application/json."
   },
   {
     "name": "US Census",
@@ -1241,20 +1236,20 @@
   },
   {
     "name": "Hugging Face",
-    "url": "https://huggingface.co/api",
+    "url": "https://huggingface.co",
     "category": "ml",
     "auth": "none",
     "query_type": "models",
     "endpoints": [
       {
-        "path": "/models?search={topic}&sort=downloads&direction=-1&limit=20",
-        "returns": "ML models with downloads, likes, tags",
+        "path": "/api/models?search={topic}&sort=downloads&direction=-1&limit=20",
+        "returns": "ML models with download counts, tags, pipeline info",
         "use_when": "AI/ML model landscape, adoption metrics"
       },
       {
-        "path": "/datasets?search={topic}&sort=downloads&direction=-1&limit=20",
-        "returns": "Datasets available for training",
-        "use_when": "dataset discovery for ML"
+        "path": "/api/datasets?search={topic}&sort=downloads&direction=-1&limit=20",
+        "returns": "Datasets with download counts and descriptions",
+        "use_when": "dataset availability, training data sources"
       }
     ],
     "notes": "Free. 800K+ models, 200K+ datasets. Downloads = adoption proxy."

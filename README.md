@@ -712,7 +712,7 @@ behive serve              # Starts both REST API (:8091) + MCP (:8090)
 - [x] MCP Server (Streamable HTTP)
 - [x] SSE streaming (real-time progress)
 - [x] Knowledge graph (Neo4j)
-- [x] 70+ API sources
+- [x] 70+ API sources (24 free APIs active, 22 need BYOK keys)
 - [x] `pip install behive` ([PyPI](https://pypi.org/project/behive/))
 - [x] Docker Compose one-liner
 - [x] n8n community node ([npm](https://www.npmjs.com/package/n8n-nodes-behive))
