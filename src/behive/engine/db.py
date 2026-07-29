@@ -18,6 +18,10 @@ Features vs DuckDB:
 import os
 import psycopg2
 import psycopg2.extras
+
+# Module-level constants for compat with legacy hive2_db imports
+DB_BACKEND = "postgres"
+DB_PATH = os.environ.get("BEHIVE_DB_URL", "postgresql://localhost:***@localhost:5432/behive")
 import psycopg2.pool
 import json
 import threading

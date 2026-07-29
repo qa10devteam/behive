@@ -33,6 +33,9 @@ COPY --from=builder /install /usr/local
 # Copy application
 COPY . .
 
+# Install the behive package (provides CLI entry point)
+RUN pip install --no-cache-dir -e .
+
 # Create data directories
 RUN mkdir -p /data/reports /data/cache && chown -R behive:behive /app /data
 

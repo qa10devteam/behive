@@ -6,7 +6,18 @@ import os
 import sys
 
 
+def _install_compat():
+    """Install legacy import shims before any engine imports."""
+    try:
+        from behive.compat.shims import install_shims, install_ops_shim
+        install_ops_shim()  # Must be first — registers meta_path finder
+        install_shims()
+    except ImportError:
+        pass
+
+
 def main():
+    _install_compat()
     parser = argparse.ArgumentParser(
         prog="behive",
         description="BeHive — Deep Research Engine. Structured knowledge, not text soup.",
