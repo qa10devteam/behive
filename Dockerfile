@@ -23,7 +23,11 @@ WORKDIR /app
 
 # Runtime deps only
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 curl && \
+    libpq5 curl \
+    # Chromium deps for Playwright (browser-based search)
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -m -r behive
 
@@ -33,8 +37,10 @@ COPY --from=builder /install /usr/local
 # Copy application
 COPY . .
 
-# Install the behive package (provides CLI entry point)
-RUN pip install --no-cache-dir -e .
+# Install the behive package + Playwright browsers
+RUN pip install --no-cache-dir -e . && \
+    pip install --no-cache-dir playwright && \
+    playwright install chromium --with-deps 2>/dev/null || true
 
 # Create data directories
 RUN mkdir -p /data/reports /data/cache && chown -R behive:behive /app /data
