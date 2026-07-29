@@ -1685,7 +1685,7 @@ class ProcessingDrones:
         except Exception as exc:
             log.warning(f"Schema ensure error: {exc}")
 
-    def run(self):
+    def run(self) -> dict:
         """Synchronous entry point — wraps the async pipeline."""
         asyncio.run(self._run_async())
 
@@ -2238,7 +2238,7 @@ class ProcessingDrones:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
+def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
         description="HIVE 3.0 BPMN ProcessingDrones — transform raw content into intelligence"

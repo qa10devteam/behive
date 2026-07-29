@@ -212,7 +212,7 @@ class DomainReputation:
     # PUBLIC WRITE API
     # ─────────────────────────────────────────────────────────────────────
 
-    def update(self, url: str, quality_score: float, success: bool = True):
+    def update(self, url: str, quality_score: float, success: bool = True) -> None:
         """
         Rejestruje wynik harvestu dla domeny.
         Wywoływać po każdym _harvest_one() w HarvesterBee.
@@ -250,7 +250,7 @@ class DomainReputation:
                 self._cache[domain]["consecutive_bad"] + 1 if is_bad else 0
             )
 
-    def flush(self):
+    def flush(self) -> None:
         """
         Commits all pending updates to database.
         Wywołaj po zakończeniu harvest misji.

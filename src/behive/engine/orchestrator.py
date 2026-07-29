@@ -1330,7 +1330,7 @@ def _bar(phase: str, elapsed: float, width: int = 20) -> str:
     return f"  {icon} {phase:<18} [{bar}] {elapsed:6.1f}s"
 
 
-def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = False, scale: int = 200):
+def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = False, scale: int = 200) -> None:
     """Full pipeline with Queen-first planning: plan → scout → harvest → process → synth."""
     _init_db(None)  # No-ops on PostgreSQL, creates tables on DuckDB legacy
 
@@ -1811,7 +1811,7 @@ Return JSON array of 5 strings only."""
     _emit(mission_id, 'done', 'done', data={'total_elapsed': total_elapsed, 'phases': list(timings.keys())})
 
 
-def cmd_scout(topic: str):
+def cmd_scout(topic: str) -> None:
     """Scout only — Queen plans first, then runs hive2_scout.py."""
     # duckdb removed — PG is primary
     _init_db(None)
@@ -1844,7 +1844,7 @@ def cmd_scout(topic: str):
     log.debug(f'\n[HIVE] Mission ID do dalszego użycia: {mission_id}')
 
 
-def cmd_plan(topic: str, output_file: str | None = None):
+def cmd_plan(topic: str, output_file: str | None = None) -> None:
     """
     Queen planning only — generate and print the scout task JSON.
     Useful for inspecting what the Queen would plan for a given topic.
@@ -1879,7 +1879,7 @@ def cmd_plan(topic: str, output_file: str | None = None):
     log.debug(json.dumps(plan, ensure_ascii=False, indent=2))
 
 
-def cmd_harvest(mission_id: str):
+def cmd_harvest(mission_id: str) -> None:
     """Harvest existing mission."""
     # duckdb removed — PG is primary
     _init_db(None)
@@ -1892,7 +1892,7 @@ def cmd_harvest(mission_id: str):
 # ── P3.7: --resume — checkpoint-based recovery ────────────────────────────────
 _PHASE_ORDER = ['scout', 'harvest', 'process', 'synth', 'done']
 
-def cmd_resume(mission_id: str):
+def cmd_resume(mission_id: str) -> None:
     """Resume mission from last completed phase (checkpoint)."""
     # duckdb removed — PG is primary
     _init_db(None)
@@ -1977,7 +1977,7 @@ def cmd_resume(mission_id: str):
         cmd_process(mission_id)
 
 
-def cmd_process(mission_id: str):
+def cmd_process(mission_id: str) -> None:
     """Process existing mission."""
     # duckdb removed — PG is primary
     _init_db(None)
@@ -1997,7 +1997,7 @@ def cmd_process(mission_id: str):
         log.info(f"[HIVE] Falsifikacja failed ({e}) — raport już zapisany")
 
 
-def cmd_synth(mission_id: str):
+def cmd_synth(mission_id: str) -> None:
     """Synthesize existing mission."""
     # duckdb removed — PG is primary
     _init_db(None)

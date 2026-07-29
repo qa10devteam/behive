@@ -149,7 +149,7 @@ class QueenPrimer:
         topic: str,
         synthesis_text: str = "",
         quality_score: float = 0.5,
-    ):
+    ) -> None:
         """
         Builds and saves primer from current mission's DB data.
         Wywołaj na końcu syntezy.

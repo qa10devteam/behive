@@ -257,7 +257,7 @@ def _get_fitz():
 _aiohttp_session = None
 
 
-async def get_session():
+async def get_session() -> object:
     """Return the shared aiohttp.ClientSession, creating it if needed."""
     global _aiohttp_session
     if _aiohttp_session is None or _aiohttp_session.closed:
@@ -275,7 +275,7 @@ async def get_session():
     return _aiohttp_session
 
 
-async def close_session():
+async def close_session() -> None:
     """Close and discard the shared aiohttp.ClientSession."""
     global _aiohttp_session
     if _aiohttp_session is not None and not _aiohttp_session.closed:
@@ -392,7 +392,7 @@ class HarvesterBee:
     # Main entry point
     # ------------------------------------------------------------------
 
-    async def run(self):
+    async def run(self) -> dict:
         """Execute the main pipeline loop."""
         log.info(f"HarvesterBee starting — mission={self.mission_id}, workers={self.workers}")
 
@@ -1157,7 +1157,7 @@ class HarvesterBee:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
+def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
         description="HIVE 2.0 HarvesterBee — fetch content from hive_sources"

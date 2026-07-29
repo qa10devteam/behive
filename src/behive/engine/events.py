@@ -288,7 +288,7 @@ try:
         summary="Stream SSE events for a HIVE mission",
         response_class=StreamingResponse,
     )
-    async def mission_events_sse(mission_id: str, since_id: int = 0):
+    async def mission_events_sse(mission_id: str, since_id: int = 0) -> object:
         """
         Server-Sent Events stream for a HIVE mission.
 
