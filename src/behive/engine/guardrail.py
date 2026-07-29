@@ -28,10 +28,13 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
+import logging
 
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Typy zagrożeń
+# Threat types
 # ---------------------------------------------------------------------------
 
 class ThreatType:
@@ -48,7 +51,7 @@ class ThreatType:
 class GuardrailResult:
     blocked: bool
     threat_type: str = ThreatType.CLEAN
-    score: float = 0.0          # 0.0 = brak zagrożenia, 1.0 = pewny atak
+    score: float = 0.0          # 0.0 = no threat, 1.0 = certain attack
     reason: str = ""
     matched_pattern: str = ""
     url: str = ""
@@ -58,7 +61,7 @@ class GuardrailResult:
 # Layer 1 — Wzorce regex (znane ataki)
 # ---------------------------------------------------------------------------
 
-# Każdy wpis: (pattern_string, threat_type, opis)
+# Each entry: (pattern_string, threat_type, description)
 _INJECTION_PATTERNS: List[Tuple[str, str, str]] = [
     # Instruction hijack
     (r"ignore\s+(all\s+)?(previous|prior|above|the)?\s*(instructions?|prompts?|context|system)",
@@ -88,7 +91,7 @@ _INJECTION_PATTERNS: List[Tuple[str, str, str]] = [
     (r"you\s+are\s+now\s+(an?\s+)?(AI\s+)?(without|with\s+no)\s+(restrictions?|limits?|filters?|censorship)",
      ThreatType.ROLE_CONFUSION, "AI without restrictions"),
 
-    # Bezpośrednie iniekcje treści
+    # Direct content injections
     (r"print\s+(the\s+)?(following|this)\s+(text|message|content)\s+verbatim",
      ThreatType.PROMPT_INJECTION, "verbatim print injection"),
     (r"respond\s+only\s+with\s*[\"'`].*[\"'`]",
@@ -107,7 +110,7 @@ _INJECTION_PATTERNS: List[Tuple[str, str, str]] = [
      ThreatType.PROMPT_INJECTION, "PL: new instruction"),
 ]
 
-# Kompilacja wzorców (raz, przy imporcie)
+# Compile patterns (once, at import time)
 _COMPILED_PATTERNS = [
     (re.compile(pat, re.IGNORECASE | re.DOTALL), threat, desc)
     for pat, threat, desc in _INJECTION_PATTERNS
@@ -134,14 +137,14 @@ def _layer1_pattern_scan(text: str) -> Optional[GuardrailResult]:
 # Layer 2 — Structural anomaly detection
 # ---------------------------------------------------------------------------
 
-# Podejrzane proporcje: za dużo tokenów "sterujących" względem zwykłego tekstu
+# Suspicious ratios: too many control tokens vs plain text
 _CONTROL_WORDS = re.compile(
     r"\b(instruction|command|directive|override|bypass|ignore|forget|disregard|"
     r"pretend|roleplay|jailbreak|unrestricted|unfiltered|without.restrictions)\b",
     re.IGNORECASE
 )
 
-# Duże zagęszczenie nawiasów/specjalnych tokenów typowych dla LLM templates
+# Dense brackets/special tokens/special tokens typical for LLM templates
 _TEMPLATE_TOKENS = re.compile(
     r"(?:\[INST\]|\[\/INST\]|\[SYSTEM\]|\[\/SYSTEM\]|<\|im_start\|>|<\|im_end\|>|"
     r"<\|system\|>|<\|user\|>|<\|assistant\|>|<<SYS>>|<</SYS>>)",
@@ -168,7 +171,7 @@ def _layer2_structural_scan(text: str) -> Optional[GuardrailResult]:
             reason=f"High control-word density: {control_ratio:.1%} ({control_hits}/{word_count} words)",
         )
 
-    # Zagęszczenie template tokens
+    # Dense template tokens
     template_hits = len(_TEMPLATE_TOKENS.findall(text))
     if template_hits >= 3:
         return GuardrailResult(
@@ -178,7 +181,7 @@ def _layer2_structural_scan(text: str) -> Optional[GuardrailResult]:
             reason=f"LLM template tokens detected: {template_hits} occurrences",
         )
 
-    # Podejrzanie dużo UPPERCASE (screaming injection)
+    # Suspiciously heavy UPPERCASE (screaming injection)
     if word_count >= 15:
         upper_words = sum(1 for w in words if w.isupper() and len(w) > 3)
         upper_ratio = upper_words / word_count
@@ -208,10 +211,10 @@ def _shannon_entropy(text: str) -> float:
     return -sum((v / n) * math.log2(v / n) for v in freq.values())
 
 
-# Regex do wykrywania base64 bloków (≥40 znaków, typical padding)
+# Regex for detecting base64 blocks (≥40 chars, typical padding)
 _BASE64_BLOCK = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
 
-# Wzorzec ROT13 — typowe słowa po odkodowaniu
+# ROT13 pattern — common words after decoding
 _ROT13_INDICATORS = re.compile(
     r"\b(vafgehpgvba|vtzaber|cerivbhf|erfrg|cnffjbeq|flfgrz)\b",
     re.IGNORECASE
@@ -219,10 +222,10 @@ _ROT13_INDICATORS = re.compile(
 
 
 def _is_base64_malicious(b64_str: str) -> bool:
-    """Sprawdź czy odkodowany base64 zawiera wzorce ataku."""
+    """Check czy odkodowany base64 zawiera wzorce ataku."""
     try:
         decoded = base64.b64decode(b64_str + "==").decode("utf-8", errors="ignore")
-        # Sprawdź odkodowaną treść wzorcami Layer 1
+        # Check decoded content with Layer 1 patterns
         result = _layer1_pattern_scan(decoded)
         return result is not None
     except Exception:
@@ -252,9 +255,9 @@ def _layer3_encoding_scan(text: str) -> Optional[GuardrailResult]:
             reason="ROT13-encoded attack pattern detected",
         )
 
-    # Unicode homoglyph injection (Cyrillic/Greek wyglądające jak ASCII)
-    # Uwaga: cyrylica MOŻE być legalna (artykuły ukraińskie/rosyjskie) — blokuj tylko
-    # gdy cyrylica MIESZA się z łacińskim (homoglyph attack), nie gdy tekst jest w całości cyrylicki.
+    # Unicode homoglyph injection (Cyrillic/Greek resembling ASCII)
+    # Note: Cyrillic CAN be legitimate (Ukrainian/Russian articles) — block only
+    # when Cyrillic is MIXED with Latin (homoglyph attack), not when text is fully Cyrillic.
     suspicious_unicode = 0
     latin_count = 0
     cyrillic_count = 0
@@ -267,8 +270,8 @@ def _layer3_encoding_scan(text: str) -> Optional[GuardrailResult]:
         elif (0x0041 <= cp <= 0x005A) or (0x0061 <= cp <= 0x007A):  # ASCII a-z A-Z
             latin_count += 1
 
-    # Atak: cyrylica ZMIESZANA z łaciną (homoglify) — np. "pаypal" gdzie 'а' to U+0430
-    # Legalne: tekst w całości cyrylicki (cyrylica > 80% liter) LUB brak cyrylicy
+    # Atak: Cyrillic MIXED with Latin (homoglify) — np. "pаypal" gdzie 'а' to U+0430
+    # Legitimate: fully Cyrillic text (>80% letters) OR no Cyrillic at all
     total_alpha = max(latin_count + cyrillic_count, 1)
     cyrillic_ratio = cyrillic_count / total_alpha
     is_mixed_script = (
@@ -287,7 +290,7 @@ def _layer3_encoding_scan(text: str) -> Optional[GuardrailResult]:
             reason=f"Unicode homoglyph injection: {suspicious_unicode} suspicious chars (mixed script: {is_mixed_script})",
         )
 
-    # Bardzo wysoka entropia w krótkim tekście (typowa dla obfuskacji)
+    # Very high entropy in short text (typical for obfuscation)
     if len(text) < 300:
         entropy = _shannon_entropy(text)
         if entropy > 5.2:  # naturalny tekst: ~4.0-4.5 bits/char

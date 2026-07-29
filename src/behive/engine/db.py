@@ -18,7 +18,10 @@ Features vs DuckDB:
 import os
 import psycopg2
 import psycopg2.extras
+import logging
 
+
+log = logging.getLogger(__name__)
 # Module-level constants for compat with legacy hive2_db imports
 DB_BACKEND = "postgres"
 DB_PATH = os.environ.get("BEHIVE_DB_URL", "postgresql://localhost:***@localhost:5432/behive")
@@ -134,6 +137,7 @@ class PgConnection:
             if not self._read_only:
                 self._conn.commit()
         except Exception as e:
+            log.debug(f"Exception in db.py: {e}")
             self._conn.rollback()
             raise
         return self
@@ -161,6 +165,7 @@ class PgConnection:
             if not self._read_only:
                 self._conn.commit()
         except Exception as e:
+            log.debug(f"Exception in db.py: {e}")
             self._conn.rollback()
             raise
         return self
@@ -313,6 +318,7 @@ def health_check() -> dict:
             "top_tables": [dict(t) for t in tables],
         }
     except Exception as e:
+        log.debug(f"Exception in db.py: {e}")
         return {"status": "error", "error": str(e)}
 
 

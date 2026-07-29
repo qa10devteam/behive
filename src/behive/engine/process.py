@@ -277,7 +277,7 @@ class SGLangClient:
                 with _urllib_request.urlopen(req, timeout=120) as resp:
                     out = json.loads(resp.read())
                 content = out["choices"][0]["message"]["content"].strip()
-                # Strip markdown fences jeśli model je dodał
+                # Strip markdown fences if model added them
                 if content.startswith("```"):
                     lines = content.split("\n")
                     content = "\n".join(
@@ -285,6 +285,7 @@ class SGLangClient:
                     ).strip()
                 return content
             except Exception as e:
+                log.debug(f"Exception in process.py: {e}")
                 import time as _time
                 if attempt < 2:
                     _time.sleep(2 ** attempt)
@@ -364,8 +365,8 @@ async def _bedrock_invoke_async(
                     _executor,
                     lambda: _sglang.invoke(prompt, system_prompt, model, max_tokens),
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
         # Bedrock fallback
         _m = model or MODEL_FAST_PRIMARY
         return await loop.run_in_executor(
@@ -380,29 +381,29 @@ def _extract_json_from_text(text: str) -> Any:
     text = text.strip()
     try:
         return json.loads(text)
-    except Exception:
-        pass
+    except (json.JSONDecodeError, ValueError, KeyError) as e:
+        log.debug(f"Parse error: {e}")
     # Try fenced code block
     m = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
     if m:
         try:
             return json.loads(m.group(1))
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            log.debug(f"Parse error: {e}")
     # Try first JSON array
     m = re.search(r"\[[\s\S]*\]", text)
     if m:
         try:
             return json.loads(m.group())
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            log.debug(f"Parse error: {e}")
     # Try first JSON object
     m = re.search(r"\{[\s\S]*\}", text)
     if m:
         try:
             return json.loads(m.group())
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            log.debug(f"Parse error: {e}")
     return None
 
 
@@ -523,8 +524,8 @@ class RelevanceFilter:
                     scores = json.loads(m.group(0))
                     if len(scores) == len(docs):
                         return [max(0.0, min(1.0, float(s))) for s in scores]
-            except Exception:
-                pass
+            except (json.JSONDecodeError, ValueError, KeyError) as e:
+                log.debug(f"Parse error: {e}")
         return [0.4] * len(docs)  # fallback — conservative, below default threshold
 
     async def filter(self, docs: list[dict]) -> list[dict]:
@@ -1056,8 +1057,8 @@ class BeeWorker:
                             VALUES (nextval('hive_facts_seq'), ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                         """, row)
                         saved += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug(f"Suppressed: {e}")
         return saved
 
     def _save_entities(
@@ -1421,8 +1422,8 @@ class FactValidationDrone:
                     s = stdev(vals)
                     if s > 0 and abs(float(value) - m) > 2 * s:
                         is_outlier = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Suppressed: {e}")
 
             try:
                 con.execute("""
@@ -1454,11 +1455,11 @@ class ClaimCrossValidationDrone:
     CONFIDENCE_MAX       = 0.95
 
     def run(self, con: Any, mission_id: str) -> int:
-        # Dodaj evidence_flags jeśli nie istnieje
+        # Dodaj evidence_flags if not istnieje
         try:
             con.execute("ALTER TABLE hive_claims ADD COLUMN IF NOT EXISTS evidence_flags VARCHAR")
         except Exception:
-            pass  # może nie wspierać IF NOT EXISTS — ignoruj
+            pass  # może not wspierać IF NOT EXISTS — ignoruj
 
         try:
             rows = con.execute("""
@@ -1493,7 +1494,7 @@ class ClaimCrossValidationDrone:
         claims = [(r[0], r[1] or "", _domain_of(r[2] or ""), float(r[3] or 0.5)) for r in rows]
         n = len(claims)
 
-        # Cluster podobnych claimów (O(n²) — akceptowalne dla <500 claims)
+        # Cluster similar claims (O(n²) — acceptable for <500 claims)
         upgraded = 0
         processed_ids: set = set()
 
@@ -1509,7 +1510,7 @@ class ClaimCrossValidationDrone:
                 cid_j, text_j, dom_j, conf_j = claims[j]
                 if cid_j in processed_ids:
                     continue
-                # Fuzzy match — token set ratio (handles różna kolejność słów)
+                # Fuzzy match — token set ratio (handles different word order)
                 sim = _fuzz.token_set_ratio(text_i, text_j) / 100.0
                 if sim >= self.SIMILARITY_THRESHOLD:
                     cluster_ids.append(cid_j)
@@ -1690,8 +1691,8 @@ class ProcessingDrones:
             self._finalize(0, 0, 0, 0, 0)
             return
 
-        # Pre-cap: jeśli > 500 docs, weź top 500 wg word_count (proxy jakości)
-        # Oszczędza Bedrock TPM w RelevanceFilter
+        # Pre-cap: if > 500 docs, take top 500 by word_count (quality proxy)
+        # Saves Bedrock TPM in RelevanceFilter
         PRE_CAP = 500
         if len(docs) > PRE_CAP:
             docs.sort(key=lambda d: d.get('word_count', 0), reverse=True)
@@ -1809,7 +1810,7 @@ class ProcessingDrones:
                 _docs_done += len(batch)
                 _cur_pct = int(100 * _docs_done / _total_docs) if _total_docs else 100
                 if _cur_pct >= _last_pct + 5 or _docs_done == len(batch):
-                    print(f"  ⚙️  Process: {_cur_pct}% ({_docs_done}/{_total_docs} docs, {total_facts} claims, {total_entities} entities)")
+                    log.debug(f"  ⚙️  Process: {_cur_pct}% ({_docs_done}/{_total_docs} docs, {total_facts} claims, {total_entities} entities)")
                     _last_pct = _cur_pct
                     # Emit progress event for SSE
                     try:
@@ -1821,8 +1822,8 @@ class ProcessingDrones:
                             'claims': total_facts,
                             'entities': total_entities,
                         })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug(f"Suppressed: {e}")
 
         # ── Legacy path: BeeOpCollector — SGLang array batch (Opcja C) ──
         else:
@@ -1850,7 +1851,7 @@ class ProcessingDrones:
 
             except Exception as e:
                 log.warning(f"  BeeOpCollector failed ({e}) — fallback do sequential gather")
-                # Fallback: oryginalna pętla sequential
+                # Fallback: original sequential loop
                 for batch_start in range(0, len(scored_docs), BATCH_SIZE):
                     batch = scored_docs[batch_start: batch_start + BATCH_SIZE]
                     log.info(
@@ -1898,8 +1899,8 @@ class ProcessingDrones:
                     [self.mission_id]
                 )
                 existing_claims = self.con.fetchone()[0]
-            except Exception:
-                pass
+            except (OSError, Exception) as e:  # network/HTTP
+                log.debug(f"HTTP error: {e}")
             
             # Always run V4 extraction — produces consistently higher quality claims
             if existing_claims < 800:  # Always run V4 — its claims are higher quality
@@ -1942,8 +1943,8 @@ class ProcessingDrones:
                         'claims': v4_claims,
                         'model': 'bedrock-haiku+sonnet',
                     })
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Suppressed: {e}")
             else:
                 log.info(f"Phase A3 skipped — BeeHive already produced {existing_claims} claims")
         except Exception as e:
@@ -2174,8 +2175,8 @@ class ProcessingDrones:
                 ).fetchone()
                 topic_str = row[0] if row else None
                 self.con.close()
-            except Exception:
-                pass
+            except (OSError, Exception) as e:  # network/HTTP
+                log.debug(f"HTTP error: {e}")
             if topic_str:
                 cr = _cmod.post_process_hook(self.mission_id, topic_str)
                 log.info(
@@ -2195,24 +2196,24 @@ class ProcessingDrones:
         bee_ops: int,
     ):
         filtered = docs_input - docs_processed
-        print("\n" + "=" * 65)
-        print(f"  HIVE 2.0 BPMN PROCESS SUMMARY — Mission: {self.mission_id}")
-        print("=" * 65)
-        print(f"  Documents input     : {docs_input}")
-        print(f"  Docs filtered out   : {filtered}  (relevance < {self.relevance_threshold})")
+        log.debug("\n" + "=" * 65)
+        log.debug(f"  HIVE 2.0 BPMN PROCESS SUMMARY — Mission: {self.mission_id}")
+        log.debug("=" * 65)
+        log.debug(f"  Documents input     : {docs_input}")
+        log.debug(f"  Docs filtered out   : {filtered}  (relevance < {self.relevance_threshold})")
         # Explicitly close DuckDB to release write lock before exit
         try:
             self.con.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
 
-        print(f"  Documents processed : {docs_processed}")
-        print(f"  BPMN op executions  : {bee_ops}")
-        print(f"  Entities extracted  : {total_entities}")
-        print(f"  Facts extracted     : {total_facts}")
-        print(f"  Dedup clusters      : {clusters}")
-        print(f"  Research gaps       : {gaps}")
-        print("=" * 65 + "\n")
+        log.debug(f"  Documents processed : {docs_processed}")
+        log.debug(f"  BPMN op executions  : {bee_ops}")
+        log.debug(f"  Entities extracted  : {total_entities}")
+        log.debug(f"  Facts extracted     : {total_facts}")
+        log.debug(f"  Dedup clusters      : {clusters}")
+        log.debug(f"  Research gaps       : {gaps}")
+        log.debug("=" * 65 + "\n")
 
 
 # ---------------------------------------------------------------------------

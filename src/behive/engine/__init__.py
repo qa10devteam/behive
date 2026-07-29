@@ -34,7 +34,10 @@ Usage:
     from behive.engine.db import get_pg_connection
     from behive.engine.orchestrator import run_mission
 """
+import logging
 
+
+log = logging.getLogger(__name__)
 __all__ = [
     "orchestrator",
     "scout",

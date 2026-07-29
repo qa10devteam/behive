@@ -24,7 +24,7 @@ Tabela: hive_queen_facts
   linked_ids  : VARCHAR — JSON lista powiązanych fact_id (conflict linking)
 
 Różnica od QueenMemory:
-  QueenMemory.recall()       → "misje o temacie X istniały, znaleziono: ..."
+  QueenMemory.recall()       → "misje o temacie X istniały, found: ..."
   QueenFactMemory.search()   → "fakty semantycznie bliskie query: ..."
 
 Użycie:
@@ -32,7 +32,7 @@ Użycie:
 
   mem = QueenFactMemory()
 
-  # Po syntezie misji — zapamiętaj fakty
+  # After mission synthesis — memorize facts
   mem.add(synthesis_text, source_type="synthesis", mission_id="m-123")
 
   # Przed planowaniem nowej misji — przypomnij relevantne fakty
@@ -62,7 +62,7 @@ EMBED_DIMS     = 512
 HAIKU_MODEL_ID = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 # Wzorzec z mem0/configs/prompts.py linia 468 — ADDITIVE_EXTRACTION_PROMPT
-# Zmodyfikowany do HIVE: wyciąga fakty z synthów/raportów wywiadowczych
+# Modified for HIVE: extracts facts from synthesis/intelligence reports
 _FACT_EXTRACTION_PROMPT = """\
 You are an intelligence analyst extracting precise, reusable facts from research text.
 
@@ -88,7 +88,7 @@ Research text to extract from:
 {text}
 """
 
-# Wzorzec z mem0: conflict linking — wyciągamy ID powiązanych faktów
+# mem0 pattern: conflict linking — extract related fact IDs
 _CONFLICT_CHECK_PROMPT = """\
 Given this new fact and a list of existing facts, identify which existing facts
 are CONTRADICTED or SUPERSEDED by the new fact.
@@ -126,7 +126,7 @@ CREATE INDEX IF NOT EXISTS idx_queen_facts_mission
     ON hive_queen_facts(mission_id);
 """.format(dims=EMBED_DIMS)
 
-# FTS index — tworzony osobno (DDL nie może być w CREATE TABLE)
+# FTS index — created separately (DDL cannot be in CREATE TABLE)
 _FTS_INDEX_SQL = "PRAGMA create_fts_index(hive_queen_facts, id, fact_text, overwrite=1)"
 
 
@@ -140,7 +140,7 @@ def _embed(text: str) -> List[float]:
         modelId=EMBED_MODEL_ID,
         body=json.dumps({
             "inputText": text[:8000],
-            "dimensions": EMBED_DIMS,   # wymuszamy 512 — domyślnie Titan v2 zwraca 1024
+            "dimensions": EMBED_DIMS,   # wymuszamy 512 — domyślnot Titan v2 zwraca 1024
             "normalize": True,          # normalizacja dla cosine similarity
         }),
         contentType="application/json",
@@ -212,7 +212,7 @@ class QueenFactMemory:
     def _ensure_schema(self) -> None:
         con = self._con
         con.execute(_SCHEMA_SQL)
-        # FTS index — graceful fail (może już istnieć lub nie być dostępny)
+        # FTS index — graceful fail (may already exist or not be available)
         try:
             con.execute("INSTALL fts; LOAD fts;")
             con.execute(_FTS_INDEX_SQL)
@@ -272,7 +272,7 @@ class QueenFactMemory:
 
         log.info("QueenFactMemory.add: %d facts extracted, embedding...", len(facts))
 
-        # Pobierz istniejące ID (do dedup)
+        # Get existing IDs (for dedup)
         existing_ids = set(
             row[0] for row in con.execute(
                 "SELECT id FROM hive_queen_facts WHERE agent_id=?", [self.AGENT_ID]
@@ -308,19 +308,19 @@ class QueenFactMemory:
             saved += 1
             log.debug("QueenFactMemory: saved fact %s: %s...", fact_id[:8], fact_text[:60])
 
-        # Odśwież FTS index po batch insert
+        # Refresh FTS index after batch insert
         if saved > 0 and self._fts_ready:
             try:
                 con.execute(_FTS_INDEX_SQL)
-            except Exception:
-                pass
+            except (Exception,) as e:  # DB operation
+                log.debug(f"DB error: {e}")
 
         log.info("QueenFactMemory.add: saved %d/%d facts", saved, len(facts))
         return saved
 
     def _extract_facts(self, text: str, max_facts: int = 12) -> List[str]:
         """1 Haiku call → lista faktów. Wzorzec mem0 ADDITIVE_EXTRACTION_PROMPT."""
-        # Ogranicz długość tekstu (Haiku context window)
+        # Limit text length (Haiku context window)
         truncated = text[:6000] if len(text) > 6000 else text
         prompt = _FACT_EXTRACTION_PROMPT.format(text=truncated)
         result = _haiku(prompt, max_tokens=800)
@@ -329,7 +329,7 @@ class QueenFactMemory:
 
         # Parse JSON — graceful fallback
         try:
-            # Wyciągnij JSON array z odpowiedzi (może być owinięty w markdown)
+            # Extract JSON array from response (may be wrapped in markdown)
             json_match = _find_json_array(result)
             if json_match:
                 facts = json.loads(json_match)
@@ -351,7 +351,7 @@ class QueenFactMemory:
         top_k: int = 8,
         agent_id: Optional[str] = None,
         mission_id: Optional[str] = None,
-        min_score: float = 0.35,   # P5 fix: 0.60 filtrowało ~60% relevantnych faktów (Titan v2 512d)
+        min_score: float = 0.35,   # P5 fix: 0.60 was filtering ~60% of relevant facts (Titan v2 512d)
     ) -> List[FactRecord]:
         """
         Hybrid semantic search po faktach.
@@ -405,7 +405,7 @@ class QueenFactMemory:
             row[0]: (row, row[7]) for row in vec_rows if row[7] is not None and row[7] >= min_score
         }
 
-        # BM25 search (jeśli FTS dostępne)
+        # BM25 search (if FTS available)
         bm25_results = {}
         if self._fts_ready:
             try:
@@ -448,7 +448,7 @@ class QueenFactMemory:
         else:
             sorted_ids = sorted(vec_results, key=lambda x: vec_results[x][1], reverse=True)[:top_k]
 
-        # Zbierz brakujące rekordy (mogą być z BM25, bez embedu powyżej progu)
+        # Collect missing records (may be from BM25, without embed above threshold)
         missing_ids = [cid for cid in sorted_ids if cid not in vec_results]
         if missing_ids:
             placeholders = ",".join(["?"] * len(missing_ids))
@@ -561,9 +561,9 @@ class QueenFactMemory:
 def _find_json_array(text: str) -> Optional[str]:
     """Wyciąga pierwszy JSON array [...] z tekstu (obsługuje markdown code blocks)."""
     import re
-    # Usuń markdown backticks
+    # Remove markdown backticks
     text = re.sub(r"```(?:json)?", "", text).strip()
-    # Znajdź [...] 
+    # Find [...] 
     start = text.find("[")
     end   = text.rfind("]")
     if start != -1 and end != -1 and end > start:
@@ -583,7 +583,7 @@ if __name__ == "__main__":
     # Test z in-memory DuckDB (bez Bedrock)
     test_con = __import__("hive2_db").connect(read_only=False)
 
-    # Ręczne schema (bez HNSW, tylko cos similarity przez brute force)
+    # Manual schema (without HNSW, only cosine similarity via brute force)
     test_con.execute("""
         CREATE TABLE hive_queen_facts (
             id VARCHAR PRIMARY KEY,
@@ -606,10 +606,10 @@ if __name__ == "__main__":
         ["test_id_001", "Allegro GMV grew 18.2% YoY in Q2 2025 to PLN 14.3B", "synthesis", "queen", fake_emb]
     )
 
-    # Sprawdź
+    # Check
     rows = test_con.execute("SELECT id, fact_text FROM hive_queen_facts").fetchall()
     assert len(rows) == 1, "Insert failed"
-    print(f"✅ Schema OK — inserted: {rows[0][1][:60]}")
+    log.info(f"✅ Schema OK — inserted: {rows[0][1][:60]}")
 
     # Test fact extraction prompt format
     sample_text = """
@@ -626,7 +626,7 @@ if __name__ == "__main__":
     result = _find_json_array(test_json)
     parsed = json.loads(result)
     assert len(parsed) == 3, f"JSON parse failed: {result}"
-    print(f"✅ JSON extraction OK: {parsed}")
+    log.info(f"✅ JSON extraction OK: {parsed}")
 
     print("\n=== format_for_prompt preview ===")
     mem = QueenFactMemory.__new__(QueenFactMemory)

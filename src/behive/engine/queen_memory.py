@@ -1,8 +1,11 @@
+import logging
 #!/usr/bin/env python3
 """
 HIVE 2.0 — Queen Memory (Trwały wektor analityczny)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+
+log = logging.getLogger(__name__)
 Doktryna z dokumentu:
   "idea ta musi stać się beeqeen — strukturą kluczową dla istnienia Ula
    implikującą wektory analityczne"
@@ -31,7 +34,7 @@ Co robi ten moduł:
 Używany przez QueenPlanner w hive2.py:
   memory = QueenMemory(topic)
   ctx = memory.recall()
-  # ctx injektowany do Queen prompt → perfekcyjne instrukcje dla scoutów
+  # ctx injected into Queen prompt → perfect instructions for scouts
 """
 
 import os

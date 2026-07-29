@@ -63,7 +63,7 @@ DB_PATH = ""  # Legacy — PostgreSQL is primary
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 UA_POOL = [
-    # Chrome 131 Windows (domyślny — najwyższy trust)
+    # Chrome 131 Windows (default — highest trust)
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     # Chrome 131 Mac
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -85,7 +85,7 @@ UA_POOL = [
     "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
 ]
 
-# Chrome 131 full headers — te MUSZĄ towarzyszyć UA żeby nie być fingerprinted
+# Chrome 131 full headers — these MUST accompany UA to avoid fingerprinting
 CHROME_131_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
@@ -128,7 +128,7 @@ CFFI_IMPERSONATE_POOL = [
     "safari17_2", "safari18",
 ]
 
-# primp 1.3.1 targets (Rust-based, rquest) — UWAGA: podkreślniki!
+# primp 1.3.1 targets (Rust-based, rquest) — NOTE: underscores!
 PRIMP_IMPERSONATE_POOL = [
     "chrome_148", "chrome_147", "chrome_146", "chrome_145",
     "firefox_148", "firefox_147", "firefox_146",
@@ -192,7 +192,7 @@ KNOWN_OPEN_DOMAINS = {
     "europarl.europa.eu", "eur-lex.europa.eu",
 }
 
-# Domeny wymagające specjalnego handlera (nie typowy rekon)
+# Domains requiring special handler (not typical recon)
 SPECIAL_HANDLERS = {
     "linkedin.com":  "PLAYWRIGHT_STEALTH",
     "twitter.com":   "ARCHIVE_FALLBACK",
@@ -303,7 +303,7 @@ class DroneRecon:
                 PRIMARY KEY (mission_id, domain)
             )
         """)
-        # Migracja — dodaj brakujące kolumny do starej tabeli
+        # Migration — add missing columns to old table
         existing = [c[0] for c in db.execute(
             "SELECT column_name FROM information_schema.columns WHERE table_name='drone_map'"
         ).fetchall()]
@@ -338,7 +338,7 @@ class DroneRecon:
                 headers["Sec-Ch-Ua-Mobile"] = "?1"
         return headers
 
-    # ── Probe z pełnymi headers ───────────────────────────────────────────────
+    # ── Probe with full headers ───────────────────────────────────────────────
 
     async def _probe_url(self, url: str, ua: str,
                          session=None) -> tuple[int, str, float]:
@@ -357,12 +357,13 @@ class DroneRecon:
                     try:
                         raw = await resp.read()
                         body = raw[:3000].decode("utf-8", errors="ignore").lower()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug(f"Suppressed: {e}")
                     return resp.status, body, elapsed
         except asyncio.TimeoutError:
             return 0, "timeout", (time.time() - t0) * 1000
         except Exception as e:
+            log.debug(f"Exception in drones.py: {e}")
             return 0, str(e)[:200], (time.time() - t0) * 1000
 
     # ── Block detection ───────────────────────────────────────────────────────
@@ -392,8 +393,8 @@ class DroneRecon:
                          "/wp-json/", "/feed/", "/rss/"]:
                 if not rp.can_fetch("*", f"https://{domain}{path}"):
                     blocked.append(path)
-        except Exception:
-            pass
+        except (OSError, Exception) as e:  # network/HTTP
+            log.debug(f"HTTP error: {e}")
         return blocked
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -497,13 +498,14 @@ class DroneRecon:
                 return True, 200, body, ms
             return False, 200, f"nodriver-blocked: {block}", ms
         except Exception as e:
+            log.debug(f"Exception in drones.py: {e}")
             return False, 0, str(e)[:200], (time.time() - t0) * 1000
         finally:
             if browser:
                 try:
                     browser.stop()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Suppressed: {e}")
 
     # ── Layer 6: patchright (stealth Playwright) ──────────────────────────────
 
@@ -540,6 +542,7 @@ class DroneRecon:
                     return True, status, body, ms
                 return False, status, f"patchright-blocked: {block}", ms
         except Exception as e:
+            log.debug(f"Exception in drones.py: {e}")
             return False, 0, str(e)[:200], (time.time() - t0) * 1000
 
     # ── Layer 7: Jina relay ───────────────────────────────────────────────────
@@ -705,7 +708,7 @@ class DroneRecon:
             result.notes.append(f"no-bypass: exhausted 8 levels, block={block}")
             return result
 
-    # ── Główna pętla rekonu ────────────────────────────────────────────────────
+    # ── Main recon loop ────────────────────────────────────────────────────
 
     async def recon(self, domains: list[str]) -> dict[str, ReconResult]:
         log.info(f"[TRUTNIE v2.0] Starting 8-level recon — {len(domains)} domains")
@@ -777,7 +780,7 @@ class DroneRecon:
         db.close()
         log.info(f"[TRUTNIE] Saved {len(rows)} domain strategies to drone_map")
 
-    # ── Retreat — zacieranie śladów ───────────────────────────────────────────
+    # ── Retreat — covering tracks ───────────────────────────────────────────
 
     def retreat(self):
         """Trutnie wycofują się — czyszczą identyfikatory."""
@@ -788,8 +791,8 @@ class DroneRecon:
             for f in glob.glob(pattern):
                 try:
                     os.remove(f)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Suppressed: {e}")
 
         log.info("[TRUTNIE] Retreat complete — all session identifiers cleared")
 
@@ -830,11 +833,11 @@ def run_recon(mission_id: str, domains: list[str]) -> dict:
     drone.retreat()
 
     # Print summary
-    print(f"\n  🪲 DRONE RECON v2.0 COMPLETE — Mission: {mission_id}")
-    print(f"     Domains scanned:  {report['total_domains']}")
-    print(f"     Accessible:       {report['accessible']} ({report['coverage_pct']}%)")
-    print(f"     Blocked (skip):   {report['blocked']}")
-    print(f"     Strategies:")
+    log.debug(f"\n  🪲 DRONE RECON v2.0 COMPLETE — Mission: {mission_id}")
+    log.debug(f"     Domains scanned:  {report['total_domains']}")
+    log.debug(f"     Accessible:       {report['accessible']} ({report['coverage_pct']}%)")
+    log.debug(f"     Blocked (skip):   {report['blocked']}")
+    log.debug(f"     Strategies:")
     for strat, cnt in sorted(report['strategy_counts'].items(), key=lambda x: -x[1]):
         icons = {
             "DIRECT": "✓", "CURL_CFFI": "⚡", "PRIMP": "🦀",
@@ -844,9 +847,9 @@ def run_recon(mission_id: str, domains: list[str]) -> dict:
             "PLAYWRIGHT_STEALTH": "🔑", "ARCHIVE_FALLBACK": "📦",
             "TELEGRAM_SCRAPE": "📨",
         }
-        print(f"       {icons.get(strat,'?')} {strat:18s} × {cnt}")
+        log.debug(f"       {icons.get(strat,'?')} {strat:18s} × {cnt}")
     if report['blocked_domains']:
-        print(f"     Blocked: {', '.join(report['blocked_domains'][:5])}"
+        log.debug(f"     Blocked: {', '.join(report['blocked_domains'][:5])}"
               + (" ..." if len(report['blocked_domains']) > 5 else ""))
     return report
 
@@ -878,8 +881,8 @@ def get_strategy(mission_id: str, domain: str) -> dict:
                 "via_nodriver":   row[9],
                 "via_patchright": row[10],
             }
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f"Suppressed: {e}")
     return {"strategy": "DIRECT", "working_ua": UA_POOL[0],
             "delay_ms": 0, "via_jina": False, "via_wayback": False,
             "via_archive_ph": False, "via_nodriver": False, "via_patchright": False}
@@ -922,8 +925,8 @@ def extract_domains_from_sources(mission_id: str, max_domains: int = 50) -> list
                     domains.append(d)
                     if len(domains) >= max_domains:
                         break
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"Suppressed: {e}")
         log.info(f"extract_domains: {len(domains)} unique domains (from {len(rows)} filtered sources)")
         return domains
     except Exception as e:

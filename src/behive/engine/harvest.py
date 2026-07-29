@@ -314,7 +314,7 @@ def _content_hash(text: str) -> str:
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# Drone strategy helper — czyta mapę trutni z DuckDB
+# Drone strategy helper — reads drone map from DB
 # ---------------------------------------------------------------------------
 
 _drone_strategy_cache: dict[str, dict] = {}  # (mission_id, domain) → strategy
@@ -380,8 +380,8 @@ class HarvesterBee:
             finally:
                 try:
                     wcon.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Suppressed: {e}")
         return _ctx()
 
     # ------------------------------------------------------------------
@@ -397,7 +397,7 @@ class HarvesterBee:
             self._finalize(0)
             return
 
-        # Pokaż ile odfiltrowano
+        # Show how many were filtered
         total_pending = self.con.execute(
             "SELECT COUNT(*) FROM hive_sources WHERE mission_id=? AND status IN ('pending','scouted')",
             [self.mission_id]
@@ -409,10 +409,10 @@ class HarvesterBee:
             from hive2_bionic_quorum import QuorumChecker
             qc = QuorumChecker(self.mission_id)
             quorum = qc.check()
-            print(quorum.summary())
+            log.debug(quorum.summary())
             if quorum.needs_expansion:
-                print(f"  🐝 Quorum: {quorum.harvestable_count} < {25} — range expansion triggered")
-                print(f"  🐝 Expansion queries: {quorum.expansion_queries}")
+                log.debug(f"  🐝 Quorum: {quorum.harvestable_count} < {25} — range expansion triggered")
+                log.debug(f"  🐝 Expansion queries: {quorum.expansion_queries}")
                 # Expansion queries are logged — hive2.py pipeline handles re-scout
                 # Here we just proceed with what we have (non-blocking)
         except Exception as _qe:
@@ -434,21 +434,21 @@ class HarvesterBee:
             await queue.put(src)
 
         # ── REC-03: Adaptive Worker Reallocation (forager bee analog) ─────────
-        # Pszczoły zbieraczki realokują się do najbogatszych kwiatów.
-        # Tutaj: wdróż adaptive worker count — start z N workers, scale up jeśli
-        # queue dużo, scale down jeśli dużo consecutive errors.
+        # Forager bees reallocate to the richest flowers.
+        # TODO: implement adaptive worker count — start with N workers, scale up if
+        # queue many, scale down if many consecutive errors.
         adaptive_workers = min(self.workers, len(sources))
         if len(sources) > 100:
-            adaptive_workers = min(adaptive_workers + 2, 12)  # scale up dla dużych misji
+            adaptive_workers = min(adaptive_workers + 2, 12)  # scale up for dużych misji
         elif len(sources) < 20:
-            adaptive_workers = max(adaptive_workers - 1, 2)   # scale down dla małych
+            adaptive_workers = max(adaptive_workers - 1, 2)   # scale down for małych
 
         worker_tasks = [
             asyncio.create_task(self._worker(queue, i))
             for i in range(adaptive_workers)
         ]
 
-        # Checkpoint co 50 docs — zapis do DB na bieżąco (odporność na SIGKILL)
+        # Checkpoint every 50 docs — write to DB continuously (resilience to SIGKILL)
         async def _checkpoint_loop():
             while True:
                 await asyncio.sleep(30)
@@ -529,7 +529,7 @@ class HarvesterBee:
         ext = _ext(url)
         dom = _domain(url)
 
-        # ── DRONE STRATEGY — czyta strategię trutni dla tej domeny ──────────
+        # ── DRONE STRATEGY — reads drone strategy for this domain ──────────
         drone_strategy = _get_drone_strategy(self.mission_id, dom)
         strategy   = drone_strategy.get("strategy", "DIRECT")
         via_jina   = drone_strategy.get("via_jina", False)
@@ -545,14 +545,14 @@ class HarvesterBee:
             base["error"]  = f"drone_blocked: {drone_strategy.get('block_type', 'unknown')}"
             return base
 
-        # ── PreScout routing hint — skip jeśli BeeMaster odrzucił ────────────
+        # ── PreScout routing hint — skip if BeeMaster rejected ────────────
         if url in self._prescout_skip:
             log.debug(f"  PreScout: SKIP {url} (approved=False by BeeMaster)")
             base["method"] = "prescout_skip"
             base["error"]  = "skipped_by_prescout"
             return base
 
-        # Wymagane opóźnienie (rate-limiting — trutnie zmierzyły próg)
+        # Required delays (rate-limiting — drones measured threshold)
         if delay_ms > 0:
             await asyncio.sleep(delay_ms / 1000.0)
 
@@ -619,8 +619,8 @@ class HarvesterBee:
         try:
             from hive2_domain_reputation import get_reputation
             get_reputation().update(url, base.get("quality_score", 0.0), base.get("success", False))
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
 
         # Record URL as seen
         _cache_url(url)
@@ -661,6 +661,7 @@ class HarvesterBee:
             result["word_count"] = len(text.split())
             result["success"] = True
         except Exception as exc:
+            log.debug(f"Exception in harvest.py: {exc}")
             result["error"] = str(exc)
         return result
 
@@ -693,6 +694,7 @@ class HarvesterBee:
             result["word_count"] = len(result["text"].split())
             result["success"] = True
         except Exception as exc:
+            log.debug(f"Exception in harvest.py: {exc}")
             result["error"] = str(exc)
         return result
 
@@ -815,6 +817,7 @@ class HarvesterBee:
                             raw = await resp.text()
                     break  # success
                 except Exception as _e:
+                    log.debug(f"Exception in harvest.py: {_e}")
                     if _attempt == 2:
                         raise
                     await asyncio.sleep(2 ** _attempt)
@@ -838,6 +841,7 @@ class HarvesterBee:
             result["word_count"] = len(text.split())
             result["success"] = bool(text)
         except Exception as exc:
+            log.debug(f"Exception in harvest.py: {exc}")
             result["error"] = str(exc)
         return result
 
@@ -866,6 +870,7 @@ class HarvesterBee:
             result["word_count"] = len(text.split())
             result["success"] = bool(text)
         except Exception as exc:
+            log.debug(f"Exception in harvest.py: {exc}")
             result["error"] = str(exc)
         return result
 
@@ -882,8 +887,8 @@ class HarvesterBee:
                 article.parse()
                 try:
                     article.nlp()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Suppressed: {e}")
                 parts = []
                 if article.title:
                     parts.append(article.title)
@@ -939,8 +944,8 @@ class HarvesterBee:
         if langdetect is not None:
             try:
                 return langdetect(text[:2000])
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"Suppressed: {e}")
         # Fallback: basic heuristic
         sample = text[:500].lower()
         if any(w in sample for w in ["the ", "and ", "is ", "are ", "was "]):
@@ -960,7 +965,7 @@ class HarvesterBee:
     def _load_pending_sources(self) -> list[dict]:
         try:
             # MAX_HARVEST = 300 top-scoring sources per mission
-            # Filtr: score_relevance >= 2 (przynajmniej 2 słowa tematu w tytule/snippecie)
+            # Filtr: score_relevance >= 2 (at least 2 topic words in title/snippet/snippecie)
             #        score_total >= 15 (eliminuje losowy szum)
             rows = self.con.execute("""
                 SELECT id, url, source_type, score_total, score_relevance
@@ -1012,8 +1017,8 @@ class HarvesterBee:
                             [r["source_id"]]
                         )
                         saved += 1
-                    except Exception:
-                        pass
+                    except (Exception,) as e:  # DB operation
+                        log.debug(f"DB error: {e}")
                 self._checkpointed.add(id(r))
         if saved:
             log.info(f"  Checkpoint: +{saved} docs zapisanych do DB")
@@ -1021,11 +1026,11 @@ class HarvesterBee:
     def _save_results(self):
         saved = 0
         failed = 0
-        # Zamknij read-only connection przed write — DuckDB nie pozwala mieszać konfiguracji
+        # Close read-only connection before write
         try:
             self.con.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
         # Chunked write — 50 results per short-lived connection (avoids holding lock for full batch)
         CHUNK = 50
         for offset in range(0, len(self.results), CHUNK):
@@ -1066,13 +1071,13 @@ class HarvesterBee:
                                 SET status = 'failed'
                                 WHERE id = ?
                             """, [r["source_id"]])
-                        except Exception:
-                            pass
+                        except (Exception,) as e:  # DB operation
+                            log.debug(f"DB error: {e}")
                         failed += 1
         log.info(f"Saved {saved} content rows, {failed} failed")
 
         # ── REC-07: Domain Reputation flush (grooming behavior) ──────────────
-        # Po zapisie wyników zaktualizuj pamięć reputacji domeny w pamięci cross-mission.
+        # After saving results, update domain reputation in cross-mission memory.
         try:
             from hive2_domain_reputation import get_reputation
             _rep = get_reputation()
@@ -1129,18 +1134,18 @@ class HarvesterBee:
         total_words = sum(r.get("word_count", 0) for r in self.results)
         rate = (success / total * 100) if total else 0
 
-        print("\n" + "=" * 60)
-        print(f"  HIVE 2.0 HARVEST SUMMARY — Mission: {self.mission_id}")
-        print("=" * 60)
-        print(f"  Sources loaded   : {total_sources}")
-        print(f"  Total harvested  : {success}/{total}")
-        print(f"  Total words      : {total_words:,}")
-        print(f"  Success rate     : {rate:.1f}%")
-        print()
-        print("  By method:")
+        log.debug("\n" + "=" * 60)
+        log.debug(f"  HIVE 2.0 HARVEST SUMMARY — Mission: {self.mission_id}")
+        log.debug("=" * 60)
+        log.debug(f"  Sources loaded   : {total_sources}")
+        log.debug(f"  Total harvested  : {success}/{total}")
+        log.debug(f"  Total words      : {total_words:,}")
+        log.debug(f"  Success rate     : {rate:.1f}%")
+        log.debug("")
+        log.debug("  By method:")
         for method, count in sorted(self._method_counts.items()):
-            print(f"    {method:<30} {count}")
-        print("=" * 60 + "\n")
+            log.debug(f"    {method:<30} {count}")
+        log.debug("=" * 60 + "\n")
 
 
 # ---------------------------------------------------------------------------

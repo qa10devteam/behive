@@ -1,8 +1,11 @@
+import logging
 #!/usr/bin/env python3
 """
 HIVE 2.0 — Scout Phase (Queen-Planned Swarm Architecture)
 Executes 200+ parallel scouts, each finding 30-40 URLs from a single source+query.
 
+
+log = logging.getLogger(__name__)
 Usage:
     MODE 1 (queen-planned):
         python3 hive2_scout.py <mission_id> --plan <plan_json_file>
@@ -21,7 +24,6 @@ from datetime import datetime
 from urllib.parse import urlparse, quote_plus
 from typing import Optional
 
-# import duckdb  # removed — using hive2_db
 import hive2_db as _hive_db
 import feedparser
 
@@ -116,7 +118,7 @@ class SwarmScout:
                 f"CREATE SEQUENCE hive_sources_id_seq START {max_id + 500}"
             )
         except Exception as e:
-            print(f"  [init_seq] warning: {e}")
+            log.debug(f"  [init_seq] warning: {e}")
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
@@ -139,7 +141,7 @@ class SwarmScout:
         if score_freshness == 0:
             score_freshness = 8  # neutral baseline (previously 3 — punished undated pages)
 
-        # Authority — podniesione domyślne wartości (strona istnieje = warto sprawdzić)
+        # Authority — elevated default values (page exists = worth checking)
         domain = urlparse(url).netloc.lower().lstrip("www.")
         score_authority = 0
         for auth_domain, pts in AUTHORITY_DOMAINS.items():
@@ -156,7 +158,7 @@ class SwarmScout:
             elif any(x in domain for x in [".co.", ".com", ".io", ".ai"]):
                 score_authority = 7   # was 2 — domeny komercyjne = wartościowe źródła
             else:
-                score_authority = 6   # was 2 — pozostałe (nie karz za nieznane domeny)
+                score_authority = 6   # was 2 — pozostałe (not karz za nieznane domeny)
 
         # Depth
         depth_hits = sum(
@@ -214,7 +216,7 @@ class SwarmScout:
             # Gry / rozrywka
             "roblox.com", "twitch.tv", "youtube.com", "tiktok.com",
             "spotify.com", "netflix.com", "imdb.com",
-            # Agregatory bez treści
+            # Aggregators without content
             "feedburner.com", "bit.ly", "tinyurl.com", "linktr.ee",
             # Job boards (nie B2B research)
             "indeed.com", "glassdoor.com", "pracuj.pl", "linkedin.com/jobs",
@@ -224,8 +226,8 @@ class SwarmScout:
         if any(_domain == bd or _domain.endswith("." + bd) for bd in _BLACKLISTED_DOMAINS):
             return False
 
-        # ── SUPERSCOUT SCORE GATE — minimum jakości ───────────────────────────
-        # Wstępny skor na podstawie samego URL+tytułu+snippetu
+        # ── SUPERSCOUT SCORE GATE — minimum quality ───────────────────────────
+        # Preliminary score based on URL+title+snippet alone
         _pre_score = 0
         _combined_pre = f"{url} {title or ''} {snippet or ''}".lower()
         # Bonus za znane premium domeny
@@ -242,19 +244,19 @@ class SwarmScout:
         }
         if any(_domain == pd or _domain.endswith("." + pd) for pd in _PREMIUM_DOMAINS):
             _pre_score += 10
-        # Bonus za świeżość w URL/tytule
+        # Freshness bonus w URL/tytule
         import re as _re
         if _re.search(r"202[4-6]", _combined_pre):
             _pre_score += 5
-        # Bonus za słowa kluczowe research
+        # Bonus for research keywords
         for kw in ["report", "study", "data", "statistics", "survey", "research",
                    "market", "analysis", "trend", "benchmark", "raport"]:
             if kw in _combined_pre:
                 _pre_score += 2
                 break
-        # Filtruj słabe źródła już na etapie scout (próg = 5)
+        # Filter weak sources at scout stage (threshold = 5)
         if _pre_score < 5 and source_type not in ("rss_gov", "rss_industry", "gov_stat"):
-            # Źródła bez żadnych sygnałów jakości → skip
+            # Sources without any quality signals → skip
             if not any(x in _combined_pre for x in ["saas", "tiktok", "social media", "marketing",
                                                       "b2b", "consulting", "poland", "polska",
                                                       "turkey", "georgia", "linkedin", "roi"]):
@@ -288,7 +290,7 @@ class SwarmScout:
             self._stats[source_type] = self._stats.get(source_type, 0) + 1
             return True
         except Exception as e:
-            print(f"  [save_source] error for {url[:80]}: {e}")
+            log.debug(f"  [save_source] error for {url[:80]}: {e}")
             return False
 
     # ── Scout method: DDG text ────────────────────────────────────────────────
@@ -311,7 +313,7 @@ class SwarmScout:
                     for r in (results or [])
                 ]
             except Exception as e:
-                print(f"  [ddg_text] '{query[:60]}': {e}")
+                log.debug(f"  [ddg_text] '{query[:60]}': {e}")
                 return []
 
     # ── Scout method: DDG news ────────────────────────────────────────────────
@@ -334,7 +336,7 @@ class SwarmScout:
                     for r in (results or [])
                 ]
             except Exception as e:
-                print(f"  [ddg_news] '{query[:60]}': {e}")
+                log.debug(f"  [ddg_news] '{query[:60]}': {e}")
                 return []
 
     # ── Scout method: DDG site: ───────────────────────────────────────────────
@@ -390,7 +392,7 @@ class SwarmScout:
                         })
                 return results
             except Exception as e:
-                print(f"  [google_rss] '{query[:60]}' lang={lang}: {e}")
+                log.debug(f"  [google_rss] '{query[:60]}' lang={lang}: {e}")
                 return []
 
     # ── Scout method: Wayback CDX ─────────────────────────────────────────────
@@ -424,7 +426,7 @@ class SwarmScout:
                     })
                 return results
             except Exception as e:
-                print(f"  [wayback_cdx] {site}: {e}")
+                log.debug(f"  [wayback_cdx] {site}: {e}")
                 return []
 
     # ── Scout method: Jina search ─────────────────────────────────────────────
@@ -455,7 +457,7 @@ class SwarmScout:
                         results.append({"url": link, "title": title, "snippet": ""})
                 return results
             except Exception as e:
-                print(f"  [jina_search] '{query[:60]}': {e}")
+                log.debug(f"  [jina_search] '{query[:60]}': {e}")
                 return []
 
     # ── Scout method: curl site-search ───────────────────────────────────────
@@ -487,7 +489,7 @@ class SwarmScout:
                         results.append({"url": link, "title": "", "snippet": ""})
                 return results[:40]
             except Exception as e:
-                print(f"  [curl_sitesearch] '{query[:60]}' site={site}: {e}")
+                log.debug(f"  [curl_sitesearch] '{query[:60]}' site={site}: {e}")
                 return []
 
     # ── Task dispatcher ───────────────────────────────────────────────────────
@@ -551,7 +553,7 @@ class SwarmScout:
             return saved
 
         except Exception as e:
-            print(f"  [task_err] method={method} query={query[:50]}: {e}")
+            log.debug(f"  [task_err] method={method} query={query[:50]}: {e}")
             return 0
 
     # ── execute_plan: main entry for queen-planned mode ───────────────────────
@@ -568,12 +570,12 @@ class SwarmScout:
         except Exception:
             self._seen_urls = set()
 
-        print(f"\n{'='*62}")
-        print(f"  🐝 HIVE 2.0 SWARM SCOUT — {self.mission_id[:16]}")
-        print(f"  📋 Executing {len(plan)} scout tasks in parallel")
-        print(f"  🔄 Pre-loaded {len(self._seen_urls)} existing URLs")
-        print(f"  🕐 Started: {datetime.utcnow().strftime('%H:%M:%S UTC')}")
-        print(f"{'='*62}\n")
+        log.debug(f"\n{'='*62}")
+        log.debug(f"  🐝 HIVE 2.0 SWARM SCOUT — {self.mission_id[:16]}")
+        log.debug(f"  📋 Executing {len(plan)} scout tasks in parallel")
+        log.debug(f"  🔄 Pre-loaded {len(self._seen_urls)} existing URLs")
+        log.debug(f"  🕐 Started: {datetime.utcnow().strftime('%H:%M:%S UTC')}")
+        log.debug(f"{'='*62}\n")
 
         t0 = time.time()
         coroutines = [self._run_task(task) for task in plan]
@@ -590,14 +592,14 @@ class SwarmScout:
         except Exception:
             breakdown = list(self._stats.items())
 
-        print(f"\n{'='*62}")
-        print(f"  ✅ SWARM COMPLETE in {elapsed:.1f}s")
-        print(f"  📊 {self._total_saved} URLs saved this run")
-        print(f"{'─'*62}")
+        log.debug(f"\n{'='*62}")
+        log.debug(f"  ✅ SWARM COMPLETE in {elapsed:.1f}s")
+        log.debug(f"  📊 {self._total_saved} URLs saved this run")
+        log.debug(f"{'─'*62}")
         for src, cnt in breakdown:
             bar = "█" * min(40, cnt // 2)
-            print(f"     {src:<22} {cnt:>5}  {bar}")
-        print(f"{'='*62}\n")
+            log.debug(f"     {src:<22} {cnt:>5}  {bar}")
+        log.debug(f"{'='*62}\n")
 
         # Update mission
         try:
@@ -612,7 +614,7 @@ class SwarmScout:
                     [self._total_saved, self.mission_id],
                 )
             except Exception as e:
-                print(f"  [db] mission update failed: {e}")
+                log.debug(f"  [db] mission update failed: {e}")
 
         self.db.close()
         return self._total_saved
@@ -703,9 +705,9 @@ def main():
     args = sys.argv[1:]
 
     if len(args) < 2:
-        print("Usage:")
-        print("  python3 hive2_scout.py <mission_id> --plan <plan_json_file>")
-        print("  python3 hive2_scout.py <mission_id> <topic>")
+        log.debug("Usage:")
+        log.debug("  python3 hive2_scout.py <mission_id> --plan <plan_json_file>")
+        log.debug("  python3 hive2_scout.py <mission_id> <topic>")
         sys.exit(1)
 
     mission_id = args[0]
@@ -717,33 +719,33 @@ def main():
         try:
             plan_file = remaining[idx + 1]
         except IndexError:
-            print("Error: --plan requires a path to a JSON file")
+            log.debug("Error: --plan requires a path to a JSON file")
             sys.exit(1)
 
         with open(plan_file, "r") as f:
             plan = json.load(f)
 
         if not isinstance(plan, list):
-            print("Error: plan JSON must be a list of scout task objects")
+            log.debug("Error: plan JSON must be a list of scout task objects")
             sys.exit(1)
 
         # topic: try to infer from plan or leave blank
         topic = plan[0].get("query", "") if plan else ""
-        print(f"[hive2_scout] MODE=queen-planned  mission={mission_id}  tasks={len(plan)}")
+        log.info(f"[hive2_scout] MODE=queen-planned  mission={mission_id}  tasks={len(plan)}")
 
     # ── MODE 2: standalone ───────────────────────────────────────────────────
     else:
         topic_parts = [a for a in remaining if not a.startswith("--")]
         topic = " ".join(topic_parts)
         if not topic:
-            print("Error: topic required in standalone mode")
+            log.debug("Error: topic required in standalone mode")
             sys.exit(1)
         plan = generate_standalone_plan(topic)
-        print(f"[hive2_scout] MODE=standalone  mission={mission_id}  topic={topic!r}  tasks={len(plan)}")
+        log.info(f"[hive2_scout] MODE=standalone  mission={mission_id}  topic={topic!r}  tasks={len(plan)}")
 
     scout = SwarmScout(mission_id, topic)
     total = asyncio.run(scout.execute_plan(plan))
-    print(f"\n✓ Scout done — {total} URLs discovered for mission {mission_id}")
+    log.debug(f"\n✓ Scout done — {total} URLs discovered for mission {mission_id}")
 
 
 if __name__ == "__main__":

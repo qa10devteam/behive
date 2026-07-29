@@ -1,7 +1,10 @@
-#!/usr/bin/env python3
+from __future__ import annotations
+import logging
 """
 hive2_events.py — HIVE 2.0 Event Bus & SSE Streaming Infrastructure
 
+
+log = logging.getLogger(__name__)
 Provides:
   - hive_events DuckDB table DDL + management
   - emit_event()       — write a structured event to the DB
@@ -14,7 +17,6 @@ Usage (standalone test):
   python3 hive2_events.py --test
 """
 
-from __future__ import annotations
 
 import json
 import time

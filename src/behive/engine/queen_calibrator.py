@@ -1,7 +1,7 @@
 """
 QueenCalibrator — HIVE Auto-Calibration Module
 ================================================
-Analizuje historyczne dane misji HIVE (DuckDB) i generuje wektory
+Analyzes historical HIVE mission data (DuckDB) i generuje wektory
 kalibracyjne dla Queen: które źródła, wzorce i strategie działają
 najlepiej per topic_domain.
 
@@ -30,7 +30,7 @@ LOG_FMT = "%(asctime)s [QueenCalibrator] %(levelname)s — %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FMT)
 log = logging.getLogger("QueenCalibrator")
 
-# Mapowanie słów kluczowych w temacie → topic_domain
+# Mapping keywords in topic → topic_domain
 TOPIC_DOMAIN_KEYWORDS: dict[str, list[str]] = {
     "regulatory_analysis": [
         "sanctions", "bypass", "dual-use", "eu regulations", "regulatory",
@@ -100,7 +100,7 @@ class CalibrationProfile:
     topic_domain: str
     generated_at: datetime = field(default_factory=datetime.utcnow)
 
-    # Źródła
+    # Sources
     source_profiles: list[SourceProfile] = field(default_factory=list)
     blocked_domains: list[str] = field(default_factory=list)
     cloudflare_domains: list[str] = field(default_factory=list)
@@ -118,10 +118,10 @@ class CalibrationProfile:
     # Tier tuning
     tier_weights: list[dict] = field(default_factory=list)
 
-    # Narzędzia
+    # Tools
     tool_weights: dict[str, float] = field(default_factory=dict)
 
-    # Queen accuracy (jeśli dostępne)
+    # Queen accuracy (if available)
     prediction_accuracy: Optional[float] = None
     calibration_n: int = 0
 
@@ -147,14 +147,14 @@ class CalibrationProfile:
 
 class QueenCalibrator:
     """
-    Analizuje historyczne dane misji HIVE i generuje instrukcje kalibracyjne
+    Analyzes historical HIVE mission data i generuje instrukcje kalibracyjne
     dla modelu Queen.
 
     Użycie:
         calibrator = QueenCalibrator()
         profile = calibrator.analyze_historical_performance("regulatory_analysis")
         block = calibrator.generate_calibration_block("regulatory_analysis")
-        # → wstrzyknij `block` do promptu Queen przed generowaniem tasków
+        # → inject `block` into Queen prompt before generating tasks
     """
 
     def __init__(self, db_path: str | Path = DB_PATH):
@@ -211,7 +211,7 @@ class QueenCalibrator:
         profile = CalibrationProfile(topic_domain=domain)
 
         with self._conn() as conn:
-            # 1. Źródła — per source_type i domain
+            # 1. Sources — per source_type and domain
             profile.source_profiles = self._analyze_sources(conn, domain)
 
             # 2. Zablokowane domeny (drone_map)
@@ -219,7 +219,7 @@ class QueenCalibrator:
                 self._analyze_drone_map(conn)
             )
 
-            # 3. Operacje pszczół (bee_results)
+            # 3. Bee operations (bee_results)
             profile.best_operations = self._analyze_operations(conn, domain)
 
             # 4. Priors (znane fakty bazowe)
@@ -279,7 +279,7 @@ class QueenCalibrator:
         self, conn: Any, domain: str
     ) -> list[SourceProfile]:
         """Pobiera profil jakości źródeł per source_type dla domeny."""
-        # Mapuj domain → słowa kluczowe do filtrowania misji
+        # Map domain → keywords for mission filtering
         keywords = TOPIC_DOMAIN_KEYWORDS.get(domain, [])
         kw_filter = " OR ".join(
             f"LOWER(m.topic) LIKE '%{kw}%'" for kw in keywords
@@ -396,7 +396,7 @@ class QueenCalibrator:
             WHERE times_contradicted = 0
             ORDER BY times_confirmed DESC, confidence DESC
         """).fetchall()
-        # Filtruj per domain jeśli jest dopasowanie, inaczej zwróć wszystkie
+        # Filter per domain if match, else return all
         matched = [
             {"fact": r[0], "domain": r[1], "confidence": r[2],
              "confirmed": r[3], "contradicted": r[4]}
@@ -706,7 +706,7 @@ def _source_recommendation(source_type: str, avg_score: float) -> str:
     recs = {
         "file_pdf": "Dokumenty PDF zawierają strukturalne dane — najwyższy priorytet",
         "gov_registry": "Rejestry rządowe: authority~95 — idealne dla danych faktycznych",
-        "eu_source": "Źródła EU: authority~95, dobre dla regulacji i statystyk",
+        "eu_source": "Sources EU: authority~95, dobre dla regulacji i statystyk",
         "search": "Wyszukiwarka: dobry balans relevance/authority przy scored",
         "news": "Newsy: uwaga na świeżość, sprawdź datę publikacji",
         "academic": "Akademickie: niska authority (paywall), ale wysokie relevance gdy dostępne",
@@ -731,9 +731,9 @@ def _source_recommendation(source_type: str, avg_score: float) -> str:
 
 def _demo():
     """Demonstracja działania QueenCalibrator — uruchamiana jako skrypt."""
-    print("=" * 70)
-    print("  QueenCalibrator DEMO — HIVE NEXUS")
-    print("=" * 70)
+    log.debug("=" * 70)
+    log.debug("  QueenCalibrator DEMO — HIVE NEXUS")
+    log.debug("=" * 70)
 
     calibrator = QueenCalibrator()
 
@@ -746,12 +746,12 @@ def _demo():
     ]
 
     for topic in demo_topics:
-        print(f"\n{'─'*70}")
-        print(f"  TOPIC: {topic}")
-        print("─" * 70)
+        log.debug(f"\n{'─'*70}")
+        log.debug(f"  TOPIC: {topic}")
+        log.debug("─" * 70)
         block = calibrator.generate_calibration_block(topic)
-        print(block)
-        print()
+        log.debug(block)
+        log.debug("")
 
 
 if __name__ == "__main__":

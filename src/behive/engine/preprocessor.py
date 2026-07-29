@@ -1,8 +1,11 @@
+import logging
 #!/usr/bin/env python3
 """
 HIVE 2.0 — hive2_preprocessor.py
 Query Clarifier + Specificity Scorer
 
+
+log = logging.getLogger(__name__)
 Inspired by: aitmpl.com deep-research-team / query-clarifier agent pattern
 Runs BEFORE scout phase to catch ambiguous topics early.
 
@@ -175,11 +178,11 @@ def preprocess_query(
     if score < SPECIFICITY_THRESHOLD and interactive and not force:
         clarifications = _generate_clarifications(topic)
 
-        print(f"\n  ⚠️  Topic specificity score: {score:.2f}/1.00 (threshold: {SPECIFICITY_THRESHOLD})")
-        print(f"  Topic '{topic}' is somewhat broad. Answer these to improve research quality:\n")
+        log.debug(f"\n  ⚠️  Topic specificity score: {score:.2f}/1.00 (threshold: {SPECIFICITY_THRESHOLD})")
+        log.debug(f"  Topic '{topic}' is somewhat broad. Answer these to improve research quality:\n")
         for i, q in enumerate(clarifications, 1):
-            print(f"  {i}. {q}")
-        print(f"\n  Press Enter to continue with broad topic, or type a more specific query:")
+            log.debug(f"  {i}. {q}")
+        log.debug(f"\n  Press Enter to continue with broad topic, or type a more specific query:")
 
         try:
             user_input = input("  > ").strip()
