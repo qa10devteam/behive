@@ -1842,6 +1842,16 @@ Return JSON array of 5 strings only."""
     for phase, t in timings.items():
         log.debug(_bar(phase, t))
     log.debug(f'\n{"═"*62}\n')
+
+    # ─── Neo4j Knowledge Graph ingest (non-blocking) ───────────────────────────
+    try:
+        from behive.knowledge_graph import ingest_entities_from_claims
+        neo4j_count = ingest_entities_from_claims(mission_id)
+        if neo4j_count > 0:
+            log.info(f'  🕸️  Neo4j: ingested {neo4j_count} entities from mission claims')
+    except Exception as neo4j_err:
+        log.debug(f'  Neo4j ingest skipped: {neo4j_err}')
+
     _emit(mission_id, 'done', 'done', data={'total_elapsed': total_elapsed, 'phases': list(timings.keys())})
 
 

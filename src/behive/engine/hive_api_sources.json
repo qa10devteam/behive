@@ -35,26 +35,26 @@
     "notes": "Rate limit: 10-30/min free. {id} = 'bitcoin', 'ethereum', etc."
   },
   {
-    "name": "CoinCap",
-    "url": "https://api.coincap.io",
+    "name": "CoinPaprika",
+    "url": "https://api.coinpaprika.com",
     "category": "crypto",
     "auth": "none",
     "query_type": "market_data",
     "endpoints": [
       {
-        "path": "/v2/assets?limit=20",
-        "returns": "Top crypto assets with market cap, volume, change",
+        "path": "/v1/tickers",
+        "returns": "Top crypto tickers with price, market cap, volume",
         "use_when": "crypto rankings"
       },
       {
-        "path": "/v2/assets?search={topic}&limit=10",
-        "returns": "Crypto assets matching search",
+        "path": "/v1/search?q={topic}&limit=10",
+        "returns": "Crypto coins/exchanges matching query",
         "use_when": "specific crypto research"
       },
       {
-        "path": "/v2/exchanges?limit=10",
-        "returns": "Crypto exchange volumes and rankings",
-        "use_when": "exchange comparison"
+        "path": "/v1/global",
+        "returns": "Global crypto market data",
+        "use_when": "crypto market overview"
       }
     ],
     "notes": "Free tier: 200 req/min. Real-time WebSocket available."
@@ -135,26 +135,6 @@
     "notes": "120 req/min. Key series: GDP, UNRATE, CPIAUCSL, FEDFUNDS, DGS10. Free key at fred.stlouisfed.org"
   },
   {
-    "name": "Econdb",
-    "url": "https://www.econdb.com/api/series",
-    "category": "macro",
-    "auth": "none",
-    "query_type": "economic_data",
-    "endpoints": [
-      {
-        "path": "/?ticker=RGDP_{country}&format=json",
-        "returns": "Real GDP time series for a country",
-        "use_when": "GDP data"
-      },
-      {
-        "path": "/?ticker=CPHI_{country}&format=json",
-        "returns": "CPI/inflation data",
-        "use_when": "inflation rates"
-      }
-    ],
-    "notes": "Free, no key. Country codes: US, GB, DE, JP, CN, etc."
-  },
-  {
     "name": "ExchangeRate-API",
     "url": "https://open.er-api.com/v6",
     "category": "forex",
@@ -162,8 +142,8 @@
     "query_type": "market_data",
     "endpoints": [
       {
-        "path": "/latest/{base}",
-        "returns": "Current exchange rates for 160+ currencies",
+        "path": "/latest/USD",
+        "returns": "Current exchange rates for 160+ currencies vs USD",
         "use_when": "currency conversion, forex rates"
       }
     ],
@@ -260,41 +240,6 @@
     "notes": "Free. Can be slow (10-15s). Key indicators: NY.GDP.MKTP.CD (GDP), SP.POP.TOTL (population), SI.POV.GINI (Gini)"
   },
   {
-    "name": "IMF Data",
-    "url": "https://dataservices.imf.org/REST/SDMX_JSON.svc",
-    "category": "economics",
-    "auth": "none",
-    "query_type": "statistics",
-    "endpoints": [
-      {
-        "path": "/CompactData/IFS/A.{country}.NGDP_R_XDC.?startPeriod=2020",
-        "returns": "Real GDP growth from IMF IFS",
-        "use_when": "IMF economic forecasts"
-      },
-      {
-        "path": "/Dataflow",
-        "returns": "List all available IMF datasets",
-        "use_when": "discovering IMF data"
-      }
-    ],
-    "notes": "Free. May have DNS issues from some hosts. Alternative: use World Bank API for similar data."
-  },
-  {
-    "name": "OECD",
-    "url": "https://sdmx.oecd.org/public/rest/data",
-    "category": "economics",
-    "auth": "none",
-    "query_type": "statistics",
-    "endpoints": [
-      {
-        "path": "/OECD.SDD.NAD,DSD_NAAG@DF_NAAG_I,1.0/A.{country}.B1GQ.V..?startPeriod=2020",
-        "returns": "GDP and national accounts",
-        "use_when": "OECD country comparisons"
-      }
-    ],
-    "notes": "Free SDMX API. Complex but comprehensive."
-  },
-  {
     "name": "Frankfurter",
     "url": "https://api.frankfurter.app",
     "category": "forex",
@@ -347,22 +292,12 @@
     "query_type": "papers",
     "endpoints": [
       {
-        "path": "/paper/search?query={topic}&limit=20&fields=title,year,citationCount,authors,abstract,venue",
-        "returns": "Papers with citation counts",
-        "use_when": "highly-cited research"
-      },
-      {
-        "path": "/paper/{paper_id}?fields=title,abstract,citations,references",
-        "returns": "Paper with full citation graph",
-        "use_when": "citation analysis"
-      },
-      {
-        "path": "/author/search?query={name}&fields=name,hIndex,paperCount",
-        "returns": "Researcher profile",
-        "use_when": "researcher metrics"
+        "path": "/paper/search?query={topic}&limit=10&fields=title,year,citationCount,authors,abstract",
+        "returns": "Academic papers with citation counts",
+        "use_when": "academic literature search"
       }
     ],
-    "notes": "100 req/5min without key (429 if exceeded). Wait 60s on rate limit. 5000/5min with free key from semanticscholar.org."
+    "notes": "Rate-limited: 1 req/sec without key. Works in normal pipeline flow. Set S2_API_KEY for 100 req/sec."
   },
   {
     "name": "OpenAlex",
@@ -466,18 +401,18 @@
   },
   {
     "name": "PatentsView (USPTO)",
-    "url": "https://api.patentsview.org",
+    "url": "https://search.patentsview.org/api/v1",
     "category": "patents",
-    "auth": "none",
+    "auth": "apiKey",
     "query_type": "patents",
     "endpoints": [
       {
-        "path": "/patents/query?q={\"_text_any\":{\"patent_abstract\":\"{topic}\"}}&f=[\"patent_number\",\"patent_title\",\"patent_date\",\"assignee_organization\"]",
-        "returns": "US patents matching topic",
-        "use_when": "patent landscape analysis"
+        "path": "/patent/?q={\"_text_any\":{\"patent_abstract\":\"{topic}\"}}&f=[\"patent_number\",\"patent_title\",\"patent_date\"]&s=[{\"patent_date\":\"desc\"}]&o={\"per_page\":20}",
+        "returns": "US patents matching topic with dates",
+        "use_when": "patent search, intellectual property research"
       }
     ],
-    "notes": "Free, no key. Full US patent database."
+    "notes": "Moved to v2 with API key. Set PATENTSVIEW_API_KEY. Free tier available."
   },
   {
     "name": "Wikipedia",
@@ -580,26 +515,6 @@
     "notes": "Requires OAuth since 2023. Unauthenticated access returns 403."
   },
   {
-    "name": "GDELT",
-    "url": "https://api.gdeltproject.org/api/v2",
-    "category": "geopolitics",
-    "auth": "none",
-    "query_type": "events",
-    "endpoints": [
-      {
-        "path": "/api/v2/doc/doc?query={topic}&mode=artlist&maxrecords=25&format=json",
-        "returns": "News articles from global media monitoring",
-        "use_when": "geopolitical events, global media coverage"
-      },
-      {
-        "path": "/api/v2/doc/doc?query={topic}&mode=timelinevol&format=json",
-        "returns": "Media volume timeline for a topic",
-        "use_when": "trend analysis, media attention over time"
-      }
-    ],
-    "notes": "Free, real-time. Can timeout \u2014 use 20s timeout. Monitors 100+ languages, all countries. Great for geopolitics & conflict."
-  },
-  {
     "name": "NewsAPI",
     "url": "https://newsapi.org/v2",
     "category": "news",
@@ -655,19 +570,19 @@
     "notes": "Free, no key. Full text of Federal Register since 1994."
   },
   {
-    "name": "Helium (News + Markets)",
-    "url": "https://heliumtrades.com/mcp-page/",
-    "category": "news_finance",
-    "auth": "none",
+    "name": "NewsData.io",
+    "url": "https://newsdata.io/api/1",
+    "category": "news",
+    "auth": "apiKey",
     "query_type": "news",
     "endpoints": [
       {
-        "path": "/api/news?query={topic}",
-        "returns": "News with media bias scoring + balanced synthesis",
-        "use_when": "bias-aware news analysis"
+        "path": "/news?q={topic}&language=en&apikey={key}",
+        "returns": "Latest news articles with source, title, description",
+        "use_when": "current events, breaking news"
       }
     ],
-    "notes": "Free. Unique: media bias scoring on articles."
+    "notes": "Free tier: 200 req/day. Set NEWSDATA_IO_API_KEY env var."
   },
   {
     "name": "MarketAux",
@@ -805,26 +720,6 @@
     "notes": "Free key required at opensanctions.org. Aggregates OFAC, EU, UN, UK sanctions lists."
   },
   {
-    "name": "Interpol Red Notices",
-    "url": "https://ws-public.interpol.int",
-    "category": "law_enforcement",
-    "auth": "none",
-    "query_type": "persons",
-    "endpoints": [
-      {
-        "path": "/notices/v1/red?name={topic}&resultPerPage=20",
-        "returns": "Interpol Red Notice subjects (wanted persons)",
-        "use_when": "international fugitive search, wanted persons"
-      },
-      {
-        "path": "/notices/v1/red?nationality={country_code}&resultPerPage=20",
-        "returns": "Red Notices by nationality",
-        "use_when": "country-specific fugitive data"
-      }
-    ],
-    "notes": "Public API but may block non-browser User-Agents. Try with Accept: application/json."
-  },
-  {
     "name": "US Census",
     "url": "https://api.census.gov/data",
     "category": "demographics",
@@ -845,21 +740,6 @@
     "notes": "Free, optional key. Thousands of variables available."
   },
   {
-    "name": "data.gov (US)",
-    "url": "https://catalog.data.gov/api/3",
-    "category": "government",
-    "auth": "none",
-    "query_type": "datasets",
-    "endpoints": [
-      {
-        "path": "/action/package_search?q={topic}&rows=20",
-        "returns": "US government datasets matching query",
-        "use_when": "finding government data sources"
-      }
-    ],
-    "notes": "Free. Catalog of 300K+ US gov datasets."
-  },
-  {
     "name": "EU Open Data Portal",
     "url": "https://data.europa.eu/api/hub/search",
     "category": "government",
@@ -867,9 +747,9 @@
     "query_type": "datasets",
     "endpoints": [
       {
-        "path": "/datasets?q={topic}&limit=20",
-        "returns": "EU datasets matching query",
-        "use_when": "European government data"
+        "path": "?q={topic}&limit=20&locale=en",
+        "returns": "EU open datasets matching query",
+        "use_when": "EU statistics, policy data"
       }
     ],
     "notes": "Free. 1.6M+ EU datasets from 36 countries."
@@ -912,14 +792,9 @@
     "query_type": "fiscal_data",
     "endpoints": [
       {
-        "path": "/search/spending_by_agency/",
-        "returns": "Federal spending by agency",
-        "use_when": "US government budget analysis"
-      },
-      {
-        "path": "/search/spending_by_category/",
-        "returns": "Spending categories breakdown",
-        "use_when": "where tax money goes"
+        "path": "/references/toptier_agencies/",
+        "returns": "All federal agencies with budget data",
+        "use_when": "US government spending analysis"
       }
     ],
     "notes": "Free. $50T+ in spending data. POST requests with filters."
@@ -980,21 +855,6 @@
     "notes": "Limited free. 200M+ companies worldwide."
   },
   {
-    "name": "OpenMercantil (Spain)",
-    "url": "https://openmercantil.es/api",
-    "category": "business",
-    "auth": "none",
-    "query_type": "company_data",
-    "endpoints": [
-      {
-        "path": "/companies/search?q={name}",
-        "returns": "Spanish company public data and BORME events",
-        "use_when": "Spanish market research"
-      }
-    ],
-    "notes": "Free. Spanish company registry data."
-  },
-  {
     "name": "GitHub",
     "url": "https://api.github.com",
     "category": "development",
@@ -1038,21 +898,6 @@
       }
     ],
     "notes": "Free, unlimited. 2M+ packages."
-  },
-  {
-    "name": "PyPI",
-    "url": "https://pypi.org",
-    "category": "development",
-    "auth": "none",
-    "query_type": "packages",
-    "endpoints": [
-      {
-        "path": "/pypi/{package}/json",
-        "returns": "Package metadata, releases, downloads",
-        "use_when": "Python package research"
-      }
-    ],
-    "notes": "Free. For search use: https://pypi.org/search/?q={topic} (HTML only)."
   },
   {
     "name": "Libraries.io",
@@ -1120,59 +965,19 @@
     "notes": "Free. Useful for systems programming landscape."
   },
   {
-    "name": "Product Hunt (unofficial)",
-    "url": "https://www.producthunt.com/frontend/graphql",
-    "category": "startups",
-    "auth": "none",
-    "query_type": "products",
-    "endpoints": [
-      {
-        "path": "",
-        "returns": "GraphQL \u2014 search products, upvotes, makers",
-        "use_when": "startup/product launches, competitor discovery"
-      }
-    ],
-    "notes": "Unofficial. OAuth needed for full access. Alternative: scrape."
-  },
-  {
     "name": "UN Comtrade",
-    "url": "https://comtradeapi.un.org/data/v1/get",
+    "url": "https://comtradeapi.un.org",
     "category": "trade",
-    "auth": "none",
+    "auth": "apiKey",
     "query_type": "trade_data",
     "endpoints": [
       {
-        "path": "/C/A/HS?reporterCode={country}&period={year}&partnerCode=0&cmdCode={hs_code}",
-        "returns": "Import/export data between countries",
-        "use_when": "bilateral trade analysis, supply chains"
+        "path": "/public/v1/preview/C/A/HS?reporterCode=842&period=2023&partnerCode=0&cmdCode=TOTAL&flowCode=M",
+        "returns": "US total imports by partner country",
+        "use_when": "trade flows, import/export data"
       }
     ],
-    "notes": "Free: 100 req/hr. Country codes: 840=US, 156=CN, 276=DE. HS codes for product categories."
-  },
-  {
-    "name": "REST Countries",
-    "url": "https://restcountries.com/v3.1",
-    "category": "geo",
-    "auth": "none",
-    "query_type": "country_data",
-    "endpoints": [
-      {
-        "path": "/name/{country}",
-        "returns": "Country data: population, GDP, region, languages, currencies",
-        "use_when": "country profiles"
-      },
-      {
-        "path": "/region/{region}",
-        "returns": "All countries in a region",
-        "use_when": "regional analysis"
-      },
-      {
-        "path": "/all?fields=name,population,gdp,region",
-        "returns": "All countries basic data",
-        "use_when": "global comparisons"
-      }
-    ],
-    "notes": "Free, unlimited. Good for quick country context."
+    "notes": "Free preview limited. Full access requires subscription key."
   },
   {
     "name": "ACLED",
@@ -1191,14 +996,14 @@
   },
   {
     "name": "FBI Wanted",
-    "url": "https://api.fbi.gov/wanted/v1",
+    "url": "https://api.fbi.gov",
     "category": "law_enforcement",
     "auth": "none",
     "query_type": "persons",
     "endpoints": [
       {
-        "path": "/list?title={name}",
-        "returns": "FBI wanted persons matching name",
+        "path": "/wanted/v1/list",
+        "returns": "FBI most wanted list",
         "use_when": "criminal investigations, security research"
       }
     ],
@@ -1206,15 +1011,15 @@
   },
   {
     "name": "EPA (US Environment)",
-    "url": "https://www.epa.gov/enviro/envirofacts-data-service-api",
+    "url": "https://data.epa.gov/efservice",
     "category": "environment",
     "auth": "none",
     "query_type": "environmental_data",
     "endpoints": [
       {
-        "path": "",
-        "returns": "Environmental facility data, violations, emissions",
-        "use_when": "environmental compliance, pollution data"
+        "path": "/TRI_FACILITY/STATE_ABBR/CA/rows/0:25/JSON",
+        "returns": "Toxic Release Inventory facilities",
+        "use_when": "environmental violations, pollution data"
       }
     ],
     "notes": "Free. Tracks facilities with environmental permits."
@@ -1291,18 +1096,18 @@
   },
   {
     "name": "Ollama Registry",
-    "url": "https://ollama.com/api",
+    "url": "https://ollama.com",
     "category": "ml",
     "auth": "none",
     "query_type": "models",
     "endpoints": [
       {
-        "path": "/models",
-        "returns": "Available local LLM models",
+        "path": "/api/tags",
+        "returns": "Available models in Ollama library",
         "use_when": "local/open-source LLM options"
       }
     ],
-    "notes": "Public model list. Useful for open-source AI research."
+    "notes": "Undocumented API. May change without notice."
   },
   {
     "name": "OpenRouter",
@@ -1318,5 +1123,70 @@
       }
     ],
     "notes": "Free model listing. Great for AI market landscape."
+  },
+  {
+    "name": "OpenFDA",
+    "url": "https://api.fda.gov",
+    "category": "medical",
+    "auth": "none",
+    "query_type": "papers",
+    "endpoints": [
+      {
+        "path": "/drug/event.json?search={topic}&limit=10",
+        "returns": "FDA adverse drug event reports",
+        "use_when": "drug safety, pharmaceutical research"
+      },
+      {
+        "path": "/drug/label.json?search={topic}&limit=10",
+        "returns": "FDA drug labels and prescribing info",
+        "use_when": "drug mechanism, indications"
+      }
+    ],
+    "notes": "Free. 240 requests/min without key, 120K/day with key."
+  },
+  {
+    "name": "GBIF (Biodiversity)",
+    "url": "https://api.gbif.org/v1",
+    "category": "science_data",
+    "auth": "none",
+    "query_type": "datasets",
+    "endpoints": [
+      {
+        "path": "/species/search?q={topic}&limit=20",
+        "returns": "Species taxonomy, distribution, conservation status",
+        "use_when": "biodiversity research, species data"
+      }
+    ],
+    "notes": "Global Biodiversity Information Facility. Free."
+  },
+  {
+    "name": "Open Notify (NASA ISS)",
+    "url": "http://api.open-notify.org",
+    "category": "science_data",
+    "auth": "none",
+    "query_type": "science_data",
+    "endpoints": [
+      {
+        "path": "/astros.json",
+        "returns": "People currently in space",
+        "use_when": "space exploration, current missions"
+      }
+    ],
+    "notes": "Always returns data. Good for space research."
+  },
+  {
+    "name": "USGS Earthquake",
+    "url": "https://earthquake.usgs.gov/fdsnws/event/1",
+    "category": "science_data",
+    "auth": "none",
+    "query_type": "events",
+    "endpoints": [
+      {
+        "path": "/query?format=geojson&limit=20&orderby=time",
+        "returns": "Recent earthquakes worldwide with magnitude, location",
+        "use_when": "seismology, natural disasters, geological events"
+      }
+    ],
+    "notes": "USGS real-time feed. Always has data."
   }
 ]
