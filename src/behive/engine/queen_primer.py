@@ -9,7 +9,7 @@ Biologia:
   Matka nie musi być obecna — jej "primer" przetrwa.
 
 W HIVE:
-  Po syntezie Queen zapisuje PRIMER do DuckDB.
+  After synthesis, Queen saves PRIMER to DB.
   Następna misja na podobny temat ładuje primer jako boosted seeds + enhanced queries.
   Primer działa jak "wzmocnione DNA" dla nowej misji — skraca czas cold-start.
 
@@ -24,7 +24,7 @@ Public API:
     # Po syntezie — zapisz primer
     primer.save(synthesis_result, top_claims, top_domains)
 
-    # Przed kolejną misją — załaduj
+    # Before next mission — load
     p = primer.load_for_topic("nowy temat o podobnej dziedzinie")
     if p:
         boosted_domains = p.top_domains
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS hive_queen_primers (
 );
 """
 
-# Similarity — wystarczą shared keywords (bez embedding dla szybkości)
+# Similarity — shared keywords suffice (without embedding for speed)
 _MIN_KEYWORD_OVERLAP = 0.25   # 25% shared keywords → "related topic"
 
 
@@ -140,7 +140,7 @@ class QueenPrimer:
             log.warning(f"Queen primer schema init failed: {e}")
 
     # ─────────────────────────────────────────────────────────────────────
-    # SAVE — wywołaj po syntezie
+    # SAVE — call after synthesis
     # ─────────────────────────────────────────────────────────────────────
 
     def save(
@@ -270,7 +270,7 @@ class QueenPrimer:
             return 1.30   # słaba coverage — pełna eksploracja
 
     # ─────────────────────────────────────────────────────────────────────
-    # LOAD — wywołaj przed planowaniem nowej misji
+    # LOAD — call before planning a new mission
     # ─────────────────────────────────────────────────────────────────────
 
     def load_for_topic(self, new_topic: str, max_age_days: int = 30) -> Optional[Primer]:
@@ -356,6 +356,7 @@ if __name__ == "__main__":
                     f"{str(r[6])[:16]}  {r[1][:60]}"
                 )
         except Exception as e:
+            log.debug(f"Exception in queen_primer.py: {e}")
             print(f"Error listing primers: {e}")
     elif "--test-load" in sys.argv:
         idx = sys.argv.index("--test-load")

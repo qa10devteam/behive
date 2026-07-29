@@ -57,7 +57,7 @@ DB_PATH = os.environ.get("BEHIVE_LEGACY_DB", "")  # Legacy — PostgreSQL is pri
 # THRESHOLDS
 # ─────────────────────────────────────────────────────────────────────────────
 QUORUM_MIN          = 25     # min harvestable sources → pszczoły lecą
-QUORUM_SOFT         = 40     # soft target — poniżej uruchamia expansion ale nie blokuje
+QUORUM_SOFT         = 40     # soft target — poniżej uruchamia expansion ale not blokuje
 QUORUM_HARD_MIN     = 15     # absolutne minimum — poniżej ZAWSZE expansion
 MAX_EXPANSIONS      = 2      # maks ile razy rozszerzamy zasięg
 EXPANSION_QUERIES   = 5      # ile dodatkowych queries per expansion
@@ -150,7 +150,7 @@ class QuorumChecker:
                   AND score_total >= 10
             """, [self.mission_id]).fetchone()[0]
 
-            # Prescout skip count (jeśli prescout już ran)
+            # Prescout skip count (if prescout already ran)
             try:
                 skip_count = con.execute("""
                     SELECT COUNT(*) FROM hive_prescout_map

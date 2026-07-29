@@ -73,12 +73,11 @@ def _llm(prompt: str, system: str = "", max_tokens: int = 4096) -> str:
             except Exception as e:
                 if 'Throttling' in str(e) or 'throttl' in str(e).lower():
                     wait = RETRY_DELAYS[attempt]
-                    print(f"[QUEEN] {model_id} throttled, retry in {wait}s "
-                          f"(attempt {attempt+1}/3)...", file=sys.stderr)
+                    log.warning(f"[QUEEN] {model_id} throttled, retry in {wait}s "
+                          f"(attempt {attempt+1}/3)...")
                     _time.sleep(wait)
                     continue
-                print(f"[QUEEN] {model_id} failed ({e}), trying next model...",
-                      file=sys.stderr)
+                log.error(f"[QUEEN] {model_id} failed ({e}), trying next model...")
                 break
 
     raise RuntimeError(
@@ -118,13 +117,13 @@ def _sglang_call(prompt: str, max_tokens: int = 4096) -> str:
                 out = _json.loads(resp.read())
             return out["choices"][0]["message"]["content"].strip()
         except Exception as e:
+            log.debug(f"Exception in synth.py: {e}")
             import time as _t
             if attempt < 1:
                 _t.sleep(1)
                 continue
             # SGLang unavailable — fall through to Bedrock
-            print(f"[QUEEN] SGLang unavailable ({e}), falling back to Bedrock Haiku…",
-                  file=__import__('sys').stderr)
+            log.info(f"[QUEEN] SGLang unavailable ({e}), falling back to Bedrock Haiku…")
             break
 
     # Bedrock fallback — Haiku (fast + cheap) for refinement passes
@@ -191,9 +190,9 @@ Tasks:
 Return the full restructured report in Markdown.""", max_tokens=4096)
         if len(edited) > 500:
             report = edited
-            print("[QUEEN] Multi-role: Editor pass ✓ (Bedrock)", file=__import__('sys').stderr)
+            log.info("[QUEEN] Multi-role: Editor pass ✓ (Bedrock)")
     except Exception as e:
-        print(f"[QUEEN] Multi-role: Editor skipped ({e})", file=__import__('sys').stderr)
+        log.warning(f"[QUEEN] Multi-role: Editor skipped ({e})")
 
     # ── Pass 2: Reviewer ────────────────────────────────────────────────────
     try:
@@ -214,9 +213,9 @@ Tasks:
 Return the full annotated report in Markdown.""", max_tokens=4096)
         if len(reviewed) > 500:
             report = reviewed
-            print("[QUEEN] Multi-role: Reviewer pass ✓ (Bedrock)", file=__import__('sys').stderr)
+            log.info("[QUEEN] Multi-role: Reviewer pass ✓ (Bedrock)")
     except Exception as e:
-        print(f"[QUEEN] Multi-role: Reviewer skipped ({e})", file=__import__('sys').stderr)
+        log.warning(f"[QUEEN] Multi-role: Reviewer skipped ({e})")
 
     # ── Pass 3: Writer ──────────────────────────────────────────────────────
     try:
@@ -239,9 +238,9 @@ Tasks:
 Return the complete final report in Markdown.""", max_tokens=4096)
         if len(written) > 500:
             report = written
-            print("[QUEEN] Multi-role: Writer pass ✓ (Bedrock)", file=__import__('sys').stderr)
+            log.info("[QUEEN] Multi-role: Writer pass ✓ (Bedrock)")
     except Exception as e:
-        print(f"[QUEEN] Multi-role: Writer skipped ({e})", file=__import__('sys').stderr)
+        log.warning(f"[QUEEN] Multi-role: Writer skipped ({e})")
 
     return report
 
@@ -372,7 +371,7 @@ class Queen:
                 confirmed_facts = all_facts = outliers = []
 
             if "hive_clusters" in all_tables:
-                # Użyj build_cluster_context z hive2_cluster — klastry + cross-mission atlas
+                # Use build_cluster_context from hive2_cluster — clusters + cross-mission atlas
                 try:
                     import importlib.util as _clu2
                     _cs2 = _clu2.spec_from_file_location("hive2_cluster", "hive2_cluster.py")
@@ -515,8 +514,8 @@ class Queen:
         lines.append("")
 
         # ── NUMERIC FACT DIGEST — TOP (depth booster, pre-inject before claims) ──
-        # Ekstrakcja wartości liczbowych z raw_claims konficdencja >= 0.65
-        # Wbudowane na górze — Queen widzi cyfry ZANIM dostanie claims
+        # Numeric value extraction z raw_claims konficdencja >= 0.65
+        # Built-in at top — Queen sees numbers BEFORE receiving claims
         import re as _re_top
         _num_top = _re_top.compile(
             r'\b(\d[\d\s]*[\d](?:[.,]\d+)?)\s*'
@@ -575,8 +574,8 @@ class Queen:
                     try:
                         from urllib.parse import urlparse
                         domain = urlparse(src_url).netloc.replace("www.", "")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug(f"Suppressed: {e}")
                 evidence_snippet = (evidence or "")[:80]
                 lines.append(
                     f"[{conf_val}] [{claim_type or '?'}] {claim[:200]}"
@@ -596,8 +595,8 @@ class Queen:
                 domains = []
                 try:
                     domains = json.loads(domains_json) if domains_json else []
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, ValueError, KeyError) as e:
+                    log.debug(f"Parse error: {e}")
                 domain_str = ", ".join(domains[:3]) if domains else "—"
                 val_str  = f"{val:g}" if val is not None else "?"
                 unit_str = f" {unit}" if unit else ""
@@ -659,8 +658,8 @@ class Queen:
                 domains = []
                 try:
                     domains = json.loads(domains_json) if domains_json else []
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, ValueError, KeyError) as e:
+                    log.debug(f"Parse error: {e}")
                 domain_str = ", ".join(domains[:2]) if domains else "—"
                 val_str  = f"{val:g}" if val is not None else "?"
                 unit_str = f" {unit}" if unit else ""
@@ -684,7 +683,7 @@ class Queen:
         lines.append("")
 
         # ── Topic clusters ───────────────────────────────────────────────────
-        # Użyj cluster_context_block jeśli dostępny (zawiera klastry + cross-mission atlas)
+        # Use cluster_context_block if available (contains clusters + cross-mission atlas)
         _ccb = honey.get("cluster_context_block")
         if _ccb:
             lines.append(_ccb)
@@ -695,8 +694,8 @@ class Queen:
                 kws = []
                 try:
                     kws = json.loads(kw_json) if kw_json else []
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, ValueError, KeyError) as e:
+                    log.debug(f"Parse error: {e}")
                 kw_str = ", ".join(kws[:6]) if kws else "—"
                 lines.append(f"{i}. {label} ({doc_count} dokumentów): {kw_str}")
         else:
@@ -713,8 +712,8 @@ class Queen:
             _falsif_block = _fm2.get_falsification_report(self.mission_id)
             if _falsif_block:
                 lines.append(_falsif_block)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
 
         # ── Outliers ─────────────────────────────────────────────────────────
         lines.append("=== WARTOŚCI ODSTAJĄCE (OUTLIERS) ===")
@@ -724,8 +723,8 @@ class Queen:
                 domains = []
                 try:
                     domains = json.loads(domains_json) if domains_json else []
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, ValueError, KeyError) as e:
+                    log.debug(f"Parse error: {e}")
                 domain_str = ", ".join(domains[:2]) if domains else "?"
                 val_str  = f"{val:g}" if val is not None else "?"
                 unit_str = f" {unit}" if unit else ""
@@ -804,8 +803,8 @@ class Queen:
                     try:
                         from urllib.parse import urlparse
                         domain = urlparse(src_url).netloc.replace("www.", "")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug(f"Suppressed: {e}")
                 evidence_snippet = (evidence or "")[:80]
                 lines.append(
                     f"[{conf_val}] [{claim_type or '?'}] {claim[:150]}"
@@ -974,8 +973,8 @@ class Queen:
 
             if lines:
                 graph_context = "\n".join(lines)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
 
         # ════════════════════════════════════════════════════════════════════
         # PASS 1 — EVIDENCE HIERARCHY
@@ -1010,20 +1009,20 @@ Format odpowiedzi:
 ## DEAD
 - [obalona hipoteza i powód]
 
-===== DANE WYWIADOWCZE =====
+===== INTELLIGENCE DATA =====
 {honey_context[:12000]}
 ==========================="""
 
-        print("[QUEEN] Pass 1 — EVIDENCE HIERARCHY (25%)…", file=sys.stderr)
+        log.info("[QUEEN] Pass 1 — EVIDENCE HIERARCHY (25%)…")
         _t0 = time.time()
         pass1_result = _llm(pass1_prompt, system=system_queen, max_tokens=4096)
-        print(f"[QUEEN] Pass 1 zakończony w {time.time()-_t0:.1f}s "
-              f"(~{len(pass1_result)} znaków)", file=sys.stderr)
+        log.info(f"[QUEEN] Pass 1 done in {time.time()-_t0:.1f}s "
+              f"(~{len(pass1_result)} chars)")
 
         # ════════════════════════════════════════════════════════════════════
         # PASS 2 — FALSIFICATION CHECK
         # ════════════════════════════════════════════════════════════════════
-        pass2_prompt = f"""Jesteś analitykiem kontrwywiadu. Twoja rola to aktywna falsyfikacja wniosków.
+        pass2_prompt = f"""You are a counterintelligence analyst. Your role is active falsification of conclusions.
 
 TEMAT: {topic}
 
@@ -1044,11 +1043,11 @@ Dla każdego twierdzenia odpowiedz:
 {honey_context[:8000]}
 ==========================="""
 
-        print("[QUEEN] Pass 2 — FALSIFICATION CHECK (50%)…", file=sys.stderr)
+        log.info("[QUEEN] Pass 2 — FALSIFICATION CHECK (50%)…")
         _t0 = time.time()
         pass2_result = _llm(pass2_prompt, system=system_queen, max_tokens=3072)
-        print(f"[QUEEN] Pass 2 zakończony w {time.time()-_t0:.1f}s "
-              f"(~{len(pass2_result)} znaków)", file=sys.stderr)
+        log.info(f"[QUEEN] Pass 2 done in {time.time()-_t0:.1f}s "
+              f"(~{len(pass2_result)} chars)")
 
         # ════════════════════════════════════════════════════════════════════
         # PASS 3 — MAIN SYNTHESIS (Queen 3.0) — STORM section-aware pattern
@@ -1182,7 +1181,7 @@ Oraz po przeprowadzeniu hierarchizacji dowodów i analizy falsyfikacyjnej, napis
 ===== POZOSTAŁE DOWODY (general) =====
 {section_general}
 
-===== PEŁNE DANE WYWIADOWCZE =====
+===== PEŁNE INTELLIGENCE DATA =====
 {honey_context}
 ===========================
 
@@ -1194,11 +1193,11 @@ OBOWIĄZKOWE WYMOGI GŁĘBOKOŚCI — bez spełnienia raportu jest niekompletny:
 • Minimum 2 porównania numeryczne (X vs Y: $A vs $B)
 • Jeśli brakuje liczb — napisz explicite: "VOID: brak danych ilościowych w tej sekcji" zamiast pisać ogólniki"""
 
-        print("[QUEEN] Pass 3 — STORM SECTION-AWARE SYNTHESIS (75%)…", file=sys.stderr)
+        log.info("[QUEEN] Pass 3 — STORM SECTION-AWARE SYNTHESIS (75%)…")
         _t0 = time.time()
         pass3_result = _llm(pass3_prompt, system=system_queen, max_tokens=8192)
-        print(f"[QUEEN] Pass 3 zakończony w {time.time()-_t0:.1f}s "
-              f"(~{len(pass3_result)} znaków)", file=sys.stderr)
+        log.info(f"[QUEEN] Pass 3 done in {time.time()-_t0:.1f}s "
+              f"(~{len(pass3_result)} chars)")
 
         # ════════════════════════════════════════════════════════════════════
         # PASS 4 — FUIR GENERATION
@@ -1223,7 +1222,7 @@ wygeneruj sformalizowane Follow-Up Intelligence Requirements (FUIR) w następuj�
 **Przykłady:**
 IV-1: [VOID] Brak danych o udziale rynkowym — wymagane źródło: raport branżowy lub SEC filing — priorytet: HIGH
 CI-2: [CONFIRMED] Wzrost przychodów o 23% YoY potwierdzone przez 3 źródła — nie wymaga weryfikacji — priorytet: LOW
-FUIR-3: [REQUIRED] Sprawdź powiązania personalne między X a Y w kontekście Z — wymagane źródło: rejestry korporacyjne — priorytet: HIGH
+FUIR-3: [REQUIRED] Check powiązania personalne między X a Y w kontekście Z — wymagane źródło: rejestry korporacyjne — priorytet: HIGH
 PRED-4: [PREDICTION] Rynek X osiągnie wartość Y mld USD do 2026 roku — confidence: 0.65 — weryfikacja: 2026-Q1
 CONTRA-5: [CONTRADICTION] Konflikt danych między źródłem A (X=10%) a B (X=35%) — wymagane źródło: trzecie niezależne — priorytet: HIGH
 
@@ -1236,15 +1235,15 @@ Każda pozycja na osobnej linii. Poprzedź je linią nagłówkową: "=FUIR_START
 ===== HIERARCHIA DOWODÓW (Pass 1 — fragment) =====
 {pass1_result[:1500]}
 
-===== DANE WYWIADOWCZE =====
+===== INTELLIGENCE DATA =====
 {honey_context[:4000]}
 ==========================="""
 
-        print("[QUEEN] Pass 4 — FUIR GENERATION (90%)…", file=sys.stderr)
+        log.info("[QUEEN] Pass 4 — FUIR GENERATION (90%)…")
         _t0 = time.time()
         pass4_result = _llm(pass4_prompt, system=system_queen, max_tokens=4096)
-        print(f"[QUEEN] Pass 4 zakończony w {time.time()-_t0:.1f}s "
-              f"(~{len(pass4_result)} znaków)", file=sys.stderr)
+        log.info(f"[QUEEN] Pass 4 done in {time.time()-_t0:.1f}s "
+              f"(~{len(pass4_result)} chars)")
 
         # Parse FUIR entries
         fuir_entries = self._parse_fuir(pass4_result)
@@ -1342,8 +1341,8 @@ Każda pozycja na osobnej linii. Poprzedź je linią nagłówkową: "=FUIR_START
             if conf_match:
                 try:
                     pred_conf = float(conf_match.group(1))
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Suppressed: {e}")
 
             # Extract verification date — search on original_rest
             verify_date = None
@@ -1491,7 +1490,7 @@ Każda pozycja na osobnej linii. Poprzedź je linią nagłówkową: "=FUIR_START
 ---
 
 *HIVE 2.0 Intelligence System (Queen 3.0) | Misja: `{mid}` | {now}*
-*Źródła znalezione: {m['sources_found']} | Zebrane: {m['sources_harvested']} | \
+*Sources znalezione: {m['sources_found']} | Zebrane: {m['sources_harvested']} | \
 Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_facts']}*
 """
         return report
@@ -1511,7 +1510,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
 
         md_path = REPORTS_DIR / f"{base_name}.md"
         md_path.write_text(report_text, encoding="utf-8")
-        print(f"[QUEEN] Markdown zapisano: {md_path}", file=sys.stderr)
+        log.info(f"[QUEEN] Markdown saved: {md_path}")
 
         pdf_path = None
         try:
@@ -1547,7 +1546,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                 rows = [r for r in buf if not all(c in '-| ' for c in r)]
                 if not rows:
                     return
-                # Podziel komórki
+                # Split cells
                 parsed = []
                 for r in rows:
                     cells = [c.strip() for c in r.strip().strip('|').split('|')]
@@ -1573,12 +1572,12 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                         pdf.set_fill_color(255, 255, 255)
                         pdf.set_text_color(0, 0, 0)
                         pdf.set_font("DejaVu", size=8)
-                    # Dopasuj komórki do szerokości
+                    # Fit cells to width
                     for ci in range(n_cols):
                         text = cells[ci] if ci < len(cells) else ""
                         pdf.cell(col_w, row_h, text[:60], border=1, fill=True)
                     pdf.ln(row_h)
-                # Reset kolorów
+                # Reset colors
                 pdf.set_fill_color(255, 255, 255)
                 pdf.set_text_color(0, 0, 0)
                 pdf.set_font("DejaVu", size=9)  # reset do domyślnego po tabeli
@@ -1590,13 +1589,13 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                 line = lines[i]
                 try:
                     s = line.strip()
-                    # Wykryj początek tabeli markdown
+                    # Detect markdown table start
                     if s.startswith('|') and '|' in s[1:]:
                         table_buf.append(line)
                         i += 1
                         continue
                     else:
-                        # Flush tabeli jeśli bufor pełny i napotkano nie-tabelę
+                        # Flush table if buffer full i non-table encountered
                         if table_buf:
                             flush_table(table_buf)
                             table_buf = []
@@ -1625,20 +1624,20 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                         pdf.set_font("DejaVu", size=9)
                         pdf.set_text_color(0, 0, 0)
                         pdf.multi_cell(0, 5, line)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Suppressed: {e}")
                 i += 1
-            # Flush pozostałej tabeli na końcu
+            # Flush remaining table at end
             if table_buf:
                 flush_table(table_buf)
 
             pdf_path = REPORTS_DIR / f"{base_name}.pdf"
             pdf.output(str(pdf_path))
-            print(f"[QUEEN] PDF zapisano: {pdf_path}", file=sys.stderr)
+            log.info(f"[QUEEN] PDF saved: {pdf_path}")
         except ImportError:
-            print("[QUEEN] fpdf2 niedostępne — pomijam PDF.", file=sys.stderr)
+            log.info("[QUEEN] fpdf2 niedostępne — skipping PDF.")
         except Exception as e:
-            print(f"[QUEEN] Błąd generowania PDF: {e}", file=sys.stderr)
+            log.info(f"[QUEEN] Błąd generowania PDF: {e}")
 
         return {
             "md":  str(md_path),
@@ -1662,11 +1661,11 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                 con = self._connect_rw()
                 break
             except Exception as e:
+                log.debug(f"Exception in synth.py: {e}")
                 if att < 4:
                     _t.sleep(2 ** att * 2)
                 else:
-                    print(f"[QUEEN] Cannot acquire RW lock for persist: {e}",
-                          file=sys.stderr)
+                    log.info(f"[QUEEN] Cannot acquire RW lock for persist: {e}")
                     return
 
         try:
@@ -1750,7 +1749,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                         completed_at = NOW()
                     WHERE mission_id = ?
                 """, [key_findings_json, conf_raw, mid])
-                print("[QUEEN] hive3_mission_memory updated.", file=sys.stderr)
+                log.info("[QUEEN] hive3_mission_memory updated.")
             else:
                 # Need next id
                 max_id = con.execute(
@@ -1762,7 +1761,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                          key_findings, confidence)
                     VALUES (?, ?, ?, NOW(), ?, ?)
                 """, [max_id + 1, mid, topic, key_findings_json, conf_raw])
-                print("[QUEEN] hive3_mission_memory inserted.", file=sys.stderr)
+                log.info("[QUEEN] hive3_mission_memory inserted.")
 
             # ── 3. hive3_calibration_log — PRED entries ──────────────────────
             pred_entries = [
@@ -1784,15 +1783,15 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                         VALUES (?, ?, ?)
                     """, [mid, pred_text[:500], pred_conf])
 
-                print(f"[QUEEN] {len(pred_entries)} predykcji zapisanych do "
-                      f"hive3_calibration_log.", file=sys.stderr)
+                log.info(f"[QUEEN] {len(pred_entries)} predictions saved to "
+                      f"hive3_calibration_log.")
 
             con.commit()
-            print(f"[QUEEN] Dane persystowane do DuckDB "
-                  f"(assessment_id={assessment_id}).", file=sys.stderr)
+            log.info(f"[QUEEN] Data persisted to DB "
+                  f"(assessment_id={assessment_id}).")
 
         except Exception as e:
-            print(f"[QUEEN] BŁĄD persystencji: {e}", file=sys.stderr)
+            log.info(f"[QUEEN] BŁĄD persystencji: {e}")
             traceback.print_exc(file=sys.stderr)
         finally:
             if con:
@@ -1813,7 +1812,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
             con_r = self._hive_db.connect(read_only=True)
             mid = self.mission_id
 
-            # coverage: % sources z pełną treścią (word_count > 0)
+            # coverage: % sources with full content (word_count > 0)
             total_src = con_r.execute(
                 "SELECT COUNT(*) FROM hive_sources WHERE mission_id=? AND status='done'",
                 [mid]).fetchone()[0] or 0
@@ -1838,7 +1837,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
 
             con_r.close()
         except Exception as qe:
-            print(f"[QUEEN] quality metrics calc error: {qe}", file=sys.stderr)
+            log.error(f"[QUEEN] quality metrics calc error: {qe}")
 
         synthesis_text = report_text or ""
 
@@ -1859,14 +1858,13 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                 )
                 con.commit()
                 con.close()
-                print(
-                    f"[QUEEN] _mark_done: synthesis={len(synthesis_text)} chars, "
+                log.info(f"[QUEEN] _mark_done: synthesis={len(synthesis_text)} chars, "
                     f"quality_coverage={quality_coverage}, "
                     f"quality_depth={quality_depth}, "
-                    f"quality_confidence={quality_confidence}",
-                    file=sys.stderr)
+                    f"quality_confidence={quality_confidence}")
                 return
             except Exception as e:
+                log.debug(f"Exception in synth.py: {e}")
                 if 'IO Error' in str(e) or 'lock' in str(e).lower():
                     _t.sleep(2 ** att * 2)
                 else:
@@ -1876,48 +1874,41 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
 
     def run(self):
         t0 = time.time()
-        print(f"\n👑 QUEEN 3.0 — synteza misji: {self.mission_id}",
-              file=sys.stderr)
-        print("[QUEEN] Pipeline: Evidence Hierarchy → Falsification → "
-              "Synthesis → FUIR → Persist", file=sys.stderr)
+        log.debug(f"\n👑 QUEEN 3.0 — synteza misji: {self.mission_id}")
+        log.info("[QUEEN] Pipeline: Evidence Hierarchy → Falsification → "
+              "Synthesis → FUIR → Persist")
 
         # Load honey
         _t_load = time.time()
         honey   = self._load_honey()
         topic   = honey["mission"]["topic"]
-        print(
-            f"[QUEEN] Honey loaded in {time.time() - _t_load:.1f}s: "
+        log.info(f"[QUEEN] Honey loaded in {time.time() - _t_load:.1f}s: "
             f"{len(honey['all_facts'])} faktów, "
             f"{len(honey['top_entities'])} encji, "
             f"{len(honey['clusters'])} klastrów, "
             f"{len(honey.get('raw_claims', []))} twierdzeń, "
             f"{len(honey.get('quantum_hypotheses', []))} hipotez QuantumBee, "
             f"{len(honey.get('cross_mission_priors', []))} priorów, "
-            f"{len(honey.get('dead_hypotheses', []))} Graveyard.",
-            file=sys.stderr
-        )
+            f"{len(honey.get('dead_hypotheses', []))} Graveyard.")
 
         # 4-Pass synthesis
         _t_synth = time.time()
         synthesis = self.synthesize(honey)
-        print(f"[QUEEN] 4-Pass synteza zakończona w "
-              f"{time.time() - _t_synth:.1f}s", file=sys.stderr)
+        log.info(f"[QUEEN] 4-Pass synteza zakończona w "
+              f"{time.time() - _t_synth:.1f}s")
 
         # Format report
         _t_fmt = time.time()
         report  = self.format_report(synthesis, honey)
-        print(f"[QUEEN] Format raportu zajął {time.time() - _t_fmt:.1f}s",
-              file=sys.stderr)
+        log.info(f"[QUEEN] Format raportu zajął {time.time() - _t_fmt:.1f}s")
 
         # Multi-role refinement (Editor → Reviewer → Writer)
         try:
             _t_multi = time.time()
             report = multi_role_synthesis(self.mission_id, report, topic=topic)
-            print(f"[QUEEN] Multi-role synthesis: {time.time() - _t_multi:.1f}s",
-                  file=sys.stderr)
+            log.info(f"[QUEEN] Multi-role synthesis: {time.time() - _t_multi:.1f}s")
         except Exception as _mr_err:
-            print(f"[QUEEN] Multi-role synthesis pominięty: {_mr_err}",
-                  file=sys.stderr)
+            log.info(f"[QUEEN] Multi-role synthesis pominięty: {_mr_err}")
 
         # Save report
         paths = self.save_report(report, self.mission_id, topic)
@@ -1925,8 +1916,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
         # Persist to DuckDB
         _t_persist = time.time()
         self._persist_to_db(synthesis, honey, report_text=report)
-        print(f"[QUEEN] Persystencja DuckDB: {time.time() - _t_persist:.1f}s",
-              file=sys.stderr)
+        log.info(f"[QUEEN] Persistence DuckDB: {time.time() - _t_persist:.1f}s")
 
         # Mark done (passes report text so synthesis column gets populated)
         self._mark_done(report_text=report, synthesis=synthesis)
@@ -1944,9 +1934,9 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
             if paths.get("md"):
                 _obs.import_report(paths["md"], self.mission_id)
             _obs.push_to_couchdb()
-            print("📒 Obsidian vault zaktualizowany → obsidian-vault/")
+            log.debug("📒 Obsidian vault zaktualizowany → obsidian-vault/")
         except Exception as _e:
-            print(f"⚠️  Obsidian sync pominięty: {_e}")
+            log.warning(f"⚠️  Obsidian sync pominięty: {_e}")
 
         # ── Graphify post-synth hook ─────────────────────────────────────────
         try:
@@ -1957,11 +1947,11 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
             _gmod = _ilu2.module_from_spec(_gspec)
             _gspec.loader.exec_module(_gmod)
             _gmod.post_synth_hook(self.mission_id)
-            print("🕸️  Graphify vault graph rebuild triggered")
+            log.debug("🕸️  Graphify vault graph rebuild triggered")
         except Exception as _ge:
-            print(f"⚠️  Graphify hook pominięty: {_ge}")
+            log.warning(f"⚠️  Graphify hook pominięty: {_ge}")
 
-        # ── Intelligence Closure — zamknięcie pętli epistemicznej ────────────
+        # ── Intelligence Closure — closing the epistemic loop ────────────
         try:
             import importlib.util as _ilu2
             _fc_spec = _ilu2.spec_from_file_location(
@@ -1971,18 +1961,15 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
             closure = _fc_mod.IntelligenceClosure()
             brief_text = synthesis.get("brief", "")
             cr = closure.close_mission(self.mission_id, brief_text)
-            print(
-                f"🧠 Intelligence Closure: "
+            log.debug(f"🧠 Intelligence Closure: "
                 f"{cr.get('predictions_extracted', 0)} predykcji, "
                 f"{cr.get('priors_updated', 0)} priors, "
                 f"{cr.get('lessons_extracted', 0)} lekcji, "
-                f"{cr.get('pending_validated', 0)} predykcji zweryfikowanych",
-                file=sys.stderr
-            )
+                f"{cr.get('pending_validated', 0)} predykcji zweryfikowanych")
         except Exception as _fe:
-            print(f"⚠️  Intelligence Closure pominięty: {_fe}", file=sys.stderr)
+            log.warning(f"⚠️  Intelligence Closure pominięty: {_fe}")
 
-        # ── QueenMemory persist — key_findings do pamięci cross-mission ──────
+        # ── QueenMemory persist — key_findings to cross-mission memory ──────
         try:
             from hive2_queen_memory import QueenMemory
             qm = QueenMemory(topic)
@@ -1995,12 +1982,9 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
             if brief_lines:
                 key_findings = brief_lines[:5] + key_findings[:3]
             qm.persist(self.mission_id, key_findings)
-            print(
-                f"🧠 QueenMemory: {len(key_findings)} key_findings do pamięci cross-mission",
-                file=sys.stderr
-            )
+            log.debug(f"🧠 QueenMemory: {len(key_findings)} key_findings do pamięci cross-mission")
         except Exception as _qme:
-            print(f"⚠️  QueenMemory persist pominięty: {_qme}", file=sys.stderr)
+            log.warning(f"⚠️  QueenMemory persist pominięty: {_qme}")
 
         # ── Numerical Falsification hook ─────────────────────────────────────
         try:
@@ -2017,17 +2001,17 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
             log.debug(f"NumericalFalsifier hook pominięty: {_fe}")
 
         elapsed = time.time() - t0
-        print(f"\n[QUEEN] Synteza zakończona w {elapsed:.1f}s", file=sys.stderr)
-        print(f"[QUEEN] Raport MD: {paths['md']}", file=sys.stderr)
+        log.info(f"\n[QUEEN] Synteza zakończona w {elapsed:.1f}s")
+        log.info(f"[QUEEN] Raport MD: {paths['md']}")
         if paths["pdf"]:
-            print(f"[QUEEN] Raport PDF: {paths['pdf']}", file=sys.stderr)
+            log.info(f"[QUEEN] Raport PDF: {paths['pdf']}")
 
-        print("\n" + "=" * 70)
-        print(report)
-        print("=" * 70)
-        print(f"\nMD:  {paths['md']}")
+        log.debug("\n" + "=" * 70)
+        log.debug(report)
+        log.debug("=" * 70)
+        log.debug(f"\nMD:  {paths['md']}")
         if paths["pdf"]:
-            print(f"PDF: {paths['pdf']}")
+            log.debug(f"PDF: {paths['pdf']}")
 
 
 # ---------------------------------------------------------------------------
@@ -2044,6 +2028,7 @@ if __name__ == "__main__":
         queen = Queen(mission_id)
         queen.run()
     except Exception as exc:
+        log.debug(f"Exception in synth.py: {exc}")
         print(f"[QUEEN] BŁĄD KRYTYCZNY: {exc}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)

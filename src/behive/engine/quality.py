@@ -1,4 +1,7 @@
-#!/usr/bin/env python3
+from __future__ import annotations
+import logging
+
+log = logging.getLogger(__name__)
 """
 HIVE 2.0 — hive2_content_quality.py
 ═════════════════════════════════════
@@ -10,7 +13,7 @@ Biologia:
   Wirus jest niewidoczny bez aktywnego testu.
 
 W HIVE:
-  Źródła które odpowiadają na HEAD (200 OK, content-length OK)
+  Sources które odpowiadają na HEAD (200 OK, content-length OK)
   ale zwracają scraper-noise, nav-boilerplate, lub AI-generated fluff
   są "covertly infected" — obniżają jakość całej syntezy.
 
@@ -29,7 +32,6 @@ Public API:
     details = score_content_detailed(raw_text)  # dict with all signals
 """
 
-from __future__ import annotations
 
 import re
 from typing import Dict
@@ -205,7 +207,7 @@ if __name__ == "__main__":
     import sys
 
     if "--audit-mission" in sys.argv:
-        # Analiza jakości treści w misji
+        # Content quality analysis for mission
         idx = sys.argv.index("--audit-mission")
         mission_id = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else None
         if not mission_id:

@@ -1,8 +1,11 @@
+import logging
 #!/usr/bin/env python3
 """
 HIVE 2.0 — hive2.py
 The ORCHESTRATOR: CLI entry point for the full HIVE intelligence pipeline.
 
+
+log = logging.getLogger(__name__)
 Usage:
   python3 hive2.py run "topic" [--think]   # full pipeline (Queen plans first)
   python3 hive2.py scout "topic"           # scout only (Queen plans first)
@@ -32,8 +35,8 @@ def _emit(mission_id: str, phase: str, event_type: str, data=None, **kw):
         from hive2_events import emit_event, ensure_events_table
         ensure_events_table(DB_PATH)
         emit_event(DB_PATH, mission_id, phase, event_type, data=data, **kw)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f"Suppressed: {e}")
 
 DB_PATH  = ''
 PYTHON   = 'python3'
@@ -537,15 +540,15 @@ Return ONLY the JSON array."""
         ctx = self._detect_context()
         type_cfg = self.TASK_TYPES.get(self.task_type, self.TASK_TYPES['geopolitical_osint'])
 
-        # ═══ PHASE 0: MEMORY RECALL — Queen ładuje pamięć operacyjną ═══
-        print(f'  👑 Queen loading operational memory...')
+        # ═══ PHASE 0: MEMORY RECALL — Queen loads operational memory ═══
+        log.debug(f'  👑 Queen loading operational memory...')
         try:
             from hive2_queen_memory import QueenMemory
             memory    = QueenMemory(self.topic)
             mem_ctx   = memory.recall()
             mem_block = mem_ctx.to_prompt_block()
             if not mem_ctx.is_empty():
-                print(f'  👑 Memory: {mem_ctx.total_missions} related missions | '
+                log.debug(f'  👑 Memory: {mem_ctx.total_missions} related missions | '
                       f'{len(mem_ctx.fuir_directives)} FUIR | '
                       f'{len(mem_ctx.intelligence_voids)} voids | '
                       f'confidence {mem_ctx.cluster_confidence:.0%}')
@@ -553,47 +556,47 @@ Return ONLY the JSON array."""
                 ctx['fuir']         = mem_ctx.fuir_directives
                 ctx['known_gaps']   = mem_ctx.intelligence_voids
             else:
-                print(f'  👑 Memory: empty — fresh topic, no prior context')
+                log.debug(f'  👑 Memory: empty — fresh topic, no prior context')
                 ctx['memory_block'] = ''
                 ctx['fuir']         = []
                 ctx['known_gaps']   = []
         except Exception as e:
-            print(f'  👑 Memory recall skipped: {e}')
+            log.warning(f'  👑 Memory recall skipped: {e}')
             ctx['memory_block'] = ''
             ctx['fuir']         = []
             ctx['known_gaps']   = []
 
-        # ═══ PHASE 0b: CALIBRATION — Queen ładuje profil kalibracyjny ═══
+        # ═══ PHASE 0b: CALIBRATION — Queen loads calibration profile ═══
         try:
             from hive2_queen_calibrator import QueenCalibrator
             calibrator = QueenCalibrator()
             calib_block = calibrator.generate_calibration_block(self.topic)
             if calib_block and len(calib_block) > 100:
-                # Dołącz kalibrację do memory_block (Queen widzi oba)
+                # Attach calibration to memory_block (Queen widzi oba)
                 existing_mem = ctx.get('memory_block', '')
                 ctx['memory_block'] = (existing_mem + '\n\n' + calib_block).strip()
-                print(f'  👑 Calibration: profile loaded for this topic domain')
+                log.debug(f'  👑 Calibration: profile loaded for this topic domain')
             else:
-                print(f'  👑 Calibration: no historical data for this domain yet')
+                log.debug(f'  👑 Calibration: no historical data for this domain yet')
         except Exception as e:
-            print(f'  👑 Calibration skipped: {e}')
+            log.warning(f'  👑 Calibration skipped: {e}')
 
-        # ═══ PHASE 0c: SEMANTIC FACT MEMORY (P5) — Queen ładuje fakty semantyczne ═══
+        # ═══ PHASE 0c: SEMANTIC FACT MEMORY — Queen loads semantic facts ═══
         try:
             from hive2_queen_fact_mem import QueenFactMemory
             fact_mem = QueenFactMemory()
             fact_block = fact_mem.recall(self.topic, top_k=8)
             if fact_block:
                 fact_stats = fact_mem.stats()
-                print(f'  👑 Semantic memory: {fact_stats["total_facts"]} facts indexed, '
+                log.debug(f'  👑 Semantic memory: {fact_stats["total_facts"]} facts indexed, '
                       f'{fact_stats["missions_covered"]} missions covered')
                 existing_mem = ctx.get('memory_block', '')
                 ctx['memory_block'] = (existing_mem + '\n\n' + fact_block).strip()
             else:
-                print(f'  👑 Semantic memory: empty — first run for this topic')
+                log.debug(f'  👑 Semantic memory: empty — first run for this topic')
             fact_mem.close()
         except Exception as e:
-            print(f'  👑 Semantic memory skipped: {e}')
+            log.warning(f'  👑 Semantic memory skipped: {e}')
 
         # ═══ PHASE 0c.5: QMP PRIMER inject ─────────────────────────
         # _primer_context set by cmd_run before plan() is called.
@@ -602,31 +605,31 @@ Return ONLY the JSON array."""
         if _primer_ctx:
             existing_mem = ctx.get('memory_block', '')
             ctx['memory_block'] = (existing_mem + '\n\n' + _primer_ctx).strip()
-            print(f'  👑 QMP Primer: injected into Queen planning context')
+            log.debug(f'  👑 QMP Primer: injected into Queen planning context')
 
-        # ═══ PHASE 0d: SUBJECT RECON — Queen poznaje podmiot przed wysłaniem pszczół ═══
+        # ═══ PHASE 0d: SUBJECT RECON — Queen profiles subject before dispatching bees ═══
         try:
             subject_profile = self._recon_subject(ctx)
             if subject_profile:
                 ctx['subject_profile'] = subject_profile
-                print(f'  👑 Subject recon: {len(subject_profile)} chars of context loaded')
+                log.debug(f'  👑 Subject recon: {len(subject_profile)} chars of context loaded')
             else:
                 ctx['subject_profile'] = ''
-                print(f'  👑 Subject recon: no subject URL detected — skipping')
+                log.warning(f'  👑 Subject recon: no subject URL detected — skipping')
         except Exception as e:
-            print(f'  👑 Subject recon skipped: {e}')
+            log.warning(f'  👑 Subject recon skipped: {e}')
             ctx['subject_profile'] = ''
 
         # ═══ PHASE 1: DECOMPOSITION — Queen thinks about WHAT to research ═══
-        print(f'  👑 Queen thinking · type={self.task_type} · decomposing into research axes...')
+        log.debug(f'  👑 Queen thinking · type={self.task_type} · decomposing into research axes...')
 
         axes = self._decompose_topic(ctx, type_cfg)
         if not axes or len(axes) < 3:
             axes = self._fallback_axes()
 
-        print(f'  👑 Identified {len(axes)} research axes:')
+        log.debug(f'  👑 Identified {len(axes)} research axes:')
         for i, ax in enumerate(axes):
-            print(f'     {i+1}. {ax[:80]}')
+            log.debug(f'     {i+1}. {ax[:80]}')
 
         # ═══ PHASE 2: TASK GENERATION — scaled by self.scale ═══
         # Compute tasks_per_axis based on scale
@@ -637,7 +640,7 @@ Return ONLY the JSON array."""
         total_planned = num_axes * tasks_per_axis
         batch_size = 20  # LLM generates 20 tasks per call (fits 4096 tokens)
         batches_per_axis = max(1, -(-tasks_per_axis // batch_size))  # ceiling division
-        print(f'  👑 Generating {num_axes} × {tasks_per_axis} = {total_planned} precision tasks ({batches_per_axis}×{batch_size} per axis)...')
+        log.debug(f'  👑 Generating {num_axes} × {tasks_per_axis} = {total_planned} precision tasks ({batches_per_axis}×{batch_size} per axis)...')
 
         BATCHES = []
         for i, ax in enumerate(axes):
@@ -658,17 +661,17 @@ Return ONLY the JSON array."""
                     bid = futures[fut]
                     try:
                         batch_results[bid] = fut.result()
-                        print(f'     ✓ Axis {bid+1}/{len(axes)}: {len(batch_results[bid])} tasks')
+                        log.info(f'     ✓ Axis {bid+1}/{len(axes)}: {len(batch_results[bid])} tasks')
                     except Exception as e:
-                        print(f'     ✗ Axis {bid+1}/{len(axes)} failed: {e} — retrying...')
+                        log.error(f'     ✗ Axis {bid+1}/{len(axes)} failed: {e} — retrying...')
                         import time as _time
                         _time.sleep(5)  # backoff before retry (429/throttle)
                         try:
                             bid2, offset2, focus2 = BATCHES[bid]
                             batch_results[bid] = self._bedrock_batch(bid2, focus2, ctx, offset2)
-                            print(f'     ↺ Axis {bid+1}/{len(axes)} retry OK: {len(batch_results[bid])} tasks')
+                            log.warning(f'     ↺ Axis {bid+1}/{len(axes)} retry OK: {len(batch_results[bid])} tasks')
                         except Exception as e2:
-                            print(f'     ✗ Axis {bid+1}/{len(axes)} retry failed: {e2}')
+                            log.error(f'     ✗ Axis {bid+1}/{len(axes)} retry failed: {e2}')
                             batch_results[bid] = []
 
             for bid in sorted(batch_results):
@@ -677,14 +680,14 @@ Return ONLY the JSON array."""
             if len(all_tasks) < max(20, self.scale // 4):
                 raise ValueError(f'Too few tasks ({len(all_tasks)}) — falling back')
 
-            print(f'\n  👑 Queen planned {len(all_tasks)} scout tasks total')
+            log.debug(f'\n  👑 Queen planned {len(all_tasks)} scout tasks total')
             src_counts = Counter(t.get('source', '?') for t in all_tasks)
             for src, cnt in src_counts.most_common():
-                print(f'     {src}: {cnt}')
+                log.debug(f'     {src}: {cnt}')
             return all_tasks
 
         except Exception as e:
-            print(f'  ⚠️  Queen planning failed ({e}) — falling back to default plan')
+            log.error(f'  ⚠️  Queen planning failed ({e}) — falling back to default plan')
             return self._fallback_plan()
 
     # ------------------------------------------------------------------
@@ -702,7 +705,7 @@ Return ONLY the JSON array."""
 
         topic = self.topic
 
-        # ── 1. Wykryj URL lub nazwę firmy w topiku ─────────────────────
+        # ── 1. Detect URL or company name in topic ─────────────────────
         # Szukaj: jawny URL, domena (xyz.io / xyz.com / xyz.pl), lub
         # wzorzec "dla X", "of X", "X competitive", "X sp. z o.o.", "X S.A."
         subject_url = None
@@ -713,7 +716,7 @@ Return ONLY the JSON array."""
         if url_match:
             subject_url = url_match.group(0)
 
-        # Domena bez protokołu (np. "qa10.io", "example.com")
+        # Domain without protocol (np. "qa10.io", "example.com")
         if not subject_url:
             domain_match = re.search(
                 r'\b([a-z0-9][a-z0-9\-]*\.[a-z]{2,6}(?:\.[a-z]{2})?)\b',
@@ -721,7 +724,7 @@ Return ONLY the JSON array."""
             )
             if domain_match:
                 candidate = domain_match.group(1).lower()
-                # Filtruj popularne słowa które nie są domenami
+                # Filter common words that are not domains
                 skip = {'process', 'mining', 'market', 'rpa', 'poland', 'size', 'cagr'}
                 if candidate.split('.')[0] not in skip:
                     subject_url = f'https://{candidate}'
@@ -747,7 +750,7 @@ Return ONLY the JSON array."""
         raw_text = ''
         scraped_url = subject_url or f'https://www.google.com/search?q={subject_name}'
 
-        # Próba 1: Jina Reader (najlepszy dla HTML→tekst)
+        # Attempt 1: Jina Reader (najlepszy dla HTML→tekst)
         try:
             jina_url = f'https://r.jina.ai/{subject_url or ("https://" + subject_name + ".io")}'
             resp = requests.get(jina_url, timeout=15, headers={
@@ -757,25 +760,25 @@ Return ONLY the JSON array."""
             if resp.status_code == 200 and len(resp.text) > 200:
                 raw_text = resp.text[:8000]
                 scraped_url = jina_url
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
 
-        # Próba 2: bezpośredni requests
+        # Attempt 2: direct requests
         if not raw_text and subject_url:
             try:
                 resp = requests.get(subject_url, timeout=10, headers={
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 })
                 if resp.status_code == 200:
-                    # Prymitywne usunięcie HTML tagów
+                    # Primitive HTML tag removal
                     text = re.sub(r'<[^>]+>', ' ', resp.text)
                     text = re.sub(r'\s+', ' ', text)
                     raw_text = text[:8000]
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"Suppressed: {e}")
 
         if not raw_text:
-            # Nie udało się zebrać — nie blokuj misji
+            # Failed to harvest — do not block mission
             return ''
 
         # ── 3. Queen ekstrakcja profilu ─────────────────────────────────
@@ -844,7 +847,8 @@ Be factual for the profile. For competitor list — use domain knowledge about t
             profile = json.loads(resp['body'].read())['content'][0]['text'].strip()
             return f"\n\n═══ SUBJECT INTELLIGENCE PROFILE ═══\n{profile}\n═══════════════════════════════════\n"
         except Exception as e:
-            # Bedrock failed — zwróć surowy tekst skrócony
+            log.debug(f"Exception in orchestrator.py: {e}")
+            # Bedrock failed — return raw truncated text
             return f"\n\n═══ SUBJECT RAW CONTENT (scrape of {scraped_url}) ═══\n{raw_text[:2000]}\n═══════════════════════════════════\n"
 
     # ------------------------------------------------------------------
@@ -919,10 +923,10 @@ Return ONLY the JSON array."""
                 text = text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
             axes = json.loads(text)
             if isinstance(axes, list) and len(axes) >= 3:
-                print(f'  👑 STORM personas generated: {len(axes)} perspectives')
+                log.debug(f'  👑 STORM personas generated: {len(axes)} perspectives')
                 return axes[:5]
         except Exception as e:
-            print(f'  ⚠️  STORM decomposition failed: {e}')
+            log.error(f'  ⚠️  STORM decomposition failed: {e}')
 
         return self._fallback_axes()
 
@@ -1100,7 +1104,7 @@ def _init_db(con=None):
             except Exception as e:
                 errmsg = str(e).lower()
                 if "already exists" not in errmsg:
-                    print(f"[HIVE] Schema warning: {e}", file=sys.stderr)
+                    log.info(f"[HIVE] Schema warning: {e}")
 
         # ── Migrate hive_missions v1 → v2 (add missing columns) ─────────────
         existing_cols = {
@@ -1130,7 +1134,7 @@ def _init_db(con=None):
                 try:
                     con.execute(f"ALTER TABLE hive_missions ADD COLUMN {col} {col_def}")
                 except Exception as e:
-                    print(f"[HIVE] Migration warning ({col}): {e}", file=sys.stderr)
+                    log.info(f"[HIVE] Migration warning ({col}): {e}")
 
         # ── Migrate quality_metrics columns (hive_events infrastructure) ──────
         quality_cols = [
@@ -1143,7 +1147,7 @@ def _init_db(con=None):
                 try:
                     con.execute(f"ALTER TABLE hive_missions ADD COLUMN IF NOT EXISTS {col} {col_def}")
                 except Exception as e:
-                    print(f"[HIVE] Quality column migration ({col}): {e}", file=sys.stderr)
+                    log.info(f"[HIVE] Quality column migration ({col}): {e}")
 
         con.commit()
     finally:
@@ -1217,14 +1221,14 @@ def run_phase(script: str, args: list[str], phase_name: str) -> float:
     log_file = f"/tmp/hive_{phase_name.replace('/', '_')}_proc.log"
     cmd = [PYTHON, script_path] + args
     t0 = time.time()
-    print(f"\n{'='*60}")
-    print(f"🐝  [{phase_name.upper()}] Uruchamiam: {' '.join(cmd)}")
-    print(f"    PID file: {pid_file} | log: {log_file}")
-    print(f"{'='*60}")
+    log.debug(f"\n{'='*60}")
+    log.debug(f"🐝  [{phase_name.upper()}] Uruchamiam: {' '.join(cmd)}")
+    log.debug(f"    PID file: {pid_file} | log: {log_file}")
+    log.debug(f"{'='*60}")
     sys.stdout.flush()
 
-    # Fazy synth: detached double-fork — hive2.py nie czeka, proces żyje sam
-    # To pozwala hive2.py zakończyć się i zwolnić DuckDB write lock.
+    # Fazy synth: detached double-fork — hive2.py does not wait, process lives on its own
+    # This allows hive2.py to exit and release the DB write lock.
     is_synth = any(k in script for k in ('master_intelligence', 'synth'))
     if is_synth:
         import shlex as _shlex
@@ -1242,9 +1246,9 @@ def run_phase(script: str, args: list[str], phase_name: str) -> float:
         try:
             with open(pid_file) as _pf:
                 child_pid_str = _pf.read().strip()
-        except Exception:
-            pass
-        print(f"  🔮 Synth detached — PID {child_pid_str}, waiting for completion…")
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
+        log.debug(f"  🔮 Synth detached — PID {child_pid_str}, waiting for completion…")
         sys.stdout.flush()
         # Czekamy przez polling log file na EXIT: marker (max 300s)
         _deadline = time.time() + 900  # Pass1~80s + Pass2~65s + Pass3~170s = ~315s — 900s generous margin
@@ -1259,22 +1263,22 @@ def run_phase(script: str, args: list[str], phase_name: str) -> float:
                     _m = _re.search(r"EXIT:(\d+)", _content)
                     _exit_code = int(_m.group(1)) if _m else 0
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"Suppressed: {e}")
         # Show last lines of log
         subprocess.run(["tail", "-20", log_file], check=False)
         elapsed = time.time() - t0
-        print(f"✅  [{phase_name.upper()}] Zakończono w {elapsed:.1f}s (exit={_exit_code})")
+        log.info(f"✅  [{phase_name.upper()}] Zakończono w {elapsed:.1f}s (exit={_exit_code})")
         if _exit_code and _exit_code != 0:
             raise subprocess.CalledProcessError(_exit_code, cmd)
         return elapsed
 
     try:
-        # Uruchamiamy przez nohup shell — przeżyje zamknięcie sesji
-        # HIVE_PARENT_PID=os.getpid() — child może czekać na śmierć parenta (DuckDB lock)
+        # Launch via nohup shell — survives session close
+        # HIVE_PARENT_PID=os.getpid() — child can wait for parent death (DuckDB lock)
         import shlex as _shlex
         _safe_cmd = ' '.join(_shlex.quote(str(a)) for a in cmd)
-        # Przekaż env vars do subprocess (HIVE_USE_BATCH, HIVE_BM_MANUAL, itp.)
+        # Pass env vars to subprocess (HIVE_USE_BATCH, HIVE_BM_MANUAL, etc.)
         _extra_env = ""
         for _evar in ("HIVE_USE_BATCH", "HIVE_BM_MANUAL", "HIVE_BM_SEEDS"):
             _evalue = os.environ.get(_evar)
@@ -1292,18 +1296,18 @@ def run_phase(script: str, args: list[str], phase_name: str) -> float:
             ["bash", "-c", nohup_cmd],
             check=False,
         )
-        # Tail log na stdout żeby zachować widoczność
+        # Tail log to stdout to maintain visibility
         subprocess.run(["grep", "-E", "⚙️|Process:|✅|❌|COMPLETE|ERROR", log_file], check=False)
         subprocess.run(["tail", "-5", log_file], check=False)
         if result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd)
     except FileNotFoundError:
-        print(f"[HIVE] UWAGA: Skrypt {script_path} nie istnieje — faza pominięta.", file=sys.stderr)
+        log.info(f"[HIVE] UWAGA: Skrypt {script_path} nie istnieje — faza pominięta.")
     except subprocess.CalledProcessError as e:
-        print(f"[HIVE] BŁĄD w fazie {phase_name}: exit code {e.returncode}", file=sys.stderr)
+        log.info(f"[HIVE] BŁĄD w fazie {phase_name}: exit code {e.returncode}")
         raise
     elapsed = time.time() - t0
-    print(f"✅  [{phase_name.upper()}] Zakończono w {elapsed:.1f}s")
+    log.info(f"✅  [{phase_name.upper()}] Zakończono w {elapsed:.1f}s")
     return elapsed
 
 # ---------------------------------------------------------------------------
@@ -1332,10 +1336,10 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
         from hive2_preprocessor import preprocess_query
         prep = preprocess_query(topic, interactive=True, force=force)
         if not prep.ok:
-            print(f"\n  ❌  {prep.message}", file=sys.stderr)
+            log.info(f"\n  ❌  {prep.message}")
             sys.exit(1)
         topic = prep.refined_topic
-        print(f"  ✓  Query specificity: {prep.specificity_score:.2f}  →  '{topic}'")
+        log.debug(f"  ✓  Query specificity: {prep.specificity_score:.2f}  →  '{topic}'")
         _specificity = prep.specificity_score
     except ImportError:
         _specificity = None
@@ -1345,34 +1349,35 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
 
     # Track active mission for SIGINT handler
     main._active_mission_id = mission_id
-    print(f'  🐝  HIVE 3.0  ·  {mission_id}')
-    print(f'  📋  {topic[:55]}{"…" if len(topic)>55 else ""}')
+    log.debug(f'  🐝  HIVE 3.0  ·  {mission_id}')
+    log.debug(f'  📋  {topic[:55]}{"…" if len(topic)>55 else ""}')
     flags = []
     if think: flags.append('🧠 think')
     if deep:  flags.append('🧬 deep')
     if flags: print(f'  {"  ".join(flags)}')
-    print(f'  🕐  {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")} UTC')
-    print(f'{"═"*62}\n')
+    log.debug(f'  🕐  {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")} UTC')
+    log.debug(f'{"═"*62}\n')
 
     # ═══ PHASE 0: QUEEN PLANS ════════════════════════════════════
-    print('  ┌─ PHASE 0 · QUEEN PLANS SWARM ─────────────────────┐')
+    log.debug('  ┌─ PHASE 0 · QUEEN PLANS SWARM ─────────────────────┐')
     t0 = time.time()
 
     # ── REC-05: QMP Primer inject (cross-mission memory) ─────────
-    # Załaduj primer z poprzednich misji na podobne tematy.
-    # Daje Queen dostęp do trusted domains + gap queries sprzed pełnego scouta.
+    # Load primer from previous missions on similar topics.
+    # Gives Queen access to trusted domains + gap queries sbefore full scout.
     try:
         from hive2_queen_primer import QueenPrimer
         _qp = QueenPrimer(mission_id)
         _primer = _qp.load_for_topic(topic, max_age_days=45)
         if _primer:
             _primer_block = _primer.to_prompt_block()
-            print(f"  🐝  QMP Primer: mission {_primer.mission_id[:20]}… "
+            log.debug(f"  🐝  QMP Primer: mission {_primer.mission_id[:20]}… "
                   f"q={_primer.primer_quality:.2f} depth={_primer.depth_modifier:.1f}x "
                   f"{len(_primer.top_domains)} trusted domains")
         else:
             _primer_block = ""
     except Exception as _pe:
+        log.debug(f"Exception in orchestrator.py: {_pe}")
         _primer_block = ""
 
     planner = QueenPlanner(topic, think_mode=think, scale=scale)
@@ -1383,7 +1388,7 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     with open(plan_file, 'w') as f:
         json.dump(plan, f, ensure_ascii=False, indent=2)
     phase0_elapsed = time.time() - t0
-    print(f'  └─ {len(plan)} tasks planned · {phase0_elapsed:.1f}s ──────────────────┘\n')
+    log.debug(f'  └─ {len(plan)} tasks planned · {phase0_elapsed:.1f}s ──────────────────┘\n')
 
     _create_mission(mission_id, topic, think_mode=think)
 
@@ -1397,15 +1402,15 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
             )
             con.commit()
             con.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
 
     _emit(mission_id, 'scout', 'started', data={'topic': topic, 'task_count': len(plan)})
     total_t0 = time.time()
     timings: dict[str, float] = {'queen_plan': phase0_elapsed}
 
     # ═══ PHASE 1: SCOUT ══════════════════════════════════════════
-    print('  ┌─ PHASE 1 · SCOUT SWARM ────────────────────────────┐')
+    log.debug('  ┌─ PHASE 1 · SCOUT SWARM ────────────────────────────┐')
     t1 = time.time()
     scout_script = str(HIVE_DIR / 'hive2_scout.py')
     scout_cmd = [PYTHON, scout_script, mission_id, '--plan', plan_file]
@@ -1413,10 +1418,9 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     try:
         result = subprocess.run(scout_cmd, check=False)
         if result.returncode != 0:
-            print(f'  ⚠️  Scout exit {result.returncode} — continuing with partial results.',
-                  file=sys.stderr)
+            log.info(f'  ⚠️  Scout exit {result.returncode} — continuing with partial results.')
     except FileNotFoundError:
-        print(f'  ⚠️  hive2_scout.py not found — skipped.', file=sys.stderr)
+        log.info(f'  ⚠️  hive2_scout.py not found — skipped.')
     timings['scout'] = time.time() - t1
     # Emit scout completed event
     try:
@@ -1429,11 +1433,11 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     except Exception:
         _n_sources = 0
     _emit(mission_id, 'scout', 'completed', data={'sources_found': _n_sources})
-    print(f'  └─ done · {timings["scout"]:.1f}s ──────────────────────────────┘\n')
+    log.info(f'  └─ done · {timings["scout"]:.1f}s ──────────────────────────────┘\n')
 
     # ═══ PHASE 1.5: DRONES (Trutnie) — rekon i penetracja barier ════════════
-    print('  ┌─ PHASE 1.5 · DRONES (Trutnie) ────────────────────────┐')
-    print('    🪲 Wall-breakers probing domains before harvest...')
+    log.debug('  ┌─ PHASE 1.5 · DRONES (Trutnie) ────────────────────────┐')
+    log.debug('    🪲 Wall-breakers probing domains before harvest...')
     t_drone = time.time()
     try:
         from hive2_drones import extract_domains_from_sources, run_recon
@@ -1443,17 +1447,17 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
             timings['drones'] = time.time() - t_drone
             pct = drone_report.get('coverage_pct', 0)
             blocked = drone_report.get('blocked', 0)
-            print(f'    ✓ Recon complete: {pct}% accessible, {blocked} domains blocked')
+            log.info(f'    ✓ Recon complete: {pct}% accessible, {blocked} domains blocked')
         else:
-            print('    ⚠  No domains found in sources — skipping drone recon')
+            log.warning('    ⚠  No domains found in sources — skipping drone recon')
             timings['drones'] = 0.0
     except Exception as e:
-        print(f'    ⚠  Drone recon error (non-fatal): {e}', file=sys.stderr)
+        log.info(f'    ⚠  Drone recon error (non-fatal): {e}')
         timings['drones'] = 0.0
-    print(f'  └─ done · {timings.get("drones", 0):.1f}s ──────────────────────────────┘\n')
+    log.info(f'  └─ done · {timings.get("drones", 0):.1f}s ──────────────────────────────┘\n')
 
     # ═══ PHASE 1.7: PRE-SCOUT (taniec + bee master + true scout) ════════════
-    print('  ┌─ PHASE 1.7 · PRE-SCOUT ───────────────────────────────┐')
+    log.debug('  ┌─ PHASE 1.7 · PRE-SCOUT ───────────────────────────────┐')
     t_prescout = time.time()
     try:
         import asyncio as _aio
@@ -1472,20 +1476,20 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
             json.dump(_routing, _f, ensure_ascii=False)
         _approved_cnt = len(_routing)
         _skip_cnt     = _n_sources - _approved_cnt
-        print(f'    ✓ PreScout: {_approved_cnt} approved, ~{_skip_cnt} skipped before harvest')
-        print(f'    📋 Routing map: {_routing_path}')
+        log.warning(f'    ✓ PreScout: {_approved_cnt} approved, ~{_skip_cnt} skipped before harvest')
+        log.debug(f'    📋 Routing map: {_routing_path}')
     except Exception as _e:
-        print(f'    ⚠  PreScout error (non-fatal): {_e}', file=sys.stderr)
+        log.info(f'    ⚠  PreScout error (non-fatal): {_e}')
         timings['prescout'] = time.time() - t_prescout
-    print(f'  └─ done · {timings.get("prescout", 0):.1f}s ─────────────────────────────┘\n')
+    log.info(f'  └─ done · {timings.get("prescout", 0):.1f}s ─────────────────────────────┘\n')
 
     # ═══ PHASE 2: HARVEST ════════════════════════════════════════
-    print('  ┌─ PHASE 2 · HARVEST ────────────────────────────────┐')
+    log.debug('  ┌─ PHASE 2 · HARVEST ────────────────────────────────┐')
     _emit(mission_id, 'harvest', 'started', data={'sources_to_harvest': _n_sources})
     try:
         timings['harvest'] = run_phase('hive2_harvest.py', [mission_id], 'harvest')
     except Exception as e:
-        print(f'  ✗ Harvest failed: {e}', file=sys.stderr)
+        log.info(f'  ✗ Harvest failed: {e}')
         _emit(mission_id, 'harvest', 'error', data={'error': str(e)})
         raise
     # Emit harvest completed event
@@ -1499,10 +1503,10 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     except Exception:
         _n_harvested = 0
     _emit(mission_id, 'harvest', 'completed', data={'sources_harvested': _n_harvested})
-    print(f'  └─ done · {timings["harvest"]:.1f}s ──────────────────────────────┘\n')
+    log.info(f'  └─ done · {timings["harvest"]:.1f}s ──────────────────────────────┘\n')
 
     # ═══ PHASE 3: PROCESS ════════════════════════════════════════
-    print('  ┌─ PHASE 3 · PROCESS ────────────────────────────────┐')
+    log.debug('  ┌─ PHASE 3 · PROCESS ────────────────────────────────┐')
     _emit(mission_id, 'process', 'started')
     try:
         process_args = [mission_id]
@@ -1510,7 +1514,7 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
             process_args.append("--deep")
         timings['process'] = run_phase('hive2_process.py', process_args, 'process')
     except Exception as e:
-        print(f'  ✗ Process failed: {e}', file=sys.stderr)
+        log.info(f'  ✗ Process failed: {e}')
         _emit(mission_id, 'process', 'error', data={'error': str(e)})
         raise
     # Emit process completed event
@@ -1524,24 +1528,24 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     except Exception:
         _n_docs = 0
     _emit(mission_id, 'process', 'completed', data={'docs_processed': _n_docs})
-    print(f'  └─ done · {timings["process"]:.1f}s ──────────────────────────────┘\n')
+    log.info(f'  └─ done · {timings["process"]:.1f}s ──────────────────────────────┘\n')
 
     # ═══ PHASE 3.5: FALSIFIER (claim dedup + cross-validation) ══
-    print('  ┌─ PHASE 3.5 · FALSIFIER ────────────────────────────┐')
+    log.debug('  ┌─ PHASE 3.5 · FALSIFIER ────────────────────────────┐')
     try:
         timings['falsifier'] = run_phase(
             'hive2_falsifier.py', [mission_id], 'falsifier'
         )
     except Exception as e_f:
-        print(f'  ⚠️  Falsifier skipped: {e_f}', file=sys.stderr)
+        log.info(f'  ⚠️  Falsifier skipped: {e_f}')
         timings['falsifier'] = 0.0
-    print(f'  └─ done · {timings.get("falsifier", 0):.1f}s ──────────────────────────────┘\n')
+    log.info(f'  └─ done · {timings.get("falsifier", 0):.1f}s ──────────────────────────────┘\n')
 
     # ═══ PHASE 3.7: STORM ITERATIVE GAP-FILL ════════════════════
     # STORM Pattern: after extraction, check what's missing → generate
     # follow-up queries → mini-harvest round 2 targeting the gaps.
     # Only runs if < 30 claims were collected (signal that harvest was thin).
-    print('  ┌─ PHASE 3.7 · STORM GAP-FILL ───────────────────────┐')
+    log.debug('  ┌─ PHASE 3.7 · STORM GAP-FILL ───────────────────────┐')
     try:
         # import duckdb as _ddb  # removed — using _connect_db()
         _con = _connect_db(read_only=True)
@@ -1550,7 +1554,7 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
         ).fetchone()[0]
         _con.close()
         if _claim_count < 30:
-            print(f'  ⚠️  Only {_claim_count} claims — triggering STORM gap-fill queries...')
+            log.warning(f'  ⚠️  Only {_claim_count} claims — triggering STORM gap-fill queries...')
             # Build gap-fill queries from open hive_gaps
             _con2 = _connect_db(read_only=True)
             _gaps = _con2.execute(
@@ -1579,7 +1583,7 @@ Return JSON array of 5 strings only."""
                 _fq = _jj.loads(_txt)
                 if isinstance(_fq, list) and len(_fq) >= 1:
                     # ── REC-10: Spillover query log ─────────────────────────
-                    # Zapisz jako gap_type='spillover' (odróżnialny w analytics od gap_type=None)
+                    # Save as gap_type='spillover' (distinguishable in analytics from gap_type=None)
                     _con3 = _connect_db()
                     for _q in _fq[:5]:
                         _con3.execute(
@@ -1588,7 +1592,7 @@ Return JSON array of 5 strings only."""
                             [mission_id, f"[STORM-SPILLOVER] {_q}"]
                         )
                     _con3.close()
-                    print(f'  ✓ STORM: {len(_fq)} spillover queries logged (gap_type=spillover)')
+                    log.info(f'  ✓ STORM: {len(_fq)} spillover queries logged (gap_type=spillover)')
                     # Run mini-scout + harvest for follow-up queries
                     import subprocess as _sp
                     for _fqi, _fqq in enumerate(_fq[:3]):  # max 3 to avoid timeout
@@ -1597,9 +1601,9 @@ Return JSON array of 5 strings only."""
                                 ['python3', 'hive2_scout.py', mission_id, '--followup', _fqq],
                                 timeout=60, capture_output=True
                             )
-                        except Exception:
-                            pass
-                    print(f'  ✓ STORM gap-fill scout done — re-running process...')
+                        except Exception as e:
+                            log.debug(f"Suppressed: {e}")
+                    log.info(f'  ✓ STORM gap-fill scout done — re-running process...')
                     run_phase('hive2_process.py', [mission_id], 'gap-fill-process')
                     # Mark original gaps as resolved after successful fill
                     _con_res = _connect_db()
@@ -1608,17 +1612,17 @@ Return JSON array of 5 strings only."""
                         [mission_id]
                     )
                     _con_res.close()
-                    print(f'  ✓ Original gaps marked resolved')
+                    log.info(f'  ✓ Original gaps marked resolved')
         else:
-            print(f'  ✓ {_claim_count} claims collected — gap-fill not needed')
+            log.info(f'  ✓ {_claim_count} claims collected — gap-fill not needed')
     except Exception as e_gf:
-        print(f'  ⚠️  Gap-fill skipped: {e_gf}')
-    print(f'  └─ done ──────────────────────────────────────────────┘\n')
+        log.warning(f'  ⚠️  Gap-fill skipped: {e_gf}')
+    log.info(f'  └─ done ──────────────────────────────────────────────┘\n')
 
     # ═══ PHASE 3.9: HARVEST QUALITY GATE ════════════════════════
     # Before Queen synthesises, audit data quality.
     # If >60% sources are errors/paywalls, inject DATA QUALITY WARNING.
-    print('  ┌─ PHASE 3.9 · HARVEST QUALITY GATE ────────────────┐')
+    log.debug('  ┌─ PHASE 3.9 · HARVEST QUALITY GATE ────────────────┐')
     _quality_warning = ""
     try:
         # duckdb import removed — _connect_db() handles routing
@@ -1647,7 +1651,7 @@ Return JSON array of 5 strings only."""
         _qcon.close()
 
         _success_pct = (_success_src / _total_src * 100) if _total_src > 0 else 0
-        print(f"  📊  Quality: {_success_src}/{_total_src} sources full content "
+        log.info(f"  📊  Quality: {_success_src}/{_total_src} sources full content "
               f"({_success_pct:.0f}%), {_unique_domains} unique domains, "
               f"median wc={_median_wc}, {_total_claims} claims")
 
@@ -1671,15 +1675,15 @@ Return JSON array of 5 strings only."""
                 [mission_id, f"[QUALITY-WARNING] {_quality_warning}"]
             )
             _wcon.close()
-            print(f"  ⚠️  Quality gate FAILED — warning injected into report")
+            log.debug(f"  ⚠️  Quality gate FAILED — warning injected into report")
         else:
-            print(f"  ✅  Quality gate passed")
+            log.debug(f"  ✅  Quality gate passed")
     except Exception as e_qg:
-        print(f"  ⚠️  Quality gate skipped: {e_qg}")
-    print(f'  └─ done ──────────────────────────────────────────────┘\n')
+        log.debug(f"  ⚠️  Quality gate skipped: {e_qg}")
+    log.info(f'  └─ done ──────────────────────────────────────────────┘\n')
 
     # ═══ PHASE 4: QUEEN MASTER INTELLIGENCE ══════════════════════
-    print('  ┌─ PHASE 4 · QUEEN SYNTHESIS ────────────────────────┐')
+    log.debug('  ┌─ PHASE 4 · QUEEN SYNTHESIS ────────────────────────┐')
     _emit(mission_id, 'synth', 'started')
     import gc as _gc
     _gc.collect()
@@ -1688,12 +1692,12 @@ Return JSON array of 5 strings only."""
             'hive2_master_intelligence.py', [mission_id, query], 'queen-synthesis'
         )
     except Exception as e:
-        print(f'  ⚠️  Queen MI failed: {e} — fallback synth', file=sys.stderr)
+        log.info(f'  ⚠️  Queen MI failed: {e} — fallback synth')
         _gc.collect()
         try:
             timings['synth'] = run_phase('hive2_synth.py', [mission_id], 'synth-fallback')
         except Exception as e2:
-            print(f'  ✗ Fallback synth failed: {e2}', file=sys.stderr)
+            log.info(f'  ✗ Fallback synth failed: {e2}')
             _emit(mission_id, 'synth', 'error', data={'error': str(e2)})
             # Mark interrupted instead of leaving status hanging — resumable
             try:
@@ -1704,15 +1708,15 @@ Return JSON array of 5 strings only."""
                 )
                 _con_int.commit()
                 _con_int.close()
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"Suppressed: {e}")
             # Don't raise — log and continue (pipeline can still write partial result)
-            print(f'  ⚠️  Synth failed — mission marked interrupted, resumable via: hive2 resume {mission_id}', file=sys.stderr)
+            log.info(f'  ⚠️  Synth failed — mission marked interrupted, resumable via: hive2 resume {mission_id}')
     _emit(mission_id, 'synth', 'completed')
-    print(f'  └─ done · {timings.get("synth", 0):.1f}s ──────────────────────────────┘\n')
+    log.info(f'  └─ done · {timings.get("synth", 0):.1f}s ──────────────────────────────┘\n')
 
     # ── REC-05b: QMP Primer flush ─────────────────────────────────
-    # Po syntezie zapisz tę misję jako primer dla podobnych tematów w przyszłości.
+    # After synthesis, save this mission as primer for similar topics in future.
     try:
         from hive2_queen_primer import QueenPrimer
         import hive2_db as _hive_db_qp
@@ -1724,8 +1728,9 @@ Return JSON array of 5 strings only."""
         _con_qp.close()
         _qp_quality = _qp_row[0] if _qp_row else 0.5
         QueenPrimer(mission_id).save(topic, quality_score=_qp_quality)
-        print(f'  🐝  QMP Primer: saved (q={_qp_quality:.2f}) for future missions')
+        log.info(f'  🐝  QMP Primer: saved (q={_qp_quality:.2f}) for future missions')
     except Exception as _pfe:
+        log.debug(f"Exception in orchestrator.py: {_pfe}")
         pass  # non-critical
 
     # ═══ PHASE 5: MASTER INTELLIGENCE SUMMARY (cross-mission) ════
@@ -1737,9 +1742,9 @@ Return JSON array of 5 strings only."""
             stderr=subprocess.STDOUT,
             env={**os.environ, 'PATH': f'{os.environ.get("PATH","")}'}
         )
-        print('  🧠  Master Intelligence Summary update triggered (background)')
+        log.debug('  🧠  Master Intelligence Summary update triggered (background)')
     except Exception as _e:
-        print(f'  ⚠️  Intel summary update skipped: {_e}', file=sys.stderr)
+        log.info(f'  ⚠️  Intel summary update skipped: {_e}')
 
     # ═══ PHASE 5b: KNOWLEDGE GRAPH REBUILD (background) ════
     try:
@@ -1750,21 +1755,21 @@ Return JSON array of 5 strings only."""
             stderr=subprocess.STDOUT,
             env={**os.environ, 'PATH': f'{os.environ.get("PATH","")}'}
         )
-        print('  🕸️   Knowledge Graph rebuild triggered (background)')
+        log.debug('  🕸️   Knowledge Graph rebuild triggered (background)')
     except Exception as _e:
-        print(f'  ⚠️  Graph rebuild skipped: {_e}', file=sys.stderr)
+        log.info(f'  ⚠️  Graph rebuild skipped: {_e}')
 
     # ═══ THINK MODE ═══════════════════════════════════════════════
     if think:
-        print(f'\n  🧠  THINK MODE — scanning research gaps …')
+        log.debug(f'\n  🧠  THINK MODE — scanning research gaps …')
         gaps = _get_unresolved_gaps(mission_id)
         gaps_to_process = gaps[:5]
-        print(f'      Found {len(gaps)} gaps, processing {len(gaps_to_process)}.')
+        log.debug(f'      Found {len(gaps)} gaps, processing {len(gaps_to_process)}.')
         for i, (gap_query, gap_type, priority) in enumerate(gaps_to_process, 1):
-            print(f'\n  🔍  Gap {i}/{len(gaps_to_process)}: {gap_query}')
+            log.debug(f'\n  🔍  Gap {i}/{len(gaps_to_process)}: {gap_query}')
             gap_mission_id = new_mission_id(gap_query)
             _create_mission(gap_mission_id, gap_query)
-            print(f'  👑  Queen planning gap scout …')
+            log.debug(f'  👑  Queen planning gap scout …')
             gap_planner = QueenPlanner(gap_query)
             gap_plan = gap_planner.plan()
             gap_plan_file = f'/tmp/hive_plan_{gap_mission_id}.json'
@@ -1783,23 +1788,23 @@ Return JSON array of 5 strings only."""
                     [mission_id, gap_query]
                 )
                 _gcon.close()
-                print(f'  ✓  Gap {i} marked resolved: {gap_query[:60]}')
+                log.info(f'  ✓  Gap {i} marked resolved: {gap_query[:60]}')
             except Exception as e:
-                print(f'  ⚠️  Gap {i} failed: {e} — continuing.', file=sys.stderr)
+                log.info(f'  ⚠️  Gap {i} failed: {e} — continuing.')
 
-        print(f'\n  🔮  THINK MODE — final synthesis after gap fill …')
+        log.debug(f'\n  🔮  THINK MODE — final synthesis after gap fill …')
         try:
             timings['synth_final'] = run_phase('hive2_synth.py', [mission_id], 'synth-final')
         except Exception as e:
-            print(f'  ✗ Final synth failed: {e}', file=sys.stderr)
+            log.info(f'  ✗ Final synth failed: {e}')
 
     total_elapsed = time.time() - total_t0
-    print(f'\n{"═"*62}')
-    print(f'  🍯  MISSION COMPLETE  ·  {mission_id}')
-    print(f'  ⏱️   Total: {total_elapsed:.1f}s\n')
+    log.debug(f'\n{"═"*62}')
+    log.info(f'  🍯  MISSION COMPLETE  ·  {mission_id}')
+    log.debug(f'  ⏱️   Total: {total_elapsed:.1f}s\n')
     for phase, t in timings.items():
-        print(_bar(phase, t))
-    print(f'\n{"═"*62}\n')
+        log.debug(_bar(phase, t))
+    log.debug(f'\n{"═"*62}\n')
     _emit(mission_id, 'done', 'done', data={'total_elapsed': total_elapsed, 'phases': list(timings.keys())})
 
 
@@ -1811,29 +1816,29 @@ def cmd_scout(topic: str):
     mission_id = new_mission_id(topic)
     _create_mission(mission_id, topic)
 
-    print(f'[HIVE] Scout: mission_id={mission_id}, topic={topic}')
+    log.debug(f'[HIVE] Scout: mission_id={mission_id}, topic={topic}')
 
     # Queen plans the swarm
-    print('\n╔═══ QUEEN PLANS SCOUT SWARM ═══╗')
+    log.debug('\n╔═══ QUEEN PLANS SCOUT SWARM ═══╗')
     t0 = time.time()
     planner = QueenPlanner(topic)
     plan = planner.plan()
     plan_file = f'/tmp/hive_plan_{mission_id}.json'
     with open(plan_file, 'w') as f:
         json.dump(plan, f, ensure_ascii=False, indent=2)
-    print(f'╚═══ Plan ready: {len(plan)} tasks → {plan_file} ({time.time()-t0:.1f}s) ═══╝\n')
+    log.debug(f'╚═══ Plan ready: {len(plan)} tasks → {plan_file} ({time.time()-t0:.1f}s) ═══╝\n')
 
     # Launch scout with plan
     scout_script = str(HIVE_DIR / 'hive2_scout.py')
     scout_cmd = [PYTHON, scout_script, mission_id, '--plan', plan_file]
-    print(f"🐝  [SCOUT] {' '.join(scout_cmd)}")
+    log.debug(f"🐝  [SCOUT] {' '.join(scout_cmd)}")
     sys.stdout.flush()
     try:
         subprocess.run(scout_cmd, check=False)
     except FileNotFoundError:
-        print(f'[HIVE] UWAGA: hive2_scout.py nie istnieje — faza pominięta.', file=sys.stderr)
+        log.info(f'[HIVE] UWAGA: hive2_scout.py nie istnieje — faza pominięta.')
 
-    print(f'\n[HIVE] Mission ID do dalszego użycia: {mission_id}')
+    log.debug(f'\n[HIVE] Mission ID do dalszego użycia: {mission_id}')
 
 
 def cmd_plan(topic: str, output_file: str | None = None):
@@ -1842,7 +1847,7 @@ def cmd_plan(topic: str, output_file: str | None = None):
     Useful for inspecting what the Queen would plan for a given topic.
     Optionally saves to output_file.
     """
-    print(f'\n👑  QUEEN PLANNING — Topic: {topic}\n')
+    log.debug(f'\n👑  QUEEN PLANNING — Topic: {topic}\n')
     t0 = time.time()
     planner = QueenPlanner(topic)
     plan = planner.plan()
@@ -1852,23 +1857,23 @@ def cmd_plan(topic: str, output_file: str | None = None):
     with open(dest, 'w') as f:
         json.dump(plan, f, ensure_ascii=False, indent=2)
 
-    print(f'\n✅  {len(plan)} tasks planned in {elapsed:.1f}s → {dest}')
+    log.info(f'\n✅  {len(plan)} tasks planned in {elapsed:.1f}s → {dest}')
 
     # Print summary table
-    print(f'\n{"─"*50}')
-    print(f'  {"SOURCE":<20} {"COUNT":>5}  {"AVG_PRIORITY":>12}')
-    print(f'{"─"*50}')
+    log.debug(f'\n{"─"*50}')
+    log.debug(f'  {"SOURCE":<20} {"COUNT":>5}  {"AVG_PRIORITY":>12}')
+    log.debug(f'{"─"*50}')
     from collections import defaultdict
     by_src: dict[str, list] = defaultdict(list)
     for t in plan:
         by_src[t.get('source', '?')].append(t.get('priority', 5))
     for src, prios in sorted(by_src.items(), key=lambda x: -len(x[1])):
         avg = sum(prios) / len(prios)
-        print(f'  {src:<20} {len(prios):>5}  {avg:>12.1f}')
-    print(f'{"─"*50}\n')
+        log.debug(f'  {src:<20} {len(prios):>5}  {avg:>12.1f}')
+    log.debug(f'{"─"*50}\n')
 
     # Also print pretty JSON
-    print(json.dumps(plan, ensure_ascii=False, indent=2))
+    log.debug(json.dumps(plan, ensure_ascii=False, indent=2))
 
 
 def cmd_harvest(mission_id: str):
@@ -1876,7 +1881,7 @@ def cmd_harvest(mission_id: str):
     # duckdb removed — PG is primary
     _init_db(None)
     if not _get_mission(mission_id):
-        print(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.", file=sys.stderr)
+        log.info(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.")
         sys.exit(1)
     run_phase('hive2_harvest.py', [mission_id], 'harvest')
 
@@ -1890,7 +1895,7 @@ def cmd_resume(mission_id: str):
     _init_db(None)
     m = _get_mission(mission_id)
     if not m:
-        print(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.", file=sys.stderr)
+        log.info(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.")
         sys.exit(1)
 
     # Ustal aktualny status z DB
@@ -1899,21 +1904,21 @@ def cmd_resume(mission_id: str):
     con.close()
     current_status = (row[0] or row[1] or 'scout').lower() if row else 'scout'
 
-    print(f"[HIVE] Resume misji {mission_id} — status: {current_status}", file=sys.stderr)
+    log.info(f"[HIVE] Resume misji {mission_id} — status: {current_status}")
 
-    # Sprawdź stan danych w DB (wyznacza punkt startowy niezależnie od status)
+    # Check data state in DB (determines start point regardless of status)
     con2 = _connect_db(read_only=True)
     harvested = con2.execute(
         "SELECT COUNT(*) FROM hive_sources WHERE mission_id=?", [mission_id]
     ).fetchone()[0]
-    # sources_harvested = źródła z pełną treścią (status done w hive_content)
+    # sources_harvested = sources with full content (status done in hive_content)
     sources_harvested = con2.execute(
         "SELECT COUNT(*) FROM hive_content WHERE mission_id=? AND word_count > 0", [mission_id]
     ).fetchone()[0]
     processed = con2.execute(
         "SELECT COUNT(*) FROM hive_entities WHERE mission_id=?", [mission_id]
     ).fetchone()[0]
-    # has_synth = synthesis w DB LUB status już done (FIX: nie polegamy wyłącznie na synthesis)
+    # has_synth = synthesis in DB OR status already done (FIX: do not rely solely on synthesis)
     synth_row = con2.execute(
         "SELECT synthesis, status FROM hive_missions WHERE id=?", [mission_id]
     ).fetchone()
@@ -1925,12 +1930,12 @@ def cmd_resume(mission_id: str):
     )
     con2.close()
 
-    print(f"[HIVE]   sources znalezione:  {harvested}", file=sys.stderr)
-    print(f"[HIVE]   sources z treścią:   {sources_harvested}", file=sys.stderr)
-    print(f"[HIVE]   entities przetworz:  {processed}", file=sys.stderr)
-    print(f"[HIVE]   synteza gotowa:      {has_synth}", file=sys.stderr)
+    log.info(f"[HIVE]   sources znalezione:  {harvested}")
+    log.info(f"[HIVE]   sources z treścią:   {sources_harvested}")
+    log.info(f"[HIVE]   entities przetworz:  {processed}")
+    log.info(f"[HIVE]   synteza gotowa:      {has_synth}")
 
-    # Dla cancelled/interrupted — odblokuj status żeby pipeline mógł kontynuować
+    # Dla cancelled/interrupted — unlock status so pipeline can continue
     if current_status in ('cancelled', 'interrupted'):
         con_rw = _connect_db()
         # Cofnij do odpowiedniej fazy na podstawie danych
@@ -1946,25 +1951,25 @@ def cmd_resume(mission_id: str):
         )
         con_rw.commit()
         con_rw.close()
-        print(f"[HIVE] ↩ Cancelled → {resume_status} (odblokowuję misję)", file=sys.stderr)
+        log.info(f"[HIVE] ↩ Cancelled → {resume_status} (odblokowuję misję)")
 
     # Wybierz punkt startowy na podstawie danych (nie statusu)
     if has_synth:
-        print(f"[HIVE] ✅ Synteza gotowa — nic do wznowienia.", file=sys.stderr)
+        log.info(f"[HIVE] ✅ Synteza gotowa — nic do wznowienia.")
         return
     elif processed > 0:
-        print(f"[HIVE] ⚡ Wznawiamy od synth (process done, {processed} entities)", file=sys.stderr)
+        log.info(f"[HIVE] ⚡ Wznawiamy od synth (process done, {processed} entities)")
         cmd_synth(mission_id)
         run_phase('hive2_falsifier.py', ['--mission', mission_id], 'falsify')
     elif sources_harvested > 0:
-        print(f"[HIVE] ⚡ Wznawiamy od process (harvest done, {sources_harvested} źródeł z treścią)", file=sys.stderr)
+        log.info(f"[HIVE] ⚡ Wznawiamy od process (harvest done, {sources_harvested} źródeł z treścią)")
         cmd_process(mission_id)
     elif harvested > 0:
-        print(f"[HIVE] ⚡ Wznawiamy od harvest (znalezione: {harvested} sources, brak treści)", file=sys.stderr)
+        log.info(f"[HIVE] ⚡ Wznawiamy od harvest (znalezione: {harvested} sources, brak treści)")
         cmd_harvest(mission_id)
         cmd_process(mission_id)
     else:
-        print(f"[HIVE] ⚡ Wznawiamy od harvest (brak danych)", file=sys.stderr)
+        log.info(f"[HIVE] ⚡ Wznawiamy od harvest (brak danych)")
         cmd_harvest(mission_id)
         cmd_process(mission_id)
 
@@ -1974,19 +1979,19 @@ def cmd_process(mission_id: str):
     # duckdb removed — PG is primary
     _init_db(None)
     if not _get_mission(mission_id):
-        print(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.", file=sys.stderr)
+        log.info(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.")
         sys.exit(1)
     run_phase('hive2_process.py', [mission_id], 'process')
 
     # ── P2.4: Auto-pipe process → synth → falsify ─────────────────────────────
-    print(f"\n[HIVE] ⚡ Auto-pipe: process → synth → falsify", file=sys.stderr)
+    log.info(f"\n[HIVE] ⚡ Auto-pipe: process → synth → falsify")
     cmd_synth(mission_id)
 
-    print(f"\n[HIVE] ⚡ Auto-pipe: uruchamiam falsifikację", file=sys.stderr)
+    log.info(f"\n[HIVE] ⚡ Auto-pipe: uruchamiam falsifikację")
     try:
         run_phase('hive2_falsifier.py', ['--mission', mission_id], 'falsify')
     except Exception as e:
-        print(f"[HIVE] Falsifikacja failed ({e}) — raport już zapisany", file=sys.stderr)
+        log.info(f"[HIVE] Falsifikacja failed ({e}) — raport już zapisany")
 
 
 def cmd_synth(mission_id: str):
@@ -1994,7 +1999,7 @@ def cmd_synth(mission_id: str):
     # duckdb removed — PG is primary
     _init_db(None)
     if not _get_mission(mission_id):
-        print(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.", file=sys.stderr)
+        log.info(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.")
         sys.exit(1)
     # Pobierz query misji z DB
     con = _connect_db(read_only=True)

@@ -9,7 +9,7 @@ Ten moduł robi to samo dla domen: akumuluje wiedzę negatywną cross-mission
 i eliminuje "zarażone" źródła z kolejnych harvests.
 
 Schemat:
-  hive_domain_reputation (DuckDB persistent)
+  hive_domain_reputation (persistent)
     domain          VARCHAR PK
     avg_quality     FLOAT   — średnia jakość treści (0.0–1.0)
     harvest_count   INT     — ile razy harvestowane
@@ -25,8 +25,8 @@ Public API:
     rep = DomainReputation()
 
     # Przed harvest
-    factor = rep.get_score_boost(url)  # 0.5–1.5 (mnożnik dla score_total)
-    skip = rep.should_skip(url)        # True jeśli blacklisted
+    factor = rep.get_score_boost(url)  # 0.5–1.5 (multiplier for score_total)
+    skip = rep.should_skip(url)        # True if blacklisted
 
     # Po harvest (aktualizacja)
     rep.update(url, quality_score, success)
@@ -75,7 +75,7 @@ _BAD_QUALITY_THRESHOLD  = 0.3    # pojedynczy harvest < X = "zły"
 _BOOST_HIGH             = 1.35   # boost dla zaufanych domen (avg > 0.75)
 _BOOST_MED              = 1.10   # lekki boost (avg 0.55–0.75)
 _BOOST_LOW              = 0.65   # kara (avg 0.25–0.45)
-_BOOST_VERY_LOW         = 0.35   # duża kara (avg < 0.25, nie blacklisted yet)
+_BOOST_VERY_LOW         = 0.35   # duża kara (avg < 0.25, not blacklisted yet)
 
 
 def _extract_domain(url: str) -> str:
@@ -176,7 +176,7 @@ class DomainReputation:
         if rec["blacklisted"]:
             return 0.0  # wyklucz całkowicie
 
-        # Potrzebujemy min. 2 harvests żeby mieć sens
+        # Need min 2 harvests to be meaningful
         if rec["harvest_count"] < 2:
             return 1.0
 
@@ -227,7 +227,7 @@ class DomainReputation:
             p["successes"].append(success)
             p["consecutive_bad"] = p["consecutive_bad"] + 1 if is_bad else 0
         else:
-            # Ładuj istniejące lub inicjuj nowe
+            # Load existing or initialize new
             rec = self._load(domain)
             base_count   = rec["harvest_count"] if rec else 0
             base_quality = rec["avg_quality"]   if rec else 0.5
@@ -251,7 +251,7 @@ class DomainReputation:
 
     def flush(self):
         """
-        Commituje wszystkie pending updates do DuckDB.
+        Commits all pending updates to database.
         Wywołaj po zakończeniu harvest misji.
         """
         if not self._pending_updates:
@@ -268,7 +268,7 @@ class DomainReputation:
                 int(p["base_count"] * 0.7) + new_successes  # aprox prior successes
             )
 
-            # Nowa średnia jakości (exponential moving average — faworyzuje nowe dane)
+            # New quality average (EMA — favors recent data)
             if p["base_count"] > 0:
                 alpha = min(0.4, new_harvests / (p["base_count"] + new_harvests))
                 new_avg = (1 - alpha) * p["base_quality"] + alpha * (
@@ -390,6 +390,7 @@ class DomainReputation:
                 lines.append(f"     {d:<45} avg={q:.2f}  harvests={h}  boost={boost}x  {reason[:40]}")
             return "\n".join(lines)
         except Exception as e:
+            log.debug(f"Exception in domain_reputation.py: {e}")
             return f"Domain reputation report error: {e}"
 
 
@@ -435,7 +436,7 @@ if __name__ == "__main__":
             print(f"  {url[:50]:50s}  skip={skip}  boost={boost:.2f}x")
         print(rep.report())
     elif "--blacklist" in sys.argv:
-        # ręczne blacklistowanie
+        # manual blacklisting
         try:
             idx = sys.argv.index("--blacklist")
             domain = sys.argv[idx + 1]
@@ -451,7 +452,7 @@ if __name__ == "__main__":
                     updated_at=excluded.updated_at
             """, [domain, reason])
             con.close()
-            print(f"✓ Blacklisted: {domain} ({reason})")
+            log.info(f"✓ Blacklisted: {domain} ({reason})")
         except (IndexError, Exception) as e:
             print(f"Usage: python3 hive2_domain_reputation.py --blacklist domain.com [reason]")
             print(f"Error: {e}")

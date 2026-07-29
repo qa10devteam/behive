@@ -1,4 +1,7 @@
-#!/usr/bin/env python3
+from __future__ import annotations
+import logging
+
+log = logging.getLogger(__name__)
 """
 HIVE 2.0 — hive2_prescout.py
 =============================
@@ -18,7 +21,6 @@ CLI:
     python3 hive2_prescout.py <mission_id> [--manual]
 """
 
-from __future__ import annotations
 
 import os
 import asyncio
@@ -211,13 +213,13 @@ def topic_dq_filter(title: str, snippet: str, topic: str) -> dict:
         "które", "jego", "jej", "ich", "ten", "tym", "przy", "pod", "nad",
     }
 
-    # Słowa kluczowe z topic
+    # Keywords from topic
     topic_words = [
         w.lower() for w in re.findall(r'[a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]{4,}', topic)
         if w.lower() not in _STOP
     ]
     if len(topic_words) < 3:
-        return {"dq": False, "dq_score": 1.0, "dq_reason": None}  # za mało danych
+        return {"dq": False, "dq_score": 1.0, "dq_reason": None}  # too few danych
 
     text = (f"{title or ''} {snippet or ''}").lower()
 
@@ -278,6 +280,7 @@ async def _head_one(
         except asyncio.TimeoutError:
             result["head_error"] = "timeout"
         except Exception as e:
+            log.debug(f"Exception in prescout.py: {e}")
             result["head_error"] = str(e)[:80]
         return result
 
@@ -404,7 +407,7 @@ def route_resource(
 
     # ── LOW tier + low score → skip ──────────────────────────────────────────
     # ── REC-06: Domain Reputation score boost (grooming signal) ──────────────
-    # Jeśli domain ma historię wysokiej jakości → override LOW tier → MEDIUM
+    # If domain has high quality history → override LOW tier → MEDIUM
     _rep_boost = 0.0
     try:
         from hive2_domain_reputation import get_reputation
@@ -417,11 +420,11 @@ def route_resource(
                     domain_info = dict(domain_info, tier="MEDIUM")
                     flags.append("rep_promoted_to_medium")
             elif _rep_boost < 0.2 and _rep_count >= 5:
-                # Historycznie słaby domain → skip nawet jeśli MEDIUM
+                # Historically weak domain → skip even if MEDIUM
                 flags.append("rep_low_quality")
                 return "thin_content", "skip", flags
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f"Suppressed: {e}")
 
     if domain_info["tier"] == "LOW" and source_score < 20 and _rep_boost < 0.5:
         flags.append("low_tier_low_score")
@@ -445,6 +448,7 @@ def _duckdb_connect_retry(path: str, read_only: bool = False, retries: int = 4) 
         try:
             return _hive_db.connect(read_only=read_only)
         except Exception as e:
+            log.debug(f"Exception in prescout.py: {e}")
             if "lock" in str(e).lower() or "IO Error" in str(e):
                 time.sleep(2 ** attempt)
             else:
@@ -594,8 +598,8 @@ class PreScoutDancer:
         except Exception:
             try:
                 con.execute("ROLLBACK")
-            except Exception:
-                pass
+            except (Exception,) as e:  # DB operation
+                log.debug(f"DB error: {e}")
             raise
         finally:
             con.close()
@@ -607,17 +611,17 @@ class PreScoutDancer:
         """
         sources = self._get_sources()
         if not sources:
-            print(f"  🐝 PreScout: no sources found for {self.mission_id}")
+            log.debug(f"  🐝 PreScout: no sources found for {self.mission_id}")
             return {}
 
         urls           = [s["url"] for s in sources]
         url_to_source  = {s["url"]: s for s in sources}
 
-        print(f"  🐝 Taniec: HEAD sweep {len(urls)} sources...")
+        log.debug(f"  🐝 Taniec: HEAD sweep {len(urls)} sources...")
         t0           = time.monotonic()
         head_results = await head_sweep(urls)
         elapsed      = time.monotonic() - t0
-        print(f"  🐝 HEAD sweep done: {len(head_results)} results in {elapsed:.1f}s")
+        log.debug(f"  🐝 HEAD sweep done: {len(head_results)} results in {elapsed:.1f}s")
 
         entries: list[dict] = []
         routing_stats: dict[str, int] = {}
@@ -635,7 +639,7 @@ class PreScoutDancer:
             rt, routing, flags = route_resource(
                 url, head_meta, domain_info, src.get("score_total", 0)
             )
-            # DQ fail → dodaj flagę, nie odrzucaj (routing niezmieniony)
+            # DQ fail → add flag, do not reject (routing unchanged)
             if dq_result["dq"] and "dq_fail" not in flags:
                 flags.append(f"dq_fail:{dq_result['dq_reason']}")
             entry = {
@@ -659,10 +663,10 @@ class PreScoutDancer:
         dq_fails = sum(1 for e in entries if any("dq_fail" in f for f in e["flags"]))
         self._save_map(entries)
 
-        print(f"  🐝 Taniec zakończony. DQ filter: {dq_fails}/{len(entries)} irrelevant flagged.")
-        print(f"  🐝 Routing distribution:")
+        log.debug(f"  🐝 Taniec zakończony. DQ filter: {dq_fails}/{len(entries)} irrelevant flagged.")
+        log.debug(f"  🐝 Routing distribution:")
         for r, cnt in sorted(routing_stats.items(), key=lambda x: -x[1]):
-            print(f"     {r:30s}: {cnt}")
+            log.debug(f"     {r:30s}: {cnt}")
 
         return {e["url"]: e for e in entries}
 
@@ -817,8 +821,8 @@ class BeeMasterGate:
         except Exception:
             try:
                 con.execute("ROLLBACK")
-            except Exception:
-                pass
+            except (Exception,) as e:  # DB operation
+                log.debug(f"DB error: {e}")
             raise
         finally:
             con.close()
@@ -829,15 +833,15 @@ class BeeMasterGate:
         approve_set: set[str] = set()
         add_urls:    list[str] = []
 
-        print("  Enter commands (or press Enter / type 'done' to proceed):")
+        log.debug("  Enter commands (or press Enter / type 'done' to proceed):")
         import select, sys
         while True:
             try:
                 # 5-minute timeout
-                print("  🐝 > ", end="", flush=True)
+                log.debug("  🐝 > ", end="", flush=True)
                 ready, _, _ = select.select([sys.stdin], [], [], 300)
                 if not ready:
-                    print("[timeout — auto-approving]")
+                    log.debug("[timeout — auto-approving]")
                     break
                 cmd = sys.stdin.readline().strip()
             except (EOFError, KeyboardInterrupt):
@@ -847,17 +851,17 @@ class BeeMasterGate:
             if cmd.startswith("s "):
                 u = cmd[2:].strip()
                 skip_set.add(u)
-                print(f"  ↳ Skip: {u}")
+                log.debug(f"  ↳ Skip: {u}")
             elif cmd.startswith("a "):
                 u = cmd[2:].strip()
                 approve_set.add(u)
-                print(f"  ↳ Force-approve: {u}")
+                log.debug(f"  ↳ Force-approve: {u}")
             elif cmd.startswith("add "):
                 u = cmd[4:].strip()
                 add_urls.append(u)
-                print(f"  ↳ Added seed: {u}")
+                log.debug(f"  ↳ Added seed: {u}")
             else:
-                print("  Commands: [Enter]/done | s <url> | a <url> | add <url>")
+                log.debug("  Commands: [Enter]/done | s <url> | a <url> | add <url>")
 
         con = _duckdb_connect_retry(self.db_path)
         try:
@@ -892,8 +896,8 @@ class BeeMasterGate:
         except Exception:
             try:
                 con.execute("ROLLBACK")
-            except Exception:
-                pass
+            except (Exception,) as e:  # DB operation
+                log.debug(f"DB error: {e}")
             raise
         finally:
             con.close()
@@ -925,8 +929,8 @@ class BeeMasterGate:
         except Exception:
             try:
                 con.execute("ROLLBACK")
-            except Exception:
-                pass
+            except (Exception,) as e:  # DB operation
+                log.debug(f"DB error: {e}")
             raise
         finally:
             con.close()
@@ -944,8 +948,8 @@ class BeeMasterGate:
                     (mission_id, mode, total_sources, approved, skipped, escalated)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, [self.mission_id, self.mode, len(entries), approved, skipped, escalated])
-        except Exception:
-            pass
+        except (Exception,) as e:  # DB operation
+            log.debug(f"DB error: {e}")
         finally:
             con.close()
 
@@ -956,14 +960,14 @@ class BeeMasterGate:
         """
         entries = self._load_map()
         if not entries:
-            print(f"  👨‍✈️  BeeMaster: no entries found for {self.mission_id}")
+            log.debug(f"  👨‍✈️  BeeMaster: no entries found for {self.mission_id}")
             return []
 
         if self.mode == "auto":
-            print(f"  👨‍✈️  BeeMaster: AUTO mode — applying decisions to {len(entries)} sources...")
+            log.debug(f"  👨‍✈️  BeeMaster: AUTO mode — applying decisions to {len(entries)} sources...")
             self._apply_auto(entries)
         elif self.mode == "manual":
-            print(self._generate_report(entries))
+            log.debug(self._generate_report(entries))
             self._manual_session(entries)
         else:
             # api mode fallback → auto
@@ -971,7 +975,7 @@ class BeeMasterGate:
 
         if seed_urls:
             self._add_seed_urls(seed_urls)
-            print(f"  👨‍✈️  BeeMaster: added {len(seed_urls)} seed URLs")
+            log.debug(f"  👨‍✈️  BeeMaster: added {len(seed_urls)} seed URLs")
 
         # Reload with decisions
         entries_with_dec = self._load_map()
@@ -999,7 +1003,7 @@ class BeeMasterGate:
             for r in rows
         ]
         self._log_session(entries_with_dec)
-        print(f"  👨‍✈️  BeeMaster: {len(approved)} approved → True Scout")
+        log.debug(f"  👨‍✈️  BeeMaster: {len(approved)} approved → True Scout")
         return approved
 
 
@@ -1061,6 +1065,7 @@ class TrueScout:
                         "extraction_confidence": 0.7,
                     }
             except Exception as e:
+                log.debug(f"Exception in prescout.py: {e}")
                 return {
                     "data_volume_words":    0,
                     "content_preview":      f"probe_failed: {str(e)[:60]}",
@@ -1126,6 +1131,7 @@ class TrueScout:
                         "extraction_confidence": 0.95,
                     }
             except Exception as e:
+                log.debug(f"Exception in prescout.py: {e}")
                 return {
                     "data_volume_records":  None,
                     "data_volume_words":    500,
@@ -1241,8 +1247,8 @@ class TrueScout:
         except Exception:
             try:
                 con.execute("ROLLBACK")
-            except Exception:
-                pass
+            except (Exception,) as e:  # DB operation
+                log.debug(f"DB error: {e}")
             raise
         finally:
             con.close()
@@ -1255,7 +1261,7 @@ class TrueScout:
         if not approved_entries:
             return []
 
-        print(f"  🔍 True Scout: verifying {len(approved_entries)} approved sources...")
+        log.debug(f"  🔍 True Scout: verifying {len(approved_entries)} approved sources...")
         t0 = time.monotonic()
 
         import aiohttp
@@ -1270,8 +1276,8 @@ class TrueScout:
         api_count   = sum(1 for r in results if r.get("extraction_method") == "api_bee")
         pdf_count   = sum(1 for r in results if r.get("extraction_method") == "pymupdf")
 
-        print(f"  🔍 True Scout done in {elapsed:.1f}s")
-        print(f"     ~{total_words:,} words estimated | {api_count} APIs | {pdf_count} PDFs")
+        log.debug(f"  🔍 True Scout done in {elapsed:.1f}s")
+        log.debug(f"     ~{total_words:,} words estimated | {api_count} APIs | {pdf_count} PDFs")
 
         return list(results)
 
@@ -1303,40 +1309,40 @@ async def run_prescout_pipeline(
         mission_id: ID misji (musi mieć hive_sources w DB)
         bm_mode:    "auto" | "manual" | "api"
         seed_urls:  [{"url": str, "title": str}]
-        db_path:    ścieżka do DuckDB
+        db_path:    database path
 
     Returns:
         routing_map: list of verified source dicts with routing_final
     """
     sep = "═" * 62
-    print(f"\n{sep}")
-    print(f"  🐝 PHASE 0 — TANIEC + BEE MASTER + TRUE SCOUT")
-    print(f"{sep}")
+    log.debug(f"\n{sep}")
+    log.debug(f"  🐝 PHASE 0 — TANIEC + BEE MASTER + TRUE SCOUT")
+    log.debug(f"{sep}")
 
     # ── Phase A: Taniec ──────────────────────────────────────────────────────
     dancer     = PreScoutDancer(mission_id, db_path)
     source_map = await dancer.dance()
     if not source_map:
-        print(f"  ⚠️  PreScout: no sources → skipping")
+        log.debug(f"  ⚠️  PreScout: no sources → skipping")
         return []
 
     # ── REC-01: Bionic Quorum check ──────────────────────────────────────────
-    # Analogia: pszczoły wymagają quorum ≥25 przed lotem do nowego gniazda.
-    # Jeśli za mało harvestowalnych URL → wygeneruj expansion queries zamiast
-    # wysyłać trutnie na bezproduktywny harvest.
+    # Analogia: bees require quorum ≥25 before flight to new nest.
+    # If too few harvestable URLs → generate expansion queries instead
+    # send drones on unproductive harvest.
     try:
         from hive2_bionic_quorum import QuorumChecker
         _qc = QuorumChecker(mission_id)
         _qr = _qc.check()
-        print(f"  🐝 Quorum: {_qr.harvestable_count}/{_qr.total_sources} harvestable "
+        log.warning(f"  🐝 Quorum: {_qr.harvestable_count}/{_qr.total_sources} harvestable "
               f"({'✅ MET' if _qr.quorum_met else '⚠️ NOT MET'})")
         if not _qr.quorum_met:
             if _qr.expansion_queries:
-                print(f"  🐝 Quorum: generating {len(_qr.expansion_queries)} expansion queries")
-                # Wstrzyknij expansion queries jako dodatkowe źródła do scout
+                log.debug(f"  🐝 Quorum: generating {len(_qr.expansion_queries)} expansion queries")
+                # Inject expansion queries as additional sources to scout
                 import importlib
                 _scout_mod = importlib.import_module('hive2')
-                # Zapisz queries do hive_gaps dla następnego runquerycycle
+                # Save queries to hive_gaps for next runquerycycle
                 try:
                     pass  # duckdb removed
                     _gc = _ddb2.connect(db_path)
@@ -1347,29 +1353,29 @@ async def run_prescout_pipeline(
                             [mission_id, f"[QUORUM-EXPAND] {_eq}"]
                         )
                     _gc.close()
-                    print(f"  🐝 Quorum: {len(_qr.expansion_queries[:5])} expansion queries → hive_gaps (priority=9)")
+                    log.debug(f"  🐝 Quorum: {len(_qr.expansion_queries[:5])} expansion queries → hive_gaps (priority=9)")
                 except Exception as _gce:
-                    pass
+                    log.debug(f"Suppressed: {_gce}")
             else:
-                print(f"  🐝 Quorum: insufficient sources, proceeding anyway (no expansions available)")
+                log.debug(f"  🐝 Quorum: insufficient sources, proceeding anyway (no expansions available)")
     except Exception as _qce:
-        print(f"  🐝 Quorum check skipped: {_qce}")
+        log.debug(f"  🐝 Quorum check skipped: {_qce}")
 
     # ── Phase B: Bee Master gate ─────────────────────────────────────────────
     bm       = BeeMasterGate(mission_id, mode=bm_mode, db_path=db_path)
     approved = bm.gate(seed_urls=seed_urls)
     if not approved:
-        print(f"  ⚠️  BeeMaster approved 0 sources → skipping True Scout")
+        log.debug(f"  ⚠️  BeeMaster approved 0 sources → skipping True Scout")
         return []
 
     # ── Phase C: True Scout ──────────────────────────────────────────────────
     scout       = TrueScout(mission_id, db_path)
     routing_map = await scout.verify(approved)
 
-    print(f"\n  ✅ Pre-Scout complete: {len(routing_map)} sources routed for harvest")
+    log.debug(f"\n  ✅ Pre-Scout complete: {len(routing_map)} sources routed for harvest")
     total_est = sum(r.get("estimated_harvest_s") or 0 for r in routing_map)
-    print(f"     Estimated harvest time: {total_est:.0f}s ({total_est/60:.1f} min)")
-    print(f"{sep}\n")
+    log.debug(f"     Estimated harvest time: {total_est:.0f}s ({total_est/60:.1f} min)")
+    log.debug(f"{sep}\n")
     return routing_map
 
 
