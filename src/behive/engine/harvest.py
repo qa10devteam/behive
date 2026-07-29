@@ -339,6 +339,7 @@ def _get_drone_strategy(mission_id: str, domain: str) -> dict:
 # ---------------------------------------------------------------------------
 
 class HarvesterBee:
+    """Content harvester — fetches, extracts, and scores web content."""
     def __init__(self, mission_id: str, workers: int = DEFAULT_WORKERS):
         self.mission_id = mission_id
         self.workers = workers
@@ -389,6 +390,7 @@ class HarvesterBee:
     # ------------------------------------------------------------------
 
     async def run(self):
+        """Execute the main pipeline loop."""
         log.info(f"HarvesterBee starting — mission={self.mission_id}, workers={self.workers}")
 
         sources = self._load_pending_sources()
@@ -1153,6 +1155,7 @@ class HarvesterBee:
 # ---------------------------------------------------------------------------
 
 def main():
+    """CLI entry point."""
     parser = argparse.ArgumentParser(
         description="HIVE 2.0 HarvesterBee — fetch content from hive_sources"
     )

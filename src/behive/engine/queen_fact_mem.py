@@ -170,6 +170,7 @@ def _haiku(prompt: str, max_tokens: int = 600) -> Optional[str]:
 
 @dataclass
 class FactRecord:
+    """Persistent fact record with embedding, confidence, and provenance."""
     id: str
     fact_text: str
     source_type: str
@@ -532,6 +533,7 @@ class QueenFactMemory:
     # Stats
     # ------------------------------------------------------------------
 
+    """Return memory statistics: total facts, coverage, staleness."""
     def stats(self) -> dict:
         con = self._get_con()
         row = con.execute(
@@ -549,6 +551,7 @@ class QueenFactMemory:
         }
 
     def close(self) -> None:
+        """Close the database connection."""
         if self._con:
             self._con.close()
             self._con = None

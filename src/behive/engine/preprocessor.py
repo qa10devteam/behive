@@ -1,3 +1,5 @@
+"""Content preprocessor — HTML cleaning, markdown extraction, and text normalization."""
+
 import logging
 #!/usr/bin/env python3
 """
@@ -123,6 +125,7 @@ def _generate_clarifications(topic: str) -> list[str]:
 
 @dataclass
 class PreprocessResult:
+    """Preprocessing result: cleaned text, metadata, quality signals."""
     ok: bool                              # True → proceed with refined_topic
     refined_topic: str                    # cleaned / unchanged topic
     specificity_score: float              # 0.0–1.0

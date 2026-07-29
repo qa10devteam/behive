@@ -1,3 +1,5 @@
+"""Scout module — query generation, source discovery, RSS/DDG/API routing, and URL scoring."""
+
 import logging
 #!/usr/bin/env python3
 """
@@ -702,6 +704,7 @@ def generate_standalone_plan(topic: str) -> list[dict]:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def main():
+    """CLI entry point."""
     args = sys.argv[1:]
 
     if len(args) < 2:

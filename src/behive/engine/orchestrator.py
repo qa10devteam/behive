@@ -1,3 +1,5 @@
+"""Pipeline orchestrator — Queen-first planning, phase coordination, and full research execution."""
+
 import logging
 #!/usr/bin/env python3
 """
@@ -1201,6 +1203,7 @@ def _get_unresolved_gaps(mission_id: str) -> list:
 # ---------------------------------------------------------------------------
 
 def new_mission_id(topic: str) -> str:
+    """Generate a unique mission identifier."""
     h = hashlib.md5(topic.encode()).hexdigest()[:6]
     return f"hive_{int(time.time())}_{h}"
 

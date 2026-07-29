@@ -66,6 +66,7 @@ _MIN_KEYWORD_OVERLAP = 0.25   # 25% shared keywords → "related topic"
 
 @dataclass
 class Primer:
+    """Mission primer — context from similar past missions for Queen planning."""
     mission_id:          str
     topic:               str
     top_domains:         List[str] = field(default_factory=list)

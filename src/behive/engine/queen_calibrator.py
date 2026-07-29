@@ -77,6 +77,7 @@ TOPIC_DOMAIN_KEYWORDS: dict[str, list[str]] = {
 
 @dataclass
 class SourceProfile:
+    """Source quality profile — aggregated trust signals for a domain."""
     source_type: str
     avg_score: float
     avg_authority: float
@@ -84,8 +85,8 @@ class SourceProfile:
     recommendation: str = ""
 
 
-@dataclass
 class OperationProfile:
+    """Bee operation profile — success rates and timing statistics."""
     operation_name: str
     tier: int
     avg_confidence: float
@@ -132,6 +133,7 @@ class CalibrationProfile:
     mission_stats: dict = field(default_factory=dict)
 
     def summary(self) -> str:
+        """Return human-readable summary of the quorum result."""
         lines = [
             f"CalibrationProfile(domain={self.topic_domain}, generated={self.generated_at.isoformat()})",
             f"  sources: {len(self.source_profiles)} types | blocked: {len(self.blocked_domains)} | cf: {len(self.cloudflare_domains)}",

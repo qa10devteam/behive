@@ -38,6 +38,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class ThreatType:
+    """Enumeration of content injection threat categories."""
     PROMPT_INJECTION   = "PROMPT_INJECTION"    # klasyczna iniekcja instrukcji
     JAILBREAK          = "JAILBREAK"            # próba obejścia limitów
     INSTRUCTION_HIJACK = "INSTRUCTION_HIJACK"   # "ignore previous instructions"
@@ -49,6 +50,7 @@ class ThreatType:
 
 @dataclass
 class GuardrailResult:
+    """Guardrail scan result: threat type, confidence, blocked flag."""
     blocked: bool
     threat_type: str = ThreatType.CLEAN
     score: float = 0.0          # 0.0 = no threat, 1.0 = certain attack
@@ -391,15 +393,18 @@ def scan_query(query: str) -> GuardrailResult:
 
 @dataclass
 class GuardrailStats:
+    """Aggregated guardrail statistics for a mission run."""
     total_scanned: int = 0
     total_blocked: int = 0
     by_threat: dict = field(default_factory=dict)
 
     @property
     def block_rate(self) -> float:
+        """Calculate the fraction of blocked requests."""
         return self.total_blocked / max(self.total_scanned, 1)
 
     def record(self, result: GuardrailResult) -> None:
+        """Record a guardrail check result."""
         self.total_scanned += 1
         if result.blocked:
             self.total_blocked += 1

@@ -250,6 +250,7 @@ Return the complete final report in Markdown.""", max_tokens=4096)
 # ---------------------------------------------------------------------------
 
 class Queen:
+    """Queen synthesizer — multi-pass evidence hierarchy, narrative generation, and PDF output."""
     def __init__(self, mission_id: str):
         self.mission_id = mission_id
         self._import_duckdb()
@@ -312,8 +313,6 @@ class Queen:
                 "total_words": mr[5], "total_entities": mr[6],
                 "total_facts": mr[7], "created_at": str(mr[8]),
             }
-
-            all_tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
 
             def safe_query(sql, params=None):
                 try:
@@ -1873,6 +1872,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
     # ── Main entry point ─────────────────────────────────────────────────────
 
     def run(self):
+        """Execute the main pipeline loop."""
         t0 = time.time()
         log.debug(f"\n👑 QUEEN 3.0 — synteza misji: {self.mission_id}")
         log.info("[QUEEN] Pipeline: Evidence Hierarchy → Falsification → "

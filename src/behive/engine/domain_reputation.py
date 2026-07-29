@@ -401,6 +401,7 @@ _global_rep: Optional[DomainReputation] = None
 
 
 def get_reputation() -> DomainReputation:
+    """Get domain reputation score and history."""
     global _global_rep
     if _global_rep is None:
         _global_rep = DomainReputation()

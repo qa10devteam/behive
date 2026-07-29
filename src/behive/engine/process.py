@@ -1,3 +1,5 @@
+"""Claim processing — extraction, deduplication, quality scoring, and DB persistence."""
+
 from typing import Any
 #!/usr/bin/env python3
 """
@@ -254,6 +256,7 @@ class SGLangClient:
         model: Optional[str] = None,
         max_tokens: int = 1024,
     ) -> str:
+        """Invoke a single bee operation on content."""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -325,6 +328,7 @@ class _BedrockFallbackClient:
             self._client = _boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
         return self._client
     def invoke(self, prompt: str, system_prompt: str = None, model: str = None, max_tokens: int = 512) -> str:
+        """Invoke a single bee operation on content."""
         m = model or MODEL_FAST_PRIMARY
         sp = system_prompt or "You are a precise data extraction AI. Return only valid JSON."
         body = _json_b.dumps({
@@ -1313,6 +1317,7 @@ class DeduplicationDrone:
     """Merges near-duplicate entities using rapidfuzz."""
 
     def run(self, con: Any, mission_id: str) -> int:
+        """Execute the main pipeline loop."""
         if not _rapidfuzz_available:
             log.warning("DeduplicationDrone: rapidfuzz not available, skipping")
             return 0
@@ -1372,6 +1377,7 @@ class FactValidationDrone:
     """Cross-domain confidence scoring for numeric facts."""
 
     def run(self, con: Any, mission_id: str) -> int:
+        """Execute the main pipeline loop."""
         try:
             rows = con.execute("""
                 SELECT id, value, unit, sources
@@ -1456,6 +1462,7 @@ class ClaimCrossValidationDrone:
 
     def run(self, con: Any, mission_id: str) -> int:
         # Dodaj evidence_flags if not istnieje
+        """Execute the main pipeline loop."""
         try:
             con.execute("ALTER TABLE hive_claims ADD COLUMN IF NOT EXISTS evidence_flags VARCHAR")
         except Exception:
@@ -1540,6 +1547,7 @@ class GapDrone:
     """Generates research gap analysis using Bedrock."""
 
     def run(self, con: Any, mission_id: str, topic: str) -> list[dict]:
+        """Execute the main pipeline loop."""
         if not _boto3_available:
             log.warning("GapDrone: boto3 not available, skipping")
             return []
@@ -2221,6 +2229,7 @@ class ProcessingDrones:
 # ---------------------------------------------------------------------------
 
 def main():
+    """CLI entry point."""
     parser = argparse.ArgumentParser(
         description="HIVE 3.0 BPMN ProcessingDrones — transform raw content into intelligence"
     )

@@ -1,3 +1,5 @@
+"""PreScout routing — intelligent source triage, BeeMaster gate, and harvest prioritization."""
+
 from __future__ import annotations
 import logging
 
