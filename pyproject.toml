@@ -78,4 +78,19 @@ Homepage = "https://github.com/qa10devteam/behive"
 Documentation = "https://behive.dev"
 Repository = "https://github.com/qa10devteam/behive"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: pure unit tests, no I/O, fast",
+    "integration: requires PostgreSQL",
+    "e2e: full pipeline end-to-end (slow)",
+    "regression: regression tests for past bugs",
+]
+addopts = "-v --tb=short"
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
 

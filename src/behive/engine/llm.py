@@ -220,6 +220,10 @@ def complete(
         log.warning("litellm not installed. Falling back to direct API calls.")
         log.warning("Install litellm for 100+ provider support: pip install litellm")
     except Exception as e:
+        err_str = str(e).lower()
+        # Auth errors should propagate (user needs to fix their key)
+        if any(k in err_str for k in ('auth', 'invalid_api_key', 'permission', 'invalid api key', 'api_key')):
+            raise
         log.error(f"LLM call failed (model={model}): {e}")
         # Fall through to direct calls as last resort
     
