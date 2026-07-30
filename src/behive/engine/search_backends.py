@@ -71,32 +71,36 @@ class PlaywrightBackend(SearchBackend):
         
         results = []
         
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
-            )
-            try:
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    locale="en-US",
-                    extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
                 )
-                page = await context.new_page()
-                page.set_default_timeout(15000)
-                
-                # Try Google first, fallback to Bing
                 try:
-                    results = await self._scrape_google(page, query, max_results)
-                except Exception as e:
-                    log.debug(f"Google scrape failed: {e}, trying Bing")
+                    context = await browser.new_context(
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        locale="en-US",
+                        extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
+                    )
+                    page = await context.new_page()
+                    page.set_default_timeout(15000)
+                    
+                    # Try Google first, fallback to Bing
                     try:
-                        results = await self._scrape_bing(page, query, max_results)
-                    except Exception as e2:
-                        log.debug(f"Bing scrape also failed: {e2}")
-                
-            finally:
-                await browser.close()
+                        results = await self._scrape_google(page, query, max_results)
+                    except Exception as e:
+                        log.debug(f"Google scrape failed: {e}, trying Bing")
+                        try:
+                            results = await self._scrape_bing(page, query, max_results)
+                        except Exception as e2:
+                            log.debug(f"Bing scrape also failed: {e2}")
+                    
+                finally:
+                    await browser.close()
+        except Exception as e:
+            log.warning(f"Playwright/Chromium crashed: {e} — falling through to next backend")
+            return []
         
         return results[:max_results]
     
