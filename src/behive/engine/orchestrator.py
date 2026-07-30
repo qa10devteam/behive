@@ -1105,9 +1105,28 @@ def new_mission_id(topic: str) -> str:
 # Phase runner
 # ---------------------------------------------------------------------------
 
+# Map from hive2_X.py filenames to package module paths
+_SCRIPT_TO_MODULE = {
+    'hive2_scout.py': 'behive.engine.scout',
+    'hive2_harvest.py': 'behive.engine.harvest',
+    'hive2_process.py': 'behive.engine.process',
+    'hive2_synth.py': 'behive.engine.synth',
+    'hive2_falsifier.py': 'behive.engine.falsifier',
+    'hive2_master_intelligence.py': 'behive.engine.master_intelligence',
+    'hive2_intel_summary.py': 'behive.engine.intel_summary',
+    'hive2_graph_engine.py': 'behive.engine.graph_engine',
+    'hive2_prescout.py': 'behive.engine.prescout',
+    'hive2_drones.py': 'behive.engine.drones',
+}
+
+
 def run_phase(script: str, args: list[str], phase_name: str, 
               timeout: int = 600) -> float:
     """Run a HIVE bee script as subprocess, return elapsed seconds.
+    
+    Resolution order:
+    1. HIVE_DIR / script (local development — script file on disk)
+    2. Package module (-m behive.engine.X — pip install users)
     
     Args:
         timeout: Max seconds for this phase (default 600 = 10 min).
@@ -1115,10 +1134,33 @@ def run_phase(script: str, args: list[str], phase_name: str,
     """
     # Allow env override for timeout
     timeout = int(os.environ.get("BEHIVE_PHASE_TIMEOUT", str(timeout)))
-    script_path = str(HIVE_DIR / script)
+    
+    # Resolve script path — prefer local file, fallback to package module
+    local_path = HIVE_DIR / script
+    if local_path.exists():
+        script_path = str(local_path)
+    else:
+        # Try package module
+        module_name = _SCRIPT_TO_MODULE.get(script)
+        if module_name:
+            # Verify module exists
+            try:
+                import importlib
+                importlib.import_module(module_name)
+                script_path = None  # Signal to use -m invocation
+            except ImportError:
+                script_path = str(local_path)  # Fall through — will error naturally
+        else:
+            script_path = str(local_path)
     pid_file = f"/tmp/hive_{phase_name.replace('/', '_')}.pid"
     log_file = f"/tmp/hive_{phase_name.replace('/', '_')}_proc.log"
-    cmd = [PYTHON, script_path] + args
+    
+    # Build command — either direct script or -m module invocation
+    if script_path is not None:
+        cmd = [PYTHON, script_path] + args
+    else:
+        module_name = _SCRIPT_TO_MODULE[script]
+        cmd = [PYTHON, '-m', module_name] + args
     t0 = time.time()
     log.debug(f"\n{'='*60}")
     log.debug(f"🐝  [{phase_name.upper()}] Uruchamiam: {' '.join(cmd)}")

@@ -36,8 +36,15 @@ Usage:
 """
 import logging
 
-
 log = logging.getLogger(__name__)
+
+# Auto-install compat shims so hive2_* imports resolve to behive.engine.*
+try:
+    from behive.compat.shims import install_shims, install_ops_shim
+    install_ops_shim()
+    install_shims()
+except ImportError:
+    pass
 __all__ = [
     "orchestrator",
     "queen",

@@ -34,6 +34,17 @@ SHIM_MAP = {
     "hive2_queen_fact_mem": "behive.engine.queen_fact_mem",
     "hive2_guardrail": "behive.engine.guardrail",
     "hive_api_scout": "behive.engine.api_scout",
+    "hive2_falsifier": "behive.engine.falsifier",
+    "hive2_master_intelligence": "behive.engine.master_intelligence",
+    "hive2_intel_summary": "behive.engine.intel_summary",
+    "hive2_graph_engine": "behive.engine.graph_engine",
+    "hive2_content_quality": "behive.engine.content_quality",
+    "hive2_queen_tools": "behive.engine.queen_tools",
+    "hive2_queen_feedback": "behive.engine.queen_feedback",
+    "hive2_rag": "behive.engine.rag",
+    "hive2_cluster": "behive.engine.cluster",
+    "hive2_watcher": "behive.engine.watcher",
+    "hive2_scout_targeted": "behive.engine.scout_targeted",
 }
 
 
