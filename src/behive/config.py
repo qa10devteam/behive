@@ -49,21 +49,32 @@ STAGES = {
     },
 }
 
-# Known model presets (user can also pass any litellm-compatible model string)
+# Known model presets (user can also pass any litellm-compatible model string directly)
+# These are convenience aliases — if your model isn't listed, just use the full string:
+#   BEHIVE_MODEL=anthropic/claude-sonnet-5-20260801
+#   BEHIVE_MODEL=openai/gpt-5.6-turbo
+# Any string litellm recognizes works as-is.
 MODEL_PRESETS = {
-    # Anthropic
+    # Anthropic (latest as of July 2026)
     "claude-haiku": "anthropic/claude-haiku-4-5-20251001",
     "claude-sonnet": "anthropic/claude-sonnet-4-20250514",
+    "claude-sonnet-5": "anthropic/claude-sonnet-5-20260715",
     "claude-opus": "anthropic/claude-opus-4-20250514",
+    "claude-opus-5": "anthropic/claude-opus-5-20260801",
+    "claude-fable": "anthropic/claude-fable-5-20260801",
     # OpenAI
     "gpt-4o-mini": "openai/gpt-4o-mini",
     "gpt-4o": "openai/gpt-4o",
     "gpt-4.1-mini": "openai/gpt-4.1-mini",
     "gpt-4.1": "openai/gpt-4.1",
+    "gpt-5": "openai/gpt-5",
+    "gpt-5-mini": "openai/gpt-5-mini",
     # AWS Bedrock
     "bedrock-haiku": "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0",
     "bedrock-sonnet": "bedrock/us.anthropic.claude-sonnet-4-6-v1@us-east-1",
+    "bedrock-sonnet-5": "bedrock/us.anthropic.claude-sonnet-5-v1@us-east-1",
     "bedrock-opus": "bedrock/us.anthropic.claude-opus-4-6-v1@us-east-1",
+    "bedrock-opus-5": "bedrock/us.anthropic.claude-opus-5-v1@us-east-1",
     # Google
     "gemini-flash": "google/gemini-2.5-flash",
     "gemini-pro": "google/gemini-2.5-pro",

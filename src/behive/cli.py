@@ -51,6 +51,7 @@ def main():
     config_mode.add_argument("--full", action="store_true", help="Full setup: pick model per stage")
     config_mode.add_argument("--show", action="store_true", help="Show current configuration")
     config_mode.add_argument("--preset", choices=["budget", "balanced", "quality", "local"], help="Apply a named preset")
+    config_mode.add_argument("--list-models", action="store_true", help="Show available model presets")
     config_p.add_argument("--stage", choices=["scout", "harvest", "process", "synth"], help="Set model for single stage")
     config_p.add_argument("--model", help="Model name or litellm string (use with --stage)")
 
@@ -110,6 +111,18 @@ def cmd_config(args):
             resolved = MODEL_PRESETS.get(combo[stage], combo[stage])
             print(f"   {stage:10s} → {resolved}")
         print(f"\n   Config: {CONFIG_FILE}\n")
+    elif getattr(args, 'list_models', False):
+        # Show all available presets
+        print("\n🐝 BeHive Model Presets\n")
+        print(f"  {'Preset':<20} {'Model String'}")
+        print(f"  {'─'*20} {'─'*50}")
+        for name, model in MODEL_PRESETS.items():
+            print(f"  {name:<20} {model}")
+        print(f"\n  💡 You can also use ANY litellm-compatible model string directly:")
+        print(f"     BEHIVE_MODEL=anthropic/claude-sonnet-5-20260801")
+        print(f"     BEHIVE_MODEL=openai/gpt-5.6-turbo")
+        print(f"     BEHIVE_MODEL=ollama/mixtral:8x22b")
+        print(f"     behive config --stage synth --model deepseek/deepseek-r1\n")
     elif args.stage and args.model:
         # Set single stage model
         cfg = load_config()
@@ -141,7 +154,7 @@ def cmd_serve(args):
 
     print(f"""
 \033[33m  ╔══════════════════════════════════════╗
-  ║   🐝 BeHive Research Engine v0.3.0   ║
+  ║   🐝 BeHive Research Engine v0.3.1   ║
   ╚══════════════════════════════════════╝\033[0m
 
   API:  http://{args.host}:{args.port}
