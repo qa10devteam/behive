@@ -156,15 +156,15 @@ def _db_connect_retry(path: str = DB_PATH, read_only: bool = False, max_retries:
     return _hive_db.connect(read_only=read_only)
 
 
-# Bedrock models — global sonnet primary, opus fallback
-MODEL_FAST_PRIMARY  = "us.anthropic.claude-haiku-4-5-20251001-v1:0"   # Haiku US — eu-central-1 wypalony
-MODEL_FAST_FALLBACK = "us.anthropic.claude-haiku-4-5-20251001-v1:0"   # Haiku US
-MODEL_DEEP          = "us.anthropic.claude-haiku-4-5-20251001-v1:0"   # Haiku US
-BEDROCK_REGION      = "us-east-1"
+# LLM model selection — resolved at runtime via llm.py BYOK layer
+# These are only used as fallback identifiers if _byok_complete is unavailable
+MODEL_FAST_PRIMARY  = os.environ.get("BEHIVE_MODEL", "")  # Auto-detected from API keys
+MODEL_FAST_FALLBACK = MODEL_FAST_PRIMARY
+MODEL_DEEP          = MODEL_FAST_PRIMARY
 
 # Concurrency limits
 BATCH_SIZE         = 20   # docs processed concurrently
-MAX_BEDROCK_CALLS  = 4   # global semaphore cap — niższe = mniej throttlingu
+MAX_LLM_CALLS      = 4   # global semaphore cap
 
 # Dedup threshold (rapidfuzz)
 DEDUP_THRESHOLD = 85

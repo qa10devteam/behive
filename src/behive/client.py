@@ -30,10 +30,7 @@ class BeHiveClient:
     ):
         self.api_url = api_url or os.environ.get("BEHIVE_API_URL")
         self.api_key = api_key or os.environ.get("BEHIVE_API_KEY")
-        self.db_url = db_url or os.environ.get(
-            "BEHIVE_DB_URL",
-            "postgresql://behive_user:REDACTED@localhost:5432/hive"
-        )
+        self.db_url = db_url or os.environ.get("BEHIVE_DB_URL")
         self._backend = self._detect_backend()
     
     def _detect_backend(self) -> str:

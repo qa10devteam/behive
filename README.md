@@ -191,7 +191,7 @@ behive serve
 **Step 3:** Restart Claude Desktop. Done. Now ask:
 > "Research the EU AI Act enforcement timeline and penalties"
 
-Claude will call BeHive automatically, fetch 200+ sources, and return scored claims instead of guessing from training data.
+Claude will call BeHive automatically, search across multiple sources, and return scored claims instead of guessing from training data.
 
 <details>
 <summary><strong>What happens under the hood</strong></summary>

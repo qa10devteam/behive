@@ -66,10 +66,11 @@ import hive2_db as _hive_db  # PostgreSQL via unified layer
 log = logging.getLogger(__name__)
 
 DUCKDB_PATH = os.environ.get("BEHIVE_LEGACY_DB", "")  # Legacy — PostgreSQL is primary
-BEDROCK_REGION = "eu-central-1"
-EMBED_MODEL_ID = "amazon.titan-embed-text-v2:0"
+
+# Optional Bedrock-specific settings (only used for embeddings fallback when boto3 available)
+BEDROCK_REGION = os.environ.get("AWS_DEFAULT_REGION", os.environ.get("BEHIVE_BEDROCK_REGION", "us-east-1"))
+EMBED_MODEL_ID = os.environ.get("BEHIVE_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 EMBED_DIMS     = 512
-HAIKU_MODEL_ID = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 # Wzorzec z mem0/configs/prompts.py linia 468 — ADDITIVE_EXTRACTION_PROMPT
 # Modified for HIVE: extracts facts from synthesis/intelligence reports
@@ -179,7 +180,7 @@ def _haiku(prompt: str, max_tokens: int = 600) -> Optional[str]:
             "messages": [{"role": "user", "content": prompt}],
         })
         try:
-            resp = bc.invoke_model(modelId=HAIKU_MODEL_ID, body=body)
+            resp = bc.invoke_model(modelId=os.environ.get("BEHIVE_BEDROCK_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"), body=body)
             return json.loads(resp["body"].read())["content"][0]["text"].strip()
         except Exception as exc:
             log.warning("Bedrock Haiku fallback failed: %s", exc)

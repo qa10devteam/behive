@@ -244,9 +244,11 @@ def ingest_entities_from_claims(mission_id: str, claims: list[dict] | None = Non
         try:
             import psycopg2
             conn = psycopg2.connect(
-                dbname="hive", user="hive_app",
-                password=os.environ.get("HIVE_PG_PASSWORD", open("/tmp/.hive_db_pass").read().strip() if os.path.exists("/tmp/.hive_db_pass") else ""),
-                host="127.0.0.1", port=5432
+                dbname=os.environ.get("HIVE_PG_DATABASE", os.environ.get("PGDATABASE", "hive")),
+                user=os.environ.get("HIVE_PG_USER", os.environ.get("PGUSER", "behive")),
+                password=os.environ.get("HIVE_PG_PASSWORD", os.environ.get("PGPASSWORD", "")),
+                host=os.environ.get("HIVE_PG_HOST", os.environ.get("PGHOST", "127.0.0.1")),
+                port=int(os.environ.get("HIVE_PG_PORT", os.environ.get("PGPORT", "5432")))
             )
             cur = conn.cursor()
             cur.execute(

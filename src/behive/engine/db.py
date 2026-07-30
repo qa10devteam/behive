@@ -1,8 +1,9 @@
 """
-hive2_pg.py — PostgreSQL connection layer for HIVE pipeline.
-Replaces DuckDB for all read/write operations.
+behive.engine.db — PostgreSQL connection layer for HIVE pipeline.
 
-Connection string: postgresql://behive:***@127.0.0.1:5432/hive
+Connection configured via environment variables:
+  BEHIVE_DB_URL=postgresql://user:pass@host:5432/dbname
+  or individual HIVE_PG_USER, HIVE_PG_PASSWORD, HIVE_PG_DATABASE, HIVE_PG_HOST, HIVE_PG_PORT
 
 Usage:
     from hive2_pg import get_pg_connection, get_pg_pool
@@ -24,7 +25,7 @@ import logging
 log = logging.getLogger(__name__)
 # Module-level constants for compat with legacy hive2_db imports
 DB_BACKEND = "postgres"
-DB_PATH = os.environ.get("BEHIVE_DB_URL", "postgresql://localhost:***@localhost:5432/behive")
+DB_PATH = os.environ.get("BEHIVE_DB_URL", "")
 import psycopg2.pool
 import json
 import threading
