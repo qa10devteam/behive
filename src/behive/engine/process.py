@@ -1055,7 +1055,7 @@ class BeeWorker:
                 try:
                     from hive3_bees import SpecializedBee
                     quality = SpecializedBee._score_claim_quality(claim_text)
-                    if quality < 0.65:  # Quality gate — only useful claims enter DB
+                    if quality < 0.70:  # Quality gate — only useful claims enter DB
                         return  # Garbage/mediocre — don't pollute the DB
                 except ImportError:
                     pass  # hive3_bees not available — skip quality gate
@@ -1993,7 +1993,7 @@ class ProcessingDrones:
                 for r in results:
                     try:
                         quality = SpecializedBee._score_claim_quality(r.claim) if _has_bee else 0.7
-                        if quality >= 0.65:
+                        if quality >= 0.70:
                             self.con.execute("""
                                 INSERT INTO hive_claims
                                     (id, mission_id, claim, source_url, claim_type, 
