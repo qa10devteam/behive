@@ -129,9 +129,18 @@ DB_PATH = ""
 
 
 def _db_connect_retry(path: str = DB_PATH, read_only: bool = False, max_retries: int = 5):
-    """Connect to database with retry. Uses PostgreSQL when HIVE_DB_BACKEND=postgres."""
+    """Connect to database with retry and exponential backoff."""
+    import time as _t
     if _pg_available:
-        return hive2_db.connect_retry(path, read_only=read_only, max_retries=max_retries)
+        for attempt in range(max_retries):
+            try:
+                return hive2_db.connect(path, read_only=read_only)
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                wait = min(2 ** attempt, 10)
+                log.warning(f"PG connect retry {attempt+1}/{max_retries}: {e}, waiting {wait}s")
+                _t.sleep(wait)
     import time as _t
     for attempt in range(max_retries):
         try:
