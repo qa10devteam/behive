@@ -130,21 +130,23 @@ DB_PATH = ""
 
 def _db_connect_retry(path: str = DB_PATH, read_only: bool = False, max_retries: int = 5):
     """Connect to database with retry. Uses PostgreSQL when HIVE_DB_BACKEND=postgres."""
-    if _pg_available:
-        return hive2_db.connect_retry(path, read_only=read_only, max_retries=max_retries)
     import time as _t
+    import hive2_db
     for attempt in range(max_retries):
         try:
-            con = _hive_db.connect(read_only=read_only)
-            return con
+            return hive2_db.connect(read_only=read_only)
         except Exception as e:
-            if 'IO Error' in str(e) or 'lock' in str(e).lower() or 'busy' in str(e).lower():
+            transient = any(
+                tok in str(e).lower()
+                for tok in ('io error', 'lock', 'busy', 'connection', 'operational', 'timeout')
+            )
+            if transient and attempt < max_retries - 1:
                 wait = 2 ** attempt * 2
-                log.warning(f"DuckDB connect retry {attempt+1}/{max_retries}: {e}, waiting {wait}s")
+                log.warning(f"DB connect retry {attempt+1}/{max_retries}: {e}, waiting {wait}s")
                 _t.sleep(wait)
             else:
                 raise
-    return _hive_db.connect(read_only=read_only)
+    return hive2_db.connect(read_only=read_only)
 
 
 # Bedrock models — global sonnet primary, opus fallback
