@@ -12,6 +12,16 @@ from typing import Optional, AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request, Depends, Query
 from behive import __version__ as BEHIVE_VERSION
+
+# ─── Concurrency control ──────────────────────────────────────────────────────
+_MAX_CONCURRENT_MISSIONS = int(os.environ.get("BEHIVE_MAX_CONCURRENT", "3"))
+_mission_semaphore: asyncio.Semaphore = None  # initialized in lifespan
+
+def _get_semaphore() -> asyncio.Semaphore:
+    global _mission_semaphore
+    if _mission_semaphore is None:
+        _mission_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_MISSIONS)
+    return _mission_semaphore
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -787,6 +797,20 @@ async def intelligence_stats():
 
 async def _run_pipeline(mission_id: str, topic: str, depth: int):
     """Run research pipeline as subprocess, stream progress via SSE events."""
+    import sys
+    
+    # Concurrency limiter — max N missions at once
+    sem = _get_semaphore()
+    if sem.locked():
+        _emit_event(mission_id, "queued", {"position": _MAX_CONCURRENT_MISSIONS, "message": "Waiting for slot..."})
+        _update_phase(mission_id, "queued")
+    
+    async with sem:
+        await _run_pipeline_inner(mission_id, topic, depth)
+
+
+async def _run_pipeline_inner(mission_id: str, topic: str, depth: int):
+    """Actual pipeline execution (called within semaphore)."""
     import sys
 
     try:

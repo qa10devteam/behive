@@ -1359,12 +1359,18 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
 
 
 def _mark_mission_error(mission_id: str, error_msg: str) -> None:
-    """Mark a mission as error in the database."""
+    """Mark a mission as error in the database with the error message."""
     try:
         con = _connect_db()
+        # Determine if it was a timeout
+        is_timeout = 'timed out' in error_msg.lower() or 'timeout' in error_msg.lower()
+        phase_val = 'timeout' if is_timeout else 'error'
         con.execute(
-            "UPDATE hive_missions SET status='error', phase='error' WHERE id=%s AND status NOT IN ('done','cancelled')",
-            [mission_id]
+            """UPDATE hive_missions 
+               SET status='error', phase=%s,
+                   quality_metrics = COALESCE(quality_metrics, '{}'::jsonb) || jsonb_build_object('error_message', %s)
+               WHERE id=%s AND status NOT IN ('done','cancelled')""",
+            [phase_val, error_msg[:500], mission_id]
         )
         con.commit()
         con.close()
@@ -1520,13 +1526,16 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
     log.info(f'  └─ done · {timings["process"]:.1f}s ──────────────────────────────┘\n')
 
     # ═══ PHASE 3.5: FALSIFIER (claim dedup + cross-validation) ══
+    # Falsifier can explode combinatorially with many claims × depth-5.
+    # Cap at 1200s (20min). If it times out, claims are still valid (just unverified).
+    _falsifier_timeout = int(os.environ.get("BEHIVE_FALSIFIER_TIMEOUT", "1200"))
     log.debug('  ┌─ PHASE 3.5 · FALSIFIER ────────────────────────────┐')
     try:
         timings['falsifier'] = run_phase(
-            'hive2_falsifier.py', [mission_id], 'falsifier'
+            'hive2_falsifier.py', [mission_id], 'falsifier', timeout=_falsifier_timeout
         )
     except Exception as e_f:
-        log.info(f'  ⚠️  Falsifier skipped: {e_f}')
+        log.info(f'  ⚠️  Falsifier skipped (non-fatal): {e_f}')
         timings['falsifier'] = 0.0
     log.info(f'  └─ done · {timings.get("falsifier", 0):.1f}s ──────────────────────────────┘\n')
 
@@ -1681,19 +1690,39 @@ Return JSON array of 5 strings only."""
         except Exception as e2:
             log.info(f'  ✗ Fallback synth failed: {e2}')
             _emit(mission_id, 'synth', 'error', data={'error': str(e2)})
-            # Mark interrupted instead of leaving status hanging — resumable
+            # Graceful degradation: if we have claims, mark as done with partial synthesis
             try:
                 _con_int = _connect_db()
-                _con_int.execute(
-                    "UPDATE hive_missions SET status='interrupted' WHERE id=? AND status NOT IN ('done','cancelled')",
-                    [mission_id]
-                )
-                _con_int.commit()
+                _claims_count = _con_int.execute(
+                    "SELECT COUNT(*) FROM hive_claims WHERE mission_id=%s", [mission_id]
+                ).fetchone()[0]
+                if _claims_count >= 3:
+                    # We have useful data — generate minimal synthesis from claims
+                    _top_claims = _con_int.execute(
+                        "SELECT claim FROM hive_claims WHERE mission_id=%s AND (is_garbage = false OR is_garbage IS NULL) ORDER BY quality_score DESC NULLS LAST LIMIT 20",
+                        [mission_id]
+                    ).fetchall()
+                    _partial_synthesis = f"# Research: {query[:100]}\n\n"
+                    _partial_synthesis += f"*Partial results — synthesis engine timed out but {_claims_count} claims were extracted.*\n\n"
+                    _partial_synthesis += "## Key Findings\n\n"
+                    for _tc in _top_claims:
+                        _partial_synthesis += f"- {_tc[0]}\n"
+                    _con_int.execute(
+                        "UPDATE hive_missions SET status='done', synthesis=%s, synth_done_at=NOW() WHERE id=%s",
+                        [_partial_synthesis, mission_id]
+                    )
+                    _con_int.commit()
+                    log.info(f'  ⚠️  Synth failed but {_claims_count} claims saved — marked DONE (partial)')
+                else:
+                    _con_int.execute(
+                        "UPDATE hive_missions SET status='interrupted' WHERE id=%s AND status NOT IN ('done','cancelled')",
+                        [mission_id]
+                    )
+                    _con_int.commit()
+                    log.info(f'  ⚠️  Synth failed, only {_claims_count} claims — marked interrupted')
                 _con_int.close()
             except Exception as e:
                 log.debug(f"Suppressed: {e}")
-            # Don't raise — log and continue (pipeline can still write partial result)
-            log.info(f'  ⚠️  Synth failed — mission marked interrupted, resumable via: hive2 resume {mission_id}')
     _emit(mission_id, 'synth', 'completed')
     log.info(f'  └─ done · {timings.get("synth", 0):.1f}s ──────────────────────────────┘\n')
 

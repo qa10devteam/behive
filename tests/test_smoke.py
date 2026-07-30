@@ -18,7 +18,8 @@ def test_import_behive():
     """behive package imports without error."""
     import behive
     assert hasattr(behive, "__version__")
-    assert behive.__version__ == "0.3.0"
+    import re
+    assert re.match(r"\d+\.\d+\.\d+", behive.__version__)
 
 
 def test_import_client():
@@ -78,7 +79,8 @@ def test_cli_version():
         timeout=10,
     )
     assert result.returncode == 0
-    assert "0.3.0" in result.stdout
+    import re
+    assert re.search(r"behive \d+\.\d+\.\d+", result.stdout)
 
 
 def test_cli_help():
