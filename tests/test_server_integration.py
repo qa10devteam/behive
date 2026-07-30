@@ -41,7 +41,8 @@ class TestHealthEndpoint:
     def test_health_has_version(self, behive_server_url):
         data = requests.get(f"{behive_server_url}/health").json()
         assert "version" in data
-        assert data["version"] == "0.3.3"
+        from behive import __version__
+        assert data["version"] == __version__
 
     def test_health_has_metrics(self, behive_server_url):
         data = requests.get(f"{behive_server_url}/health").json()

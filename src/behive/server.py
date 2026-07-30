@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Optional, AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request, Depends, Query
+from behive import __version__ as BEHIVE_VERSION
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -38,6 +39,12 @@ def get_db_url():
     port = os.environ.get("HIVE_PG_PORT", "5432")
     db = os.environ.get("HIVE_PG_DATABASE", "behive")
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+
+
+def get_db_url_display():
+    """Return DB URL with password masked — for logs and health endpoint."""
+    url = get_db_url()
+    return re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", url)
 
 
 def get_db():
@@ -96,7 +103,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BeHive Research Engine",
     description="Deep research with structured knowledge extraction",
-    version="0.3.3",
+    version=BEHIVE_VERSION,
     lifespan=lifespan,
 )
 
@@ -164,7 +171,7 @@ class ResearchRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = "0.3.3"
+    version: str = BEHIVE_VERSION
     missions_total: int = 0
     claims_total: int = 0
     avg_quality: float = 0.0

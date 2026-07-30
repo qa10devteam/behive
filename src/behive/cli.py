@@ -55,6 +55,9 @@ def main():
     config_p.add_argument("--stage", choices=["scout", "harvest", "process", "synth"], help="Set model for single stage")
     config_p.add_argument("--model", help="Model name or litellm string (use with --stage)")
 
+    # ─── doctor ──────────────────────────────────────────────────────────
+    sub.add_parser("doctor", help="Check system health (DB, LLM, browser, dependencies)")
+
     # ─── version ──────────────────────────────────────────────────────────
     sub.add_parser("version", help="Show version")
 
@@ -81,6 +84,8 @@ def main():
         cmd_db(args)
     elif args.command == "missions":
         cmd_missions(args)
+    elif args.command == "doctor":
+        cmd_doctor()
     elif args.command == "version":
         from behive import __version__
         print(f"behive {__version__}")
@@ -148,13 +153,15 @@ def cmd_config(args):
 def cmd_serve(args):
     """Start BeHive API server + MCP endpoint."""
     import multiprocessing
+    from behive import __version__
 
     # Check required env vars
     _check_env()
 
+    ver = __version__
     print(f"""
 \033[33m  ╔══════════════════════════════════════╗
-  ║   🐝 BeHive Research Engine v0.3.3   ║
+  ║   🐝 BeHive Research Engine v{ver:<6}║
   ╚══════════════════════════════════════╝\033[0m
 
   API:  http://{args.host}:{args.port}
@@ -201,25 +208,58 @@ def _run_mcp_server(host: str, port: int):
 
 
 def _check_env():
-    """Check that necessary environment variables are set."""
-    # At minimum need an LLM key
+    """Check that necessary environment variables are set. Exit with helpful message if critical deps missing."""
+    issues = []
+
+    # Check LLM key
     has_key = any(os.environ.get(k) for k in [
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
+        "GROQ_API_KEY",
+        "MISTRAL_API_KEY",
         "AWS_ACCESS_KEY_ID",  # Bedrock
+        "BEHIVE_MODEL",  # litellm model string (implies key is set)
     ])
     if not has_key:
-        print("\033[31m⚠ No LLM API key found.\033[0m")
-        print("  Set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, or AWS credentials")
-        print("  Example: export ANTHROPIC_API_KEY=sk-...")
-        print()
-        print()
+        issues.append(("LLM", "No LLM API key found. Set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, or AWS credentials."))
 
-    # Check DB
+    # Check DB connectivity
     db_url = os.environ.get("DATABASE_URL") or os.environ.get("BEHIVE_DB_URL")
-    if not db_url:
-        print("\033[33mℹ No DATABASE_URL set — using default postgresql://localhost:5432/hive\033[0m")
-        print("  To configure: export DATABASE_URL=postgresql://user:pass@host:5432/db")
+    has_pg_vars = os.environ.get("HIVE_PG_USER") or os.environ.get("HIVE_PG_PASSWORD")
+    if not db_url and not has_pg_vars:
+        issues.append(("DB", "No database configured. Set BEHIVE_DB_URL or HIVE_PG_* environment variables."))
+    else:
+        # Test connection
+        try:
+            import psycopg2
+            from behive.server import get_db_url
+            conn = psycopg2.connect(get_db_url())
+            conn.close()
+        except Exception as e:
+            issues.append(("DB", f"Cannot connect to database: {e}"))
+
+    if issues:
+        print("\033[33m")
+        print("  ╔══════════════════════════════════════╗")
+        print("  ║   🐝 BeHive — Setup Required        ║")
+        print("  ╚══════════════════════════════════════╝\033[0m")
+        print()
+        for category, msg in issues:
+            print(f"  \033[31m✗ [{category}]\033[0m {msg}")
+        print()
+        print("  Quick setup:")
+        print("    1. Start PostgreSQL and create a database:")
+        print("       createdb behive")
+        print("    2. Set environment variables:")
+        print("       export BEHIVE_DB_URL=postgresql://user:pass@localhost:5432/behive")
+        print("       export OPENAI_API_KEY=sk-...")
+        print("    3. Initialize the schema:")
+        print("       behive db init")
+        print("    4. Start the server:")
+        print("       behive serve")
+        print()
+        if any(cat == "DB" for cat, _ in issues):
+            sys.exit(1)
         print()
 
 
@@ -284,6 +324,110 @@ def _print_result(result):
         for line in lines:
             print(f"  {line}")
         print("  ...")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCTOR — system health check
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cmd_doctor():
+    """Check all BeHive dependencies and report status."""
+    from behive import __version__
+    print(f"\n  🐝 BeHive Doctor v{__version__}\n")
+    checks = []
+
+    # 1. Python version
+    import platform
+    py_ver = platform.python_version()
+    ok = tuple(int(x) for x in py_ver.split(".")[:2]) >= (3, 10)
+    checks.append(("Python", f"{py_ver}", ok))
+
+    # 2. PostgreSQL connection
+    try:
+        import psycopg2
+        from behive.server import get_db_url
+        db_url = get_db_url()
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'")
+        tables = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM hive_missions")
+        missions = cur.fetchone()[0]
+        conn.close()
+        checks.append(("Database", f"connected ({tables} tables, {missions} missions)", True))
+    except Exception as e:
+        checks.append(("Database", str(e)[:80], False))
+
+    # 3. LLM connectivity
+    llm_keys = {
+        "OPENAI_API_KEY": "OpenAI",
+        "ANTHROPIC_API_KEY": "Anthropic",
+        "GROQ_API_KEY": "Groq",
+        "MISTRAL_API_KEY": "Mistral",
+        "AWS_ACCESS_KEY_ID": "Bedrock",
+    }
+    found_keys = [name for env, name in llm_keys.items() if os.environ.get(env)]
+    behive_model = os.environ.get("BEHIVE_MODEL", "")
+    if found_keys or behive_model:
+        detail = ", ".join(found_keys) if found_keys else f"BEHIVE_MODEL={behive_model}"
+        checks.append(("LLM", f"configured ({detail})", True))
+    else:
+        checks.append(("LLM", "no API key found", False))
+
+    # 4. Playwright/Chromium (for web search)
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["python3", "-c", "from playwright.sync_api import sync_playwright; print('ok')"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            checks.append(("Browser", "Playwright + Chromium available", True))
+        else:
+            checks.append(("Browser", "Playwright installed but Chromium missing (run: playwright install chromium)", False))
+    except FileNotFoundError:
+        checks.append(("Browser", "not installed (pip install playwright && playwright install chromium)", False))
+    except Exception as e:
+        checks.append(("Browser", f"check failed: {e}", False))
+
+    # 5. Optional: Neo4j
+    neo4j_uri = os.environ.get("BEHIVE_NEO4J_URI")
+    if neo4j_uri:
+        try:
+            from neo4j import GraphDatabase
+            driver = GraphDatabase.driver(neo4j_uri, auth=("neo4j", os.environ.get("BEHIVE_NEO4J_PASSWORD", "")))
+            driver.verify_connectivity()
+            driver.close()
+            checks.append(("Neo4j", f"connected ({neo4j_uri})", True))
+        except Exception as e:
+            checks.append(("Neo4j", f"configured but unreachable: {e}", False))
+    else:
+        checks.append(("Neo4j", "not configured (optional — for knowledge graphs)", None))
+
+    # 6. Optional: Qdrant
+    qdrant_url = os.environ.get("BEHIVE_QDRANT_URL")
+    if qdrant_url:
+        checks.append(("Qdrant", f"configured ({qdrant_url})", True))
+    else:
+        checks.append(("Qdrant", "not configured (optional — for vector search)", None))
+
+    # Print results
+    for name, detail, ok in checks:
+        if ok is True:
+            icon = "\033[32m✓\033[0m"
+        elif ok is False:
+            icon = "\033[31m✗\033[0m"
+        else:
+            icon = "\033[2m○\033[0m"
+        print(f"  {icon} {name:<12} {detail}")
+
+    # Summary
+    critical = [(n, d) for n, d, ok in checks if ok is False]
+    if critical:
+        print(f"\n  \033[31m{len(critical)} issue(s) found.\033[0m Fix them and run `behive doctor` again.\n")
+        sys.exit(1)
+    else:
+        print(f"\n  \033[32mAll checks passed.\033[0m BeHive is ready.\n")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
