@@ -114,9 +114,9 @@ def _check_keys() -> str:
     return (
         "No LLM configured. BeHive uses YOUR OWN LLM key (BYOK).\n\n"
         "Set one of:\n"
-        "  export ANTHROPIC_API_KEY=sk-ant-...    (Anthropic Claude)\n"
-        "  export OPENAI_API_KEY=sk-...           (OpenAI GPT-4o)\n"
-        "  export GROQ_API_KEY=gsk_...            (Groq, free tier)\n"
+        "  export ANTHROPIC_API_KEY=your-key-here    (Anthropic Claude)\n"
+        "  export OPENAI_API_KEY=your-key-here       (OpenAI GPT-4o)\n"
+        "  export GROQ_API_KEY=your-key-here         (Groq, free tier)\n"
         "  export MISTRAL_API_KEY=...             (Mistral)\n"
         "  export DEEPSEEK_API_KEY=...            (DeepSeek)\n"
         "  export BEHIVE_LLM_URL=http://localhost:11434/v1  (Ollama/vLLM/SGLang)\n"
