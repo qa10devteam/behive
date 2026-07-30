@@ -1,13 +1,13 @@
 """Queen Memory — cross-mission knowledge persistence and operational context injection."""
 
 import logging
+
+log = logging.getLogger(__name__)
 #!/usr/bin/env python3
 """
 HIVE 2.0 — Queen Memory (Trwały wektor analityczny)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-
-log = logging.getLogger(__name__)
 Doktryna z dokumentu:
   "idea ta musi stać się beeqeen — strukturą kluczową dla istnienia Ula
    implikującą wektory analityczne"

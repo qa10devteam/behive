@@ -1,13 +1,13 @@
 """Content preprocessor — HTML cleaning, markdown extraction, and text normalization."""
 
 import logging
+
+log = logging.getLogger(__name__)
 #!/usr/bin/env python3
 """
 HIVE 2.0 — hive2_preprocessor.py
 Query Clarifier + Specificity Scorer
 
-
-log = logging.getLogger(__name__)
 Inspired by: aitmpl.com deep-research-team / query-clarifier agent pattern
 Runs BEFORE scout phase to catch ambiguous topics early.
 
