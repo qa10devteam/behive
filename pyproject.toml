@@ -10,7 +10,7 @@ behive = ["init-db.sql", "engine/hive_api_sources.json"]
 
 [project]
 name = "behive"
-version = "0.3.2"
+version = "0.3.3"
 description = "Research engine that builds structured knowledge graphs from any topic"
 readme = "README.md"
 license = "MIT"
