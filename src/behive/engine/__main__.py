@@ -48,13 +48,6 @@ def main() -> None:
     if args.mission_id:
         os.environ["BEHIVE_MISSION_ID"] = args.mission_id
 
-    # Patch boto3.client so all invoke_model calls go through unified LLM
-    try:
-        from behive.engine.bedrock_compat import patch_boto3_bedrock
-        patch_boto3_bedrock(stage="scout")
-    except ImportError:
-        pass
-
     from behive.engine.orchestrator import cmd_run
     cmd_run(
         topic=topic,

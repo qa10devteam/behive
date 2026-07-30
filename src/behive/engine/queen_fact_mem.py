@@ -52,11 +52,15 @@ from typing import List, Optional
 
 try:
     import boto3
+    _boto3_ok = True
 except ImportError:
-    from behive.engine.bedrock_compat import get_bedrock_compat_client as _get_bcc
-    class boto3:
-        @staticmethod
-        def client(*a, **kw): return _get_bcc(stage="process")
+    _boto3_ok = False
+    boto3 = None
+
+try:
+    from behive.engine.llm import complete as _llm_complete
+except ImportError:
+    _llm_complete = None
 import hive2_db as _hive_db  # PostgreSQL via unified layer
 
 log = logging.getLogger(__name__)
@@ -137,17 +141,21 @@ _FTS_INDEX_SQL = "PRAGMA create_fts_index(hive_queen_facts, id, fact_text, overw
 
 
 # ---------------------------------------------------------------------------
-# Bedrock helpers
+# ---------------------------------------------------------------------------
+# LLM helpers (BYOK primary, Bedrock fallback for embeddings)
 # ---------------------------------------------------------------------------
 
 def _embed(text: str) -> List[float]:
+    """Generate embeddings — requires boto3 + Bedrock (Titan Embed)."""
+    if not _boto3_ok:
+        return [0.0] * EMBED_DIMS  # No embedding available — return zero vector
     bc = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
     resp = bc.invoke_model(
         modelId=EMBED_MODEL_ID,
         body=json.dumps({
             "inputText": text[:8000],
-            "dimensions": EMBED_DIMS,   # wymuszamy 512 — domyślnot Titan v2 zwraca 1024
-            "normalize": True,          # normalizacja dla cosine similarity
+            "dimensions": EMBED_DIMS,
+            "normalize": True,
         }),
         contentType="application/json",
         accept="application/json",
@@ -156,18 +164,26 @@ def _embed(text: str) -> List[float]:
 
 
 def _haiku(prompt: str, max_tokens: int = 600) -> Optional[str]:
-    bc = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
-    body = json.dumps({
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}],
-    })
-    try:
-        resp = bc.invoke_model(modelId=HAIKU_MODEL_ID, body=body)
-        return json.loads(resp["body"].read())["content"][0]["text"].strip()
-    except Exception as exc:
-        log.warning("Haiku call failed: %s", exc)
-        return None
+    """LLM call — BYOK primary, Bedrock fallback."""
+    if _llm_complete:
+        try:
+            return _llm_complete(prompt, stage="process", max_tokens=max_tokens)
+        except Exception as exc:
+            log.warning("BYOK LLM failed: %s", exc)
+    # Bedrock fallback
+    if _boto3_ok:
+        bc = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
+        body = json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        })
+        try:
+            resp = bc.invoke_model(modelId=HAIKU_MODEL_ID, body=body)
+            return json.loads(resp["body"].read())["content"][0]["text"].strip()
+        except Exception as exc:
+            log.warning("Bedrock Haiku fallback failed: %s", exc)
+    return None
 
 
 # ---------------------------------------------------------------------------

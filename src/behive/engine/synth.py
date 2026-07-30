@@ -32,57 +32,20 @@ REPORTS_DIR = Path('hive-reports')
 
 
 # ---------------------------------------------------------------------------
-# LLM helper (Bedrock → fallback)
+# LLM helper (BYOK via llm.py — works with any provider)
 # ---------------------------------------------------------------------------
 
 def _llm(prompt: str, system: str = "", max_tokens: int = 4096) -> str:
-    """Call Bedrock Claude with retry on throttle, multi-model fallback."""
-    import time as _time
-
-    MODELS = [
-        "eu.anthropic.claude-sonnet-4-6",
-        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
-    ]
-    RETRY_DELAYS = [5, 15, 30]
-
-    for model_id in MODELS:
-        for attempt in range(3):
-            try:
-                import boto3
-                from botocore.config import Config
-                client = boto3.client(
-                    'bedrock-runtime', region_name='eu-central-1',
-                    config=Config(read_timeout=300, connect_timeout=10,
-                                  retries={'max_attempts': 2})
-                )
-                body = {
-                    'anthropic_version': 'bedrock-2023-05-31',
-                    'max_tokens': max_tokens,
-                    'messages': [{'role': 'user', 'content': prompt}],
-                }
-                if system:
-                    body["system"] = system
-                response = client.invoke_model(
-                    modelId=model_id,
-                    body=json.dumps(body),
-                    contentType="application/json",
-                    accept="application/json",
-                )
-                result = json.loads(response['body'].read())
-                return result['content'][0]['text']
-            except Exception as e:
-                if 'Throttling' in str(e) or 'throttl' in str(e).lower():
-                    wait = RETRY_DELAYS[attempt]
-                    log.warning(f"[QUEEN] {model_id} throttled, retry in {wait}s "
-                          f"(attempt {attempt+1}/3)...")
-                    _time.sleep(wait)
-                    continue
-                log.error(f"[QUEEN] {model_id} failed ({e}), trying next model...")
-                break
-
-    raise RuntimeError(
-        "All Bedrock models failed after exhaustive retry (3 attempts × 2 models)"
-    )
+    """Call LLM via BYOK layer (litellm). Works with OpenAI, Anthropic, Bedrock, local, etc."""
+    try:
+        from behive.engine.llm import complete
+        result = complete(prompt, stage="synth", system=system, max_tokens=max_tokens)
+        if result:
+            return result
+    except Exception as e:
+        log.warning(f"[SYNTH] BYOK LLM failed: {e}")
+    
+    raise RuntimeError("LLM call failed — check BEHIVE_MODEL or API key configuration")
 
 
 # ---------------------------------------------------------------------------
@@ -91,65 +54,12 @@ def _llm(prompt: str, system: str = "", max_tokens: int = 4096) -> str:
 # ---------------------------------------------------------------------------
 
 def _sglang_call(prompt: str, max_tokens: int = 4096) -> str:
-    """Direct SGLang/Qwen call — falls back to Bedrock Haiku if SGLang unavailable."""
-    import urllib.request as _req
-    import json as _json
-
-    SGLANG_URL   = os.environ.get("BEHIVE_SGLANG_URL", "http://localhost:8002/v1/chat/completions")
-    SGLANG_MODEL = "Qwen2.5-7B-Instruct"
-
-    # Try SGLang first (fast, local)
-    payload = _json.dumps({
-        "model": SGLANG_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": min(max_tokens, 4096),
-        "temperature": 0.15,
-    }).encode()
-    request = _req.Request(
-        SGLANG_URL,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    for attempt in range(2):
-        try:
-            with _req.urlopen(request, timeout=60) as resp:
-                out = _json.loads(resp.read())
-            return out["choices"][0]["message"]["content"].strip()
-        except Exception as e:
-            log.debug(f"Exception in synth.py: {e}")
-            import time as _t
-            if attempt < 1:
-                _t.sleep(1)
-                continue
-            # SGLang unavailable — fall through to Bedrock
-            log.info(f"[QUEEN] SGLang unavailable ({e}), falling back to Bedrock Haiku…")
-            break
-
-    # Bedrock fallback — Haiku (fast + cheap) for refinement passes
-    try:
-        import boto3 as _b3
-        from botocore.config import Config as _Cfg
-        _bc = _b3.client(
-            'bedrock-runtime', region_name='eu-central-1',
-            config=_Cfg(read_timeout=120, connect_timeout=10,
-                        retries={'max_attempts': 2})
-        )
-        _body = _json.dumps({
-            'anthropic_version': 'bedrock-2023-05-31',
-            'max_tokens': min(max_tokens, 4096),
-            'temperature': 0.15,
-            'messages': [{'role': 'user', 'content': prompt}],
-        })
-        _resp = _bc.invoke_model(
-            modelId='eu.anthropic.claude-haiku-4-5-20251001-v1:0',
-            body=_body,
-            contentType='application/json',
-            accept='application/json',
-        )
-        return _json.loads(_resp['body'].read())['content'][0]['text'].strip()
-    except Exception as e2:
-        raise RuntimeError(f"SGLang + Bedrock Haiku both failed: {e2}") from e2
+    """LLM call for refinement passes — uses BYOK layer."""
+    from behive.engine.llm import complete
+    result = complete(prompt, stage="synth", max_tokens=min(max_tokens, 4096))
+    if result:
+        return result
+    raise RuntimeError("LLM call failed for synth refinement")
 
 
 def multi_role_synthesis(mission_id: str, initial_report: str, topic: str = "") -> str:

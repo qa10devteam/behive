@@ -11,6 +11,11 @@ import logging
 import traceback
 from collections import Counter
 
+try:
+    from behive.engine.llm import complete as _llm_complete
+except ImportError:
+    _llm_complete = None
+
 log = logging.getLogger(__name__)
 
 class QueenPlanner:
@@ -21,8 +26,7 @@ class QueenPlanner:
     She plans EVERYTHING before any scout leaves the hive.
     """
 
-    BEDROCK_MODEL  = 'eu.anthropic.claude-sonnet-4-6'
-    BEDROCK_REGION = 'eu-central-1'
+    # LLM calls routed through behive.engine.llm (BYOK — any provider)
 
     # Task type classification — determines which source strategy Queen uses
     TASK_TYPES = {
@@ -207,16 +211,7 @@ class QueenPlanner:
 
     # ------------------------------------------------------------------
     def _bedrock_batch(self, batch_id: int, focus: str, ctx: dict, id_offset: int) -> list[dict]:
-        """Single Bedrock call — Queen thinks deeply about ONE research axis."""
-        try:
-            import boto3 as _boto3
-        except ImportError:
-            from behive.engine.bedrock_compat import get_bedrock_compat_client as _bcc
-            class _boto3:
-                @staticmethod
-                def client(*a, **kw):
-                    return _bcc(stage="scout")
-        client = _boto3.client('bedrock-runtime', region_name=self.BEDROCK_REGION)
+        """Single LLM call — Queen thinks deeply about ONE research axis."""
 
         type_cfg = self.TASK_TYPES.get(self.task_type, self.TASK_TYPES['geopolitical_osint'])
         domains = type_cfg['domains']
@@ -327,16 +322,7 @@ CRITICAL: The "purpose" and "expected_output" fields are MANDATORY. They prove y
 
 Return ONLY the JSON array."""
 
-        resp = client.invoke_model(
-            modelId=self.BEDROCK_MODEL,
-            body=json.dumps({
-                'anthropic_version': 'bedrock-2023-05-31',
-                'max_tokens': 4096, 'temperature': 0.4,
-                'system': system_prompt,
-                'messages': [{'role': 'user', 'content': prompt}]
-            })
-        )
-        text = json.loads(resp['body'].read())['content'][0]['text'].strip()
+        text = _llm_complete(prompt, stage="scout", system=system_prompt, max_tokens=4096)
         if text.startswith('```'):
             text = text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
         tasks = json.loads(text)
@@ -514,7 +500,7 @@ Return ONLY the JSON array."""
         Zwraca: string z profilem podmiotu (do ctx['subject_profile'])
                 lub pusty string jeśli nie wykryto podmiotu.
         """
-        import re, requests, boto3 as _boto3
+        import re, requests
 
         topic = self.topic
 
@@ -595,7 +581,7 @@ Return ONLY the JSON array."""
             return ''
 
         # ── 3. Queen ekstrakcja profilu ─────────────────────────────────
-        client = _boto3.client('bedrock-runtime', region_name=self.BEDROCK_REGION)
+        # ── 3. Queen ekstrakcja profilu ─────────────────────────────────
         prompt = f"""You scraped the following content from the subject's website.
 Extract a structured intelligence profile AND generate a competitor seed list.
 
@@ -648,16 +634,7 @@ If a field has no evidence, write "not found".
 Be factual for the profile. For competitor list — use domain knowledge about the industry."""
 
         try:
-            resp = client.invoke_model(
-                modelId=self.BEDROCK_MODEL,
-                body=json.dumps({
-                    'anthropic_version': 'bedrock-2023-05-31',
-                    'max_tokens': 1500,
-                    'temperature': 0.1,
-                    'messages': [{'role': 'user', 'content': prompt}]
-                })
-            )
-            profile = json.loads(resp['body'].read())['content'][0]['text'].strip()
+            profile = _llm_complete(prompt, stage="scout", max_tokens=1500)
             return f"\n\n═══ SUBJECT INTELLIGENCE PROFILE ═══\n{profile}\n═══════════════════════════════════\n"
         except Exception as e:
             log.debug(f"Exception in orchestrator.py: {e}")
@@ -671,15 +648,6 @@ Be factual for the profile. For competitor list — use domain knowledge about t
         a distinct viewpoint, motivation, and targeted query strategy.
         This mirrors Stanford STORM's 'diverse perspectives' pattern (+25% breadth).
         """
-        try:
-            import boto3 as _boto3
-        except ImportError:
-            from behive.engine.bedrock_compat import get_bedrock_compat_client as _bcc
-            class _boto3:
-                @staticmethod
-                def client(*a, **kw):
-                    return _bcc(stage="scout")
-        client = _boto3.client('bedrock-runtime', region_name=self.BEDROCK_REGION)
 
         memory_section = ''
         raw_mem = ctx.get('memory_block', '')
@@ -730,15 +698,7 @@ Example for competitive intelligence topic:
 Return ONLY the JSON array."""
 
         try:
-            resp = client.invoke_model(
-                modelId=self.BEDROCK_MODEL,
-                body=json.dumps({
-                    'anthropic_version': 'bedrock-2023-05-31',
-                    'max_tokens': 2000, 'temperature': 0.6,
-                    'messages': [{'role': 'user', 'content': prompt}]
-                })
-            )
-            text = json.loads(resp['body'].read())['content'][0]['text'].strip()
+            text = _llm_complete(prompt, stage="scout", max_tokens=2000)
             if text.startswith('```'):
                 text = text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
             axes = json.loads(text)

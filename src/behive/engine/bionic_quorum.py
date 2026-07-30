@@ -223,8 +223,8 @@ class QuorumChecker:
             return self._template_expansion(keywords)
 
     def _bedrock_expansion(self, current: int, total: int) -> List[str]:
-        import boto3, json
-        client = boto3.client("bedrock-runtime", region_name="eu-central-1")
+        from behive.engine.llm import complete
+        import json
 
         prompt = f"""Research topic: "{self._topic}"
 
@@ -247,16 +247,7 @@ Rules:
 Return ONLY a JSON array of {EXPANSION_QUERIES} strings:
 ["query 1", "query 2", "query 3", "query 4", "query 5"]"""
 
-        resp = client.invoke_model(
-            modelId="eu.anthropic.claude-haiku-4-5-20251001-v1:0",
-            body=json.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 500,
-                "temperature": 0.5,
-                "messages": [{"role": "user", "content": prompt}],
-            }),
-        )
-        text = json.loads(resp["body"].read())["content"][0]["text"].strip()
+        text = complete(prompt, stage="scout", max_tokens=500)
         if text.startswith("```"):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         queries = json.loads(text)

@@ -59,7 +59,7 @@ try:
     _boto3_available = True
 except ImportError:
     _boto3_available = False
-    boto3 = None
+    boto3 = None  # noqa: F811 — optional dependency
 
 # ---------------------------------------------------------------------------
 # HIVE 2.0 Operations Registry
@@ -344,36 +344,23 @@ class SGLangClient:
         self._last_check = 0.0
 
 
-# Bedrock fallback client (used when SGLang is unavailable)
+# LLM client — BYOK via llm.py (works with any provider)
 try:
-    import boto3 as _boto3
+    from behive.engine.llm import complete as _byok_complete
+    _byok_available = True
 except ImportError:
-    from behive.engine.bedrock_compat import get_bedrock_compat_client as _get_bcc
-    class _boto3:
-        @staticmethod
-        def client(*a, **kw): return _get_bcc(stage="process")
+    _byok_complete = None
+    _byok_available = False
 import json as _json_b
 
 class _BedrockFallbackClient:
-    def __init__(self):
-        self._client = None
-    def _get(self):
-        if self._client is None:
-            self._client = _boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
-        return self._client
+    """LLM client that routes through BYOK layer (litellm)."""
     def invoke(self, prompt: str, system_prompt: str = None, model: str = None, max_tokens: int = 512) -> str:
-        """Invoke a single bee operation on content."""
-        m = model or MODEL_FAST_PRIMARY
+        """Invoke LLM for data extraction."""
         sp = system_prompt or "You are a precise data extraction AI. Return only valid JSON."
-        body = _json_b.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
-            "system": sp,
-            "messages": [{"role": "user", "content": prompt}]
-        })
-        resp = self._get().invoke_model(body=body, modelId=m, contentType="application/json", accept="application/json")
-        out = _json_b.loads(resp["body"].read())
-        return out["content"][0]["text"].strip()
+        if _byok_available:
+            return _byok_complete(prompt, stage="process", system=sp, max_tokens=max_tokens)
+        raise RuntimeError("No LLM backend available — set BEHIVE_MODEL or provide API key")
 
 _bedrock_client = _BedrockFallbackClient()
 _sglang = SGLangClient()
@@ -490,7 +477,7 @@ class RelevanceFilter:
 
     async def score(self, doc_id: str, title: str, text_sample: str) -> float:
         """Returns relevance score 0.0–1.0. Uses local SGLang/Qwen (free), Bedrock fallback."""
-        if not _sglang.is_available() and not _boto3_available:
+        if not _sglang.is_available() and not _byok_available:
             return 1.0  # no-op fallback: process everything
 
         prompt = (
@@ -529,7 +516,7 @@ class RelevanceFilter:
         """Score up to 20 docs in a single LLM call (SGLang/Qwen primary, Bedrock fallback)."""
         if not docs:
             return [1.0] * len(docs)
-        if not _sglang.is_available() and not _boto3_available:
+        if not _sglang.is_available() and not _byok_available:
             return [1.0] * len(docs)
         if self.threshold <= 0.0:
             return [1.0] * len(docs)  # --no-filter bypass
@@ -1610,8 +1597,8 @@ class GapDrone:
 
     def run(self, con: Any, mission_id: str, topic: str) -> list[dict]:
         """Execute the main pipeline loop."""
-        if not _boto3_available:
-            log.warning("GapDrone: boto3 not available, skipping")
+        if not _byok_available:
+            log.warning("GapDrone: LLM not available, skipping")
             return []
 
         try:
@@ -1749,12 +1736,8 @@ class ProcessingDrones:
         if not _ops_available:
             log.warning("hive2_ops not available — falling back to regex extraction only")
 
-        # Eagerly probe Bedrock model ONCE before parallel ops begin
-        if _boto3_available:
-            try:
-                _bedrock._confirm_fast_model()
-            except NameError:
-                pass  # _bedrock not initialized in this context — skip probe
+        # LLM readiness check (no-op — BYOK layer handles lazy init)
+        pass
 
         # Load documents
         docs = self._load_content()
