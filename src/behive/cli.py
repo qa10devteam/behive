@@ -154,7 +154,7 @@ def cmd_serve(args):
 
     print(f"""
 \033[33m  ╔══════════════════════════════════════╗
-  ║   🐝 BeHive Research Engine v0.3.1   ║
+  ║   🐝 BeHive Research Engine v0.3.2   ║
   ╚══════════════════════════════════════╝\033[0m
 
   API:  http://{args.host}:{args.port}

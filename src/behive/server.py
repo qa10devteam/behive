@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BeHive Research Engine",
     description="Deep research with structured knowledge extraction",
-    version="0.3.1",
+    version="0.3.2",
     lifespan=lifespan,
 )
 
@@ -164,7 +164,7 @@ class ResearchRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = "0.3.1"
+    version: str = "0.3.2"
     missions_total: int = 0
     claims_total: int = 0
     avg_quality: float = 0.0
