@@ -14,7 +14,7 @@ try:
     from importlib.metadata import version as _get_version
     __version__ = _get_version("behive")
 except Exception:
-    __version__ = "0.3.3"
+    __version__ = "0.4.0"
 
 from behive.client import research, BeHiveClient
 from behive.models import ResearchResult, Claim, Entity

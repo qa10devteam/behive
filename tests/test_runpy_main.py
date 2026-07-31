@@ -74,17 +74,9 @@ class TestMainBlocks:
                     output = sys.stdout.getvalue()
                     sys.stdout = old_stdout
 
-    def test_quality_test(self):
-        """Run quality module --test."""
-        with patch.object(sys, 'argv', ['quality', '--test']):
-            old_stdout = sys.stdout
-            sys.stdout = io.StringIO()
-            try:
-                runpy.run_module('behive.engine.quality', run_name='__main__', alter_sys=True)
-            except SystemExit:
-                pass
-            finally:
-                sys.stdout = old_stdout
+    def test_quality_test_removed(self):
+        """quality.py removed (duplicate of content_quality)."""
+        pass  # quality.py removed — duplicate of content_quality.py
 
     def test_guardrail_test(self):
         """Run guardrail --test."""

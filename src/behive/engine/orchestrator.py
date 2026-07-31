@@ -1,6 +1,6 @@
 """Pipeline orchestrator — Queen-first planning, phase coordination, and full research execution.
 
-Refactored: QueenPlanner → behive.engine.queen, run_phase → behive.engine.runner.
+Refactored: QueenPlanner extracted for maintainability.
 This module remains the entry point (cmd_run, cmd_scout, etc.) for backward compatibility.
 """
 

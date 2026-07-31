@@ -42,9 +42,6 @@ SHIM_MAP = {
     "hive2_queen_tools": "behive.engine.queen_tools",
     "hive2_queen_feedback": "behive.engine.queen_feedback",
     "hive2_rag": "behive.engine.rag",
-    "hive2_cluster": "behive.engine.cluster",
-    "hive2_watcher": "behive.engine.watcher",
-    "hive2_scout_targeted": "behive.engine.scout_targeted",
 }
 
 
