@@ -47,7 +47,6 @@ except ImportError:
     pass
 __all__ = [
     "orchestrator",
-    "queen",
     "scout",
     "harvest",
     "process",

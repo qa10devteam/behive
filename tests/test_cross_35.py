@@ -32,7 +32,7 @@ class TestQueenPlannerPure:
     @patch("behive.engine.llm.complete")
     def test_classify_task_type(self, mock_llm):
         mock_llm.return_value = "market_analysis"
-        from behive.engine.queen import QueenPlanner
+        from behive.engine.orchestrator import QueenPlanner
         qp = QueenPlanner("AI semiconductor market growth 2024")
         result = qp._classify_task_type()
         assert isinstance(result, str)
@@ -40,7 +40,7 @@ class TestQueenPlannerPure:
     @patch("behive.engine.llm.complete")
     def test_classify_various_topics(self, mock_llm):
         mock_llm.return_value = "research"
-        from behive.engine.queen import QueenPlanner
+        from behive.engine.orchestrator import QueenPlanner
         topics = [
             "Latest advances in quantum computing",
             "Compare React vs Vue for enterprise",
@@ -61,7 +61,7 @@ class TestQueenPlannerPure:
             "geographic": "global",
             "entities": ["NVIDIA", "AI"]
         })
-        from behive.engine.queen import QueenPlanner
+        from behive.engine.orchestrator import QueenPlanner
         qp = QueenPlanner("AI semiconductor market")
         ctx = qp._detect_context()
         assert isinstance(ctx, dict)
@@ -69,7 +69,7 @@ class TestQueenPlannerPure:
     @patch("behive.engine.llm.complete")
     def test_detect_context_various(self, mock_llm):
         mock_llm.return_value = json.dumps({"domain": "finance", "temporal": "recent"})
-        from behive.engine.queen import QueenPlanner
+        from behive.engine.orchestrator import QueenPlanner
         for topic in ["Bitcoin price prediction", "EU trade policy 2025", "SpaceX Starship"]:
             qp = QueenPlanner(topic)
             ctx = qp._detect_context()
@@ -77,7 +77,7 @@ class TestQueenPlannerPure:
 
     @patch("behive.engine.llm.complete")
     def test_fallback_axes(self, mock_llm):
-        from behive.engine.queen import QueenPlanner
+        from behive.engine.orchestrator import QueenPlanner
         qp = QueenPlanner("AI market growth")
         axes = qp._fallback_axes()
         assert isinstance(axes, list)
@@ -86,7 +86,7 @@ class TestQueenPlannerPure:
     @patch("behive.engine.llm.complete")
     def test_fallback_plan(self, mock_llm):
         mock_llm.return_value = json.dumps({"sub_topics": ["market size", "key players"]})
-        from behive.engine.queen import QueenPlanner
+        from behive.engine.orchestrator import QueenPlanner
         qp = QueenPlanner("AI market growth")
         plan = qp._fallback_plan()
         assert isinstance(plan, list)
@@ -99,7 +99,7 @@ class TestQueenPlannerPure:
                 {"id": 2, "topic": "Key players", "focus": "entities"},
             ]
         })
-        from behive.engine.queen import QueenPlanner
+        from behive.engine.orchestrator import QueenPlanner
         qp = QueenPlanner("AI semiconductor market", think_mode=False, scale=100)
         try:
             plan = qp.plan()
@@ -113,7 +113,7 @@ class TestQueenPlannerPure:
         mock_llm.return_value = json.dumps({
             "missions": [{"id": 1, "topic": "Deep analysis", "focus": "comprehensive"}]
         })
-        from behive.engine.queen import QueenPlanner
+        from behive.engine.orchestrator import QueenPlanner
         qp = QueenPlanner("Quantum computing advances", think_mode=True, scale=50)
         try:
             plan = qp.plan()

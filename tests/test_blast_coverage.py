@@ -203,7 +203,7 @@ class TestQueenModules:
         assert len(attrs) >= 1
 
     def test_queen_planner_import(self):
-        import behive.engine.queen_planner_extracted as qpe
+        from behive.engine.orchestrator import QueenPlanner as qpe_QueenPlanner
         attrs = [a for a in dir(qpe) if not a.startswith('_')]
         assert len(attrs) >= 1
 

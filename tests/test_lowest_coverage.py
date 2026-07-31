@@ -233,7 +233,7 @@ class TestQueenDeep:
             old_stdout = sys.stdout
             sys.stdout = io.StringIO()
             try:
-                runpy.run_module('behive.engine.queen', run_name='__main__', alter_sys=True)
+                pass  # queen.py removed (duplicate of orchestrator.QueenPlanner)
             except (SystemExit, Exception):
                 pass
             finally:
