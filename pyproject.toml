@@ -79,7 +79,7 @@ behive = "behive.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/qa10devteam/behive"
-Documentation = "https://behive.dev"
+Documentation = "https://github.com/qa10devteam/behive/tree/main/docs"
 Repository = "https://github.com/qa10devteam/behive"
 
 [tool.pytest.ini_options]

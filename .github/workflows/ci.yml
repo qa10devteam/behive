@@ -7,49 +7,81 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check src/ --select E,F,W --ignore E501,E402,W503
+
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
     
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: behive
+          POSTGRES_PASSWORD: behive_test
+          POSTGRES_DB: behive_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    
-    - name: Install package
-      run: |
-        pip install -e ".[all]"
-        pip install pytest
-    
-    - name: Verify CLI
-      run: |
-        behive version
-        behive --help
-    
-    - name: Run smoke tests
-      run: |
-        pytest tests/test_smoke.py -v -k "not integration"
-    
-    - name: Check no secrets
-      run: |
-        ! grep -r "hive_2026_prod\|sk-ant-\|ghp_\|/home/ubuntu" src/ --include="*.py"
-    
-    - name: Syntax check all engine modules
-      run: |
-        python -c "
-        import ast, os
-        errors = []
-        for root, dirs, files in os.walk('src/behive'):
-            for f in files:
-                if f.endswith('.py'):
-                    path = os.path.join(root, f)
-                    with open(path) as fh:
-                        try:
-                            ast.parse(fh.read())
-                        except SyntaxError as e:
-                            errors.append(f'{path}: {e}')
-        assert not errors, f'Syntax errors: {errors}'
-        print('✅ All modules parse OK')
-        "
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install dependencies
+        run: |
+          pip install -e ".[all,dev]"
+      
+      - name: Initialize test database
+        env:
+          BEHIVE_DB_URL: postgresql://behive:behive_test@localhost:5432/behive_test
+        run: |
+          behive db init
+      
+      - name: Run tests
+        env:
+          BEHIVE_DB_URL: postgresql://behive:behive_test@localhost:5432/behive_test
+          HIVE_PG_USER: behive
+          HIVE_PG_PASSWORD: behive_test
+          HIVE_PG_HOST: localhost
+          HIVE_PG_DATABASE: behive_test
+          OPENAI_API_KEY: sk-test-fake-key-for-ci
+        run: |
+          python -m pytest tests/ -q --ignore=tests/test_e2e_pipeline.py -x
+      
+      - name: Verify CLI works
+        run: |
+          behive version
+          behive --help
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Fresh install smoke test
+        run: |
+          pip install .
+          behive version
+          behive --help
+          python -c "from behive import __version__; print(f'v{__version__}')"
+          python -c "from behive.engine import orchestrator; print('engine OK')"

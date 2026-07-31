@@ -201,7 +201,7 @@ You ask Claude a question
     ↓
 Claude calls BeHive MCP tool "research_topic"
     ↓
-BeHive scouts 70+ APIs, fetches 1000+ URLs via stealth drones
+BeHive scouts 64 APIs (38 free, 26 BYOK), fetches 1000+ URLs via stealth drones
     ↓
 Your LLM key extracts claims (Claude Haiku = ~$0.50 per mission)
     ↓
@@ -404,7 +404,7 @@ Layer 8 │ Archives        — Wayback Machine + archive.org fallback
 - `rss_feed` → RSS bee (structured, fast)
 - `database_portal` → Dedicated connector (custom scraping logic)
 
-### 70+ API Sources
+### 64 API Sources (38 Free + 26 BYOK)
 
 Scout bees don't just Google. They query **specialized APIs** across 37 categories:
 
@@ -491,7 +491,7 @@ Real results. No cherry-picking. Scale 30 (standard depth).
 1. **Dual-model extraction** — Fast model (Haiku) for bulk extraction, powerful model (Sonnet) for enriching thin claims. Not just "summarize this page."
 2. **Quality scoring** — Every claim gets a 0.0-1.0 score. Below threshold = rejected. No filler.
 3. **Knowledge graph** — Entities and relationships persist across missions. Research compounds.
-4. **70+ API sources** — Not just web search. SEC filings, arXiv, patent databases, government APIs.
+4. **64 API sources** — Not just web search. SEC filings, arXiv, patent databases, government APIs.
 5. **Deduplication** — Jaccard 0.60 threshold prevents the same fact from different sources inflating counts.
 
 ---
@@ -654,7 +654,7 @@ behive serve              # Starts both REST API (:8091) + MCP (:8090)
 
 1. **You give it a topic.** "NVIDIA GPU market 2026"
 
-2. **Scout bees plan the research.** The Queen decomposes it into 5 axes (market share, financials, products, competition, supply chain). Generates 12-14 search queries per axis. Checks 70+ APIs.
+2. **Scout bees plan the research.** The Queen decomposes it into 5 axes (market share, financials, products, competition, supply chain). Generates 12-14 search queries per axis. Checks 64 APIs.
 
 3. **Harvest bees collect sources.** Parallel HTTP fetches ~1000 URLs. HEAD sweep first (fast), then full content extraction on promising ones. Typically lands 60-90 usable documents.
 
@@ -710,7 +710,7 @@ No env vars set? DDG is the default. Add any key above to instantly upgrade sear
 | Knowledge graph | ✅ Neo4j | ❌ | ❌ | ❌ | ❌ |
 | Cross-session memory | ✅ Cumulative | ❌ | ❌ | ❌ | ❌ |
 | MCP native | ✅ | ❌ | ❌ | ❌ | ❌ |
-| API sources (70+) | ✅ | ❌ Web only | ⚠️ Search | ⚠️ Search | ❌ Web only |
+| API sources (64) | ✅ | ❌ Web only | ⚠️ Search | ⚠️ Search | ❌ Web only |
 | Self-hosted | ✅ Full | ⚠️ Needs API keys | ❌ Cloud | ❌ Cloud | ✅ |
 | Quality deduplication | ✅ Jaccard 0.60 | ❌ | ❌ | ❌ | ❌ |
 | SSE streaming | ✅ Real-time | ❌ | ❌ | ❌ | ❌ |
