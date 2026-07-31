@@ -38,8 +38,6 @@ dependencies = [
     "feedparser>=6.0",
     "fastapi>=0.100",
     "uvicorn>=0.20",
-    "sse-starlette>=1.6",
-    "click>=8.0",
 ]
 
 [project.optional-dependencies]
