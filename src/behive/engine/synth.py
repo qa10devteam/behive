@@ -169,8 +169,8 @@ class Queen:
         # PostgreSQL backend (preferred — always available)
         try:
             from behive.engine.db import connect as _db_connect
-            self._pg_available = (hive2_db.DB_BACKEND == "postgres")
-            self._hive_db = hive2_db
+            self._pg_available = True  # PostgreSQL is the only backend
+            self._db_connect = _db_connect
         except ImportError:
             self._pg_available = False
         try:

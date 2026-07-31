@@ -204,7 +204,7 @@ class TestQueenModules:
 
     def test_queen_planner_import(self):
         from behive.engine.orchestrator import QueenPlanner as qpe_QueenPlanner
-        attrs = [a for a in dir(qpe) if not a.startswith('_')]
+        attrs = [a for a in dir(qpe_QueenPlanner) if not a.startswith('_')]
         assert len(attrs) >= 1
 
     def test_queen_main_import(self):

@@ -44,10 +44,10 @@ except ImportError:
 # PostgreSQL backend (preferred)
 try:
     from behive.engine.db import connect as _db_connect
-    _pg_available = (_hive_db.DB_BACKEND == "postgres")
+    _pg_available = True  # PostgreSQL is the only backend
 except ImportError:
     _pg_available = False
-    _hive_db = None
+    _db_connect = None
 
 log = logging.getLogger("hive2_master_intelligence")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s — %(message)s")
