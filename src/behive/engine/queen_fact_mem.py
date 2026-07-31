@@ -50,18 +50,8 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional
 
-try:
-    import boto3
-    _boto3_ok = True
-except ImportError:
-    _boto3_ok = False
-    boto3 = None
 
-try:
-    from behive.engine.llm import complete as _llm_complete
-except ImportError:
-    _llm_complete = None
-import hive2_db as _hive_db  # PostgreSQL via unified layer
+from behive.engine.db import connect as _db_connect
 
 log = logging.getLogger(__name__)
 
@@ -147,43 +137,23 @@ _FTS_INDEX_SQL = "PRAGMA create_fts_index(hive_queen_facts, id, fact_text, overw
 # ---------------------------------------------------------------------------
 
 def _embed(text: str) -> List[float]:
-    """Generate embeddings — requires boto3 + Bedrock (Titan Embed)."""
-    if not _boto3_ok:
-        return [0.0] * EMBED_DIMS  # No embedding available — return zero vector
-    bc = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
-    resp = bc.invoke_model(
-        modelId=EMBED_MODEL_ID,
-        body=json.dumps({
-            "inputText": text[:8000],
-            "dimensions": EMBED_DIMS,
-            "normalize": True,
-        }),
-        contentType="application/json",
-        accept="application/json",
-    )
-    return json.loads(resp["body"].read())["embedding"]
+    """Generate embeddings via BYOK llm.embed()."""
+    try:
+        from behive.engine.llm import embed
+        results = embed([text[:8000]])
+        return results[0] if results else [0.0] * EMBED_DIMS
+    except Exception as e:
+        log.warning("Embedding failed: %s — returning zero vector", e)
+        return [0.0] * EMBED_DIMS
 
 
 def _haiku(prompt: str, max_tokens: int = 600) -> Optional[str]:
-    """LLM call — BYOK primary, Bedrock fallback."""
-    if _llm_complete:
-        try:
-            return _llm_complete(prompt, stage="process", max_tokens=max_tokens)
-        except Exception as exc:
-            log.warning("BYOK LLM failed: %s", exc)
-    # Bedrock fallback
-    if _boto3_ok:
-        bc = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
-        })
-        try:
-            resp = bc.invoke_model(modelId=os.environ.get("BEHIVE_BEDROCK_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"), body=body)
-            return json.loads(resp["body"].read())["content"][0]["text"].strip()
-        except Exception as exc:
-            log.warning("Bedrock Haiku fallback failed: %s", exc)
+    """LLM call via BYOK llm.complete()."""
+    try:
+        from behive.engine.llm import complete
+        return complete(prompt, stage="process", max_tokens=max_tokens)
+    except Exception as exc:
+        log.warning("LLM call failed: %s", exc)
     return None
 
 

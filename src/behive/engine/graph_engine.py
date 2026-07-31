@@ -26,8 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import boto3
-import hive2_db as _hive_db  # PostgreSQL via unified layer
+from behive.engine.db import connect as _db_connect
 import networkx as nx
 import numpy as np
 from rapidfuzz import fuzz
@@ -48,7 +47,7 @@ HASH_FILE        = GRAPH_DIR / "incremental_hash.json"
 QDRANT_HOST = "localhost"; QDRANT_PORT = 6333; COLLECTION = "hive_intelligence"
 EMBED_DIM = 384; EMBED_CACHE = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
 EMBED_MODEL = "all-MiniLM-L6-v2"; EMBED_BATCH = 512
-BEDROCK_MODEL = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"; BEDROCK_REGION = "eu-central-1"
+# BEDROCK constants removed — BYOK via llm.py
 
 # Thresholds
 CLAIM_CONF_MIN     = 0.65   # min confidence to index claim
@@ -59,26 +58,20 @@ MENTION_MAX_PER_ENT = 200   # max claim-mention edges per entity
 
 # ── Bedrock ───────────────────────────────────────────────────────────────────
 
-_bedrock_client: Optional[Any] = None
+_bedrock_client: Optional[Any] = None  # Legacy — unused
+
 
 def _get_bedrock() -> Any:
-    global _bedrock_client
-    if _bedrock_client is None:
-        _bedrock_client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
-    return _bedrock_client
+    """Legacy stub — replaced by llm.complete()."""
+    return None
 
 def call_bedrock(prompt: str, system: str = "", max_tokens: int = 512) -> str:
-    body: dict[str, Any] = {"anthropic_version": "bedrock-2023-05-31",
-                             "max_tokens": max_tokens,
-                             "messages": [{"role": "user", "content": prompt}]}
-    if system:
-        body["system"] = system
+    """LLM call via BYOK llm.complete()."""
     try:
-        resp = _get_bedrock().invoke_model(modelId=BEDROCK_MODEL, body=json.dumps(body),
-                                           contentType="application/json", accept="application/json")
-        return json.loads(resp["body"].read())["content"][0]["text"]
+        from behive.engine.llm import complete
+        return complete(prompt, stage="process", system=system, max_tokens=max_tokens)
     except Exception as exc:
-        log.warning("Bedrock call failed: %s", exc)
+        log.warning("LLM call failed: %s", exc)
         return ""
 
 # ── Embeddings ────────────────────────────────────────────────────────────────

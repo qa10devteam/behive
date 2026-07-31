@@ -95,24 +95,12 @@ def _sglang(prompt: str, system: str = "", max_tokens: int = 2048) -> str:
 
 
 def _bedrock_fallback(prompt: str, system: str = "", max_tokens: int = 2048) -> str:
-    """Bedrock Claude fallback when SGLang unavailable."""
+    """LLM call via BYOK llm.complete() — supports any provider."""
     try:
-        import boto3
-        client = boto3.client("bedrock-runtime", region_name="us-east-1")
-        messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
-            "system": system or "You are an intelligence analyst.",
-            "messages": messages,
-        })
-        resp = client.invoke_model(
-            modelId="us.anthropic.claude-haiku-4-5-20251001-v1:0",
-            body=body,
-        )
-        return json.loads(resp["body"].read())["content"][0]["text"].strip()
+        from behive.engine.llm import complete
+        return complete(prompt, stage="process", system=system or "You are an intelligence analyst.", max_tokens=max_tokens)
     except Exception as e:
-        log.error(f"Bedrock fallback failed: {e}")
+        log.error(f"LLM call failed: {e}")
         return "[synthesis unavailable]"
 
 

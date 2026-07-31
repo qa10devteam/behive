@@ -727,12 +727,10 @@ class ConflictResolver:
             return OpenAI(base_url=self.BEDROCK_URL, api_key="bedrock-local")
         except Exception:
             pass
-        # Bedrock direct fallback via boto3
+        # Bedrock direct fallback via llm.complete()
         try:
-            import boto3, json as _json
-            class _BedrockConflictClient:
-                def __init__(self):
-                    self._b = boto3.client("bedrock-runtime", region_name="eu-central-1")
+            from behive.engine.llm import complete as _llm_complete
+            class _LLMConflictClient:
                 class _FakeCompletion:
                     def __init__(self, text):
                         self.choices = [type("C", (), {"message": type("M", (), {"content": text})()})()]
@@ -740,13 +738,11 @@ class ConflictResolver:
                 def completions(self): return self
                 def create(self, model, messages, max_tokens=512, **kw):
                     prompt = "\n\n".join(m["content"] for m in messages)
-                    body = _json.dumps({"anthropic_version":"bedrock-2023-05-31","max_tokens":max_tokens,"messages":[{"role":"user","content":prompt}]})
-                    r = self._b.invoke_model(modelId="eu.anthropic.claude-haiku-4-5-20251001-v1:0", body=body, contentType="application/json", accept="application/json")
-                    txt = _json.loads(r["body"].read())["content"][0]["text"]
-                    return _BedrockConflictClient._FakeCompletion(txt)
-            client = _BedrockConflictClient()
+                    txt = _llm_complete(prompt, stage="process", max_tokens=max_tokens)
+                    return _LLMConflictClient._FakeCompletion(txt)
+            client = _LLMConflictClient()
             client.chat = type("Chat", (), {"completions": type("Comp", (), {"create": client.create})()})()
-            log.info("ConflictResolver: używam Bedrock direct fallback")
+            log.info("ConflictResolver: using BYOK llm.complete()")
             return client
         except Exception as e:
             log.warning(f"ConflictResolver: brak klienta LLM: {e}")

@@ -34,23 +34,20 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import sys
 import time
 from typing import List, Optional
 
-import boto3
-import hive2_db as _hive_db  # PostgreSQL via unified layer
+from behive.engine.db import connect as _db_connect
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-DUCKDB_PATH = ""  # Legacy PostgreSQL removed — PostgreSQL is primary
-BEDROCK_REGION = "eu-central-1"
-EMBED_MODEL_ID = "amazon.titan-embed-text-v2:0"
-EMBED_DIMS = 512
+EMBED_DIMS = int(os.environ.get("BEHIVE_EMBED_DIMS", "512"))
 CHUNK_WORDS = 500
 CHUNK_OVERLAP = 50
-BATCH_SIZE = 10          # docs per embedding batch (Titan rate-limit friendly)
+BATCH_SIZE = 10          # docs per embedding batch
 DEFAULT_TOP_K = 15
 DEFAULT_MIN_SIM = 0.72
 
@@ -220,14 +217,12 @@ def _qdrant_count(mission_id: str) -> int:
 # ---------------------------------------------------------------------------
 # Bedrock client (lazy singleton)
 # ---------------------------------------------------------------------------
-_bedrock_client: Optional[object] = None
+_bedrock_client: Optional[object] = None  # Legacy — kept for backward compat
 
 
-def _get_bedrock() -> "boto3.client":
-    global _bedrock_client
-    if _bedrock_client is None:
-        _bedrock_client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
-    return _bedrock_client
+def _get_bedrock():
+    """Legacy stub — embeddings now routed via llm.embed()."""
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -235,21 +230,14 @@ def _get_bedrock() -> "boto3.client":
 # ---------------------------------------------------------------------------
 
 def embed_text(text: str) -> List[float]:
-    """Call Bedrock Titan embed-text-v2 and return a 512-dim float list."""
-    client = _get_bedrock()
-    body = json.dumps({
-        "inputText": text[:8000],   # Titan input limit ~8192 tokens / ~10k chars
-        "dimensions": EMBED_DIMS,
-        "normalize": True,
-    })
-    resp = client.invoke_model(
-        modelId=EMBED_MODEL_ID,
-        body=body,
-        contentType="application/json",
-        accept="application/json",
-    )
-    embedding: List[float] = json.loads(resp["body"].read())["embedding"]
-    return embedding
+    """Generate embedding for text via BYOK llm.embed()."""
+    from behive.engine.llm import embed
+    try:
+        results = embed([text[:8000]])
+        return results[0] if results else [0.0] * EMBED_DIMS
+    except Exception as e:
+        log.warning("embed_text failed: %s — returning zero vector", e)
+        return [0.0] * EMBED_DIMS
 
 
 # ---------------------------------------------------------------------------
@@ -951,19 +939,12 @@ def hybrid_retrieve(
 # ---------------------------------------------------------------------------
 
 def _haiku_call(prompt: str, max_tokens: int = 256) -> str:
-    """Minimalistyczny synchroniczny call do Haiku przez Bedrock."""
+    """LLM call via BYOK llm.complete()."""
     try:
-        import boto3 as _boto3, json as _json
-        bc = _boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
-        body = _json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
-        })
-        resp = bc.invoke_model(modelId=CRAG_GRADE_MODEL, body=body)
-        return _json.loads(resp["body"].read())["content"][0]["text"].strip()
+        from behive.engine.llm import complete
+        return complete(prompt, stage="process", max_tokens=max_tokens)
     except Exception as exc:
-        log.warning("Haiku call failed: %s", exc)
+        log.warning("LLM call failed: %s", exc)
         return ""
 
 
@@ -2305,14 +2286,14 @@ def cross_mission_retrieve_enhanced(
 
 
 def _cli_build(mission_id: str) -> None:
-    con = _hive_db.connect(read_only=False)
+    con = _db_connect(read_only=False)
     inserted = build_rag_index(mission_id, con)
     print(f"Build done. {inserted} new chunks inserted for mission {mission_id}.")
     con.close()
 
 
 def _cli_query(mission_id: str, query_text: str) -> None:
-    con = _hive_db.connect(read_only=False)
+    con = _db_connect(read_only=False)
     result = retrieve(query_text, mission_id, con)
     con.close()
     if result:
@@ -2322,7 +2303,7 @@ def _cli_query(mission_id: str, query_text: str) -> None:
 
 
 def _cli_status(mission_id: str) -> None:
-    con = _hive_db.connect(read_only=False)
+    con = _db_connect(read_only=False)
     info = rag_status(mission_id, con)
     con.close()
     print(f"Mission       : {info['mission_id']}")

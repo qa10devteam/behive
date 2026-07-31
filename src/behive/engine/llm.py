@@ -408,3 +408,72 @@ def _call_bedrock(model: str, prompt: str, system: str, max_tokens: int, tempera
     
     result = json.loads(resp["body"].read())
     return result["content"][0]["text"]
+
+
+# ─── Embedding Support ─────────────────────────────────────────────────────────
+
+_EMBED_MODEL = os.environ.get("BEHIVE_EMBED_MODEL", "")
+
+
+def embed(texts: list[str], model: str = "") -> list[list[float]]:
+    """
+    Generate embeddings for a list of texts.
+    
+    BYOK routing:
+    1. BEHIVE_EMBED_MODEL env → litellm.embedding()
+    2. Auto-detect: if OPENAI_API_KEY → text-embedding-3-small
+    3. If AWS creds → amazon.titan-embed-text-v2:0
+    4. sentence-transformers local fallback (if installed)
+    
+    Returns list of float vectors (one per input text).
+    """
+    embed_model = model or _EMBED_MODEL or _detect_embed_model()
+    
+    if not embed_model:
+        raise RuntimeError(
+            "No embedding model configured. Set BEHIVE_EMBED_MODEL env var, "
+            "or provide OPENAI_API_KEY / AWS credentials."
+        )
+    
+    # Route through litellm for all cloud providers
+    if embed_model.startswith("local/"):
+        return _local_embed(texts, embed_model.replace("local/", ""))
+    
+    try:
+        import litellm
+        response = litellm.embedding(model=embed_model, input=texts)
+        return [item["embedding"] for item in response.data]
+    except Exception as e:
+        log.warning("litellm embedding failed (%s), trying local fallback: %s", embed_model, e)
+        return _local_embed(texts)
+
+
+def _detect_embed_model() -> str:
+    """Auto-detect best available embedding model."""
+    if os.environ.get("OPENAI_API_KEY"):
+        return "text-embedding-3-small"
+    if os.environ.get("VOYAGE_API_KEY"):
+        return "voyage/voyage-3-lite"
+    if _has_aws_credentials():
+        return "bedrock/amazon.titan-embed-text-v2:0"
+    # Check for local sentence-transformers
+    try:
+        import sentence_transformers  # noqa: F401
+        return "local/all-MiniLM-L6-v2"
+    except ImportError:
+        pass
+    return ""
+
+
+def _local_embed(texts: list[str], model_name: str = "all-MiniLM-L6-v2") -> list[list[float]]:
+    """Fallback: local sentence-transformers embedding."""
+    try:
+        from sentence_transformers import SentenceTransformer
+        _model = SentenceTransformer(model_name)
+        embeddings = _model.encode(texts, show_progress_bar=False)
+        return [emb.tolist() for emb in embeddings]
+    except ImportError:
+        raise RuntimeError(
+            "No embedding provider available. Install sentence-transformers "
+            "(`pip install sentence-transformers`) or set OPENAI_API_KEY / AWS creds."
+        )

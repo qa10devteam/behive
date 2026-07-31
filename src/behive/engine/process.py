@@ -54,12 +54,8 @@ try:
 except ImportError:
     _pg_available = False
 
-try:
-    import boto3
-    _boto3_available = True
-except ImportError:
-    _boto3_available = False
-    boto3 = None  # noqa: F811 — optional dependency
+# boto3 no longer needed — all LLM calls routed via llm.py
+_boto3_available = False  # kept for backward compat checks
 
 # ---------------------------------------------------------------------------
 # HIVE 2.0 Operations Registry

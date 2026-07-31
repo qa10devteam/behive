@@ -33,9 +33,8 @@ import hive2_db as _hive_db  # PostgreSQL via unified layer
 # CONFIG
 # ---------------------------------------------------------------------------
 DB_PATH = ""  # Legacy PostgreSQL removed — PostgreSQL is primary
-BEDROCK_REGION = "eu-central-1"
-MODEL_HAIKU = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
-MODEL_SONNET = "eu.anthropic.claude-sonnet-4-6"
+
+# Model constants removed — BYOK via llm.py (BEHIVE_MODEL env var)
 
 LOG_FMT = "%(asctime)s [QueenFeedback] %(levelname)s — %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FMT)
@@ -93,61 +92,21 @@ class Prior:
 
 
 # ---------------------------------------------------------------------------
-# LLM HELPER — Bedrock eu-central-1
+# LLM HELPER — BYOK via llm.complete()
 # ---------------------------------------------------------------------------
 
 def _llm_call(
     prompt: str,
     system: str = "",
-    model: str = MODEL_HAIKU,
+    model: str = "",  # ignored — routed via BEHIVE_MODEL
     max_tokens: int = 2048,
     retries: int = 3,
 ) -> str:
     """
-    Wywołuje Bedrock Claude z retry na throttle.
-    Domyślnie Haiku (szybki, tani) — Queen używa go do ekstrakcji predykcji.
+    LLM call via BYOK llm.complete() — supports any provider.
     """
-    import boto3
-    from botocore.config import Config
-
-    client = boto3.client(
-        "bedrock-runtime",
-        region_name=BEDROCK_REGION,
-        config=Config(
-            read_timeout=120,
-            connect_timeout=15,
-            retries={"max_attempts": 2},
-        ),
-    )
-
-    body: dict = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    if system:
-        body["system"] = system
-
-    for attempt in range(retries):
-        try:
-            response = client.invoke_model(
-                modelId=model,
-                body=json.dumps(body),
-                contentType="application/json",
-                accept="application/json",
-            )
-            result = json.loads(response["body"].read())
-            return result["content"][0]["text"]
-        except Exception as exc:
-            err = str(exc)
-            if "Throttling" in err or "throttl" in err.lower():
-                wait = 10 * (attempt + 1)
-                log.warning(f"Throttled on attempt {attempt+1}/{retries}, waiting {wait}s...")
-                time.sleep(wait)
-                continue
-            log.error(f"LLM call failed: {exc}")
-            raise
-    raise RuntimeError(f"LLM call failed after {retries} retries")
+    from behive.engine.llm import complete
+    return complete(prompt, stage="feedback", system=system, max_tokens=max_tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +243,7 @@ TEKST:
 Odpowiedz w formacie JSON jak opisano w instrukcji systemowej."""
 
         try:
-            raw = _llm_call(prompt, system=self.SYSTEM_PROMPT, model=MODEL_HAIKU)
+            raw = _llm_call(prompt, system=self.SYSTEM_PROMPT)
         except Exception as exc:
             log.error(f"[PredictionExtractor] LLM call failed: {exc}")
             return []
@@ -542,7 +501,7 @@ Oceń: czy to evidence POTWIERDZA, OBALA, CZĘŚCIOWO POTWIERDZA czy jest NIEROZ
 
         try:
             raw = _llm_call(
-                prompt, system=self.VALIDATION_SYSTEM, model=MODEL_HAIKU
+                prompt, system=self.VALIDATION_SYSTEM
             )
         except Exception as exc:
             log.error(f"[FeedbackValidator] LLM failed for cal_id={cal_id}: {exc}")
@@ -921,7 +880,7 @@ Wyciągnij lekcje operacyjne dla przyszłych misji o podobnej tematyce."""
 
         try:
             raw = _llm_call(
-                prompt, system=self.LESSONS_SYSTEM, model=MODEL_HAIKU
+                prompt, system=self.LESSONS_SYSTEM
             )
         except Exception as exc:
             log.error(f"[LessonsExtractor] LLM call failed: {exc}")

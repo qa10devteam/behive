@@ -35,9 +35,11 @@ from pathlib import Path
 from typing import Optional, Any
 
 try:
-    import boto3
+    import boto3  # Optional — only needed for agentic Queen (tool-use loop)
+    _boto3_available = True
 except ImportError:
     boto3 = None
+    _boto3_available = False
 
 # PostgreSQL backend (preferred)
 try:
@@ -800,17 +802,12 @@ def main():
         # Translate query to English for better vector similarity (corpus is English)
         def _translate_query_to_en(q: str) -> str:
             try:
-                import boto3, json as _json
-                _bc = boto3.client("bedrock-runtime", region_name="eu-central-1")
-                body = _json.dumps({
-                    "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": 120,
-                    "messages": [{"role": "user", "content":
-                        f"Translate this research query to English in 1-2 sentences, keep all key terms:\n{q}"}]
-                })
-                resp = _bc.invoke_model(modelId="eu.anthropic.claude-haiku-4-5-20251001-v1:0", body=body)
-                result = _json.loads(resp["body"].read())["content"][0]["text"].strip()
-                # Strip any markdown headers Haiku may add (e.g. English Translation header)
+                from behive.engine.llm import complete
+                result = complete(
+                    f"Translate this research query to English in 1-2 sentences, keep all key terms:\n{q}",
+                    stage="process", max_tokens=120
+                )
+                # Strip any markdown headers (e.g. English Translation header)
                 lines = result.splitlines()
                 lines = [l for l in lines if not l.startswith("#") and l.strip()]
                 return " ".join(lines).strip()
