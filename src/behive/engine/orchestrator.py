@@ -1320,6 +1320,14 @@ def _bar(phase: str, elapsed: float, width: int = 20) -> str:
 def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = False, scale: int = 200) -> None:
     """Full pipeline with Queen-first planning: plan → scout → harvest → process → synth."""
     _init_db(None)  # No-ops on PostgreSQL, creates tables on PostgreSQL legacy
+    
+    # Cleanup zombie missions from previous crashed runs
+    try:
+        cleaned = cleanup_stuck_missions(max_age_hours=1)
+        if cleaned > 0:
+            log.info(f"  🧹  Cleaned {cleaned} stuck missions from previous runs")
+    except Exception:
+        pass  # Non-critical
 
     # ═══ PHASE -1: QUERY CLARIFICATION ═══════════════════════════
     try:
@@ -1462,7 +1470,8 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
     
     # Scout with retry on 0 sources (handles search rate-limiting)
     _n_sources = 0
-    for scout_attempt in range(2):  # max 2 scout attempts
+    _max_scout_retries = int(os.environ.get("BEHIVE_SCOUT_RETRIES", "3"))
+    for scout_attempt in range(_max_scout_retries):
         try:
             result = subprocess.run(scout_cmd, check=False, timeout=scout_timeout)
             if result.returncode != 0:
@@ -1470,7 +1479,7 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
         except subprocess.TimeoutExpired:
             log.warning(f'  ⚠️  Scout timed out after {scout_timeout}s — continuing with partial results.')
         except FileNotFoundError:
-            log.info(f'  ⚠️  hive2_scout.py not found — skipped.')
+            log.info(f'  ⚠️  Scout script not found — skipped.')
             break
         
         # Check how many sources we got
@@ -1485,9 +1494,10 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
         
         if _n_sources > 0:
             break  # Got sources, proceed
-        elif scout_attempt == 0:
-            log.warning(f'  ⚠️  Scout returned 0 sources — retrying in 10s (rate-limit backoff)...')
-            time.sleep(10)
+        elif scout_attempt < _max_scout_retries - 1:
+            _backoff = 10 * (scout_attempt + 1)  # 10s, 20s
+            log.warning(f'  ⚠️  Scout returned 0 sources — retrying in {_backoff}s (attempt {scout_attempt+1}/{_max_scout_retries})...')
+            time.sleep(_backoff)
     
     timings['scout'] = time.time() - t1
     _emit(mission_id, 'scout', 'completed', data={'sources_found': _n_sources})
