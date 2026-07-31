@@ -19,7 +19,7 @@ Narzędzia pogrupowane w 7 domen:
 import os, json, re, time, urllib.request, urllib.parse, logging
 from typing import Optional
 
-import hive2_db as _hive_db  # PostgreSQL via unified layer
+from behive.engine.db import connect as _db_connect
 
 DB_PATH = ""  # Legacy PostgreSQL removed — PostgreSQL is primary
 log = logging.getLogger("hive.queen.tools")
@@ -411,7 +411,7 @@ def ipinfo_lookup(ip: str) -> dict:
 def rag_query(mission_id: str, query: str, top_k: int = 10) -> list[dict]:
     """Odpytaj lokalne RAG chunks — dane już zebrane przez scouty."""
     try:
-        db = _hive_db.connect(read_only=False)
+        db = _db_connect(read_only=False)
         keywords = [w.lower() for w in re.findall(r"\b\w{4,}\b", query)
                     if w.lower() not in {
                         "that","this","with","from","have","which","what","when","where",
@@ -436,7 +436,7 @@ def rag_query(mission_id: str, query: str, top_k: int = 10) -> list[dict]:
 def hive_sources_top(mission_id: str, top_n: int = 20) -> list[dict]:
     """Top N źródeł misji z wynikami scoutów."""
     try:
-        db = _hive_db.connect(read_only=False)
+        db = _db_connect(read_only=False)
         rows = db.execute(f"""
             SELECT url, domain, title, score_total, score_relevance, score_authority, status
             FROM hive_sources
@@ -456,7 +456,7 @@ def hive_sources_top(mission_id: str, top_n: int = 20) -> list[dict]:
 def hive_mission_stats(mission_id: str) -> dict:
     """Statystyki misji: źródła, encje, claims, chunki RAG, top domeny."""
     try:
-        db = _hive_db.connect(read_only=True)
+        db = _db_connect(read_only=True)
         stats = {}
         for key, sql in [
             ("sources_total",   f"SELECT COUNT(*) FROM hive_sources WHERE mission_id='{mission_id}'"),
@@ -499,7 +499,7 @@ def hive_entities_top(mission_id: str, entity_type: str = "", top_n: int = 50) -
     Zwraca listę {type, value, context, confidence, count} posortowaną wg frequency.
     """
     try:
-        db = _hive_db.connect(read_only=True)
+        db = _db_connect(read_only=True)
         where = f"mission_id='{mission_id}'"
         if entity_type:
             where += f" AND entity_type='{entity_type}'"
@@ -523,7 +523,7 @@ def hive_claims_top(mission_id: str, min_confidence: float = 0.7, top_n: int = 5
     Użyj do weryfikacji hipotez i budowania narracji — to są fakty wyciągnięte z 1964 dokumentów.
     """
     try:
-        db = _hive_db.connect(read_only=True)
+        db = _db_connect(read_only=True)
         rows = db.execute(f"""
             SELECT claim, evidence, source_url, claim_type, confidence
             FROM hive_claims

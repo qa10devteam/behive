@@ -126,10 +126,10 @@ def smart_db_mock():
     """Install smart mock for all tests in this module."""
     import behive.engine.db_helpers as dbh
     dbh._pg_available = True
-    dbh._hive_db = SmartMockHiveDB()
+    dbh._db_mod = SmartMockHiveDB()
     yield
     dbh._pg_available = None
-    dbh._hive_db = None
+    dbh._db_mod = None
 
 
 # ═══ ORCHESTRATOR deep functions ═══

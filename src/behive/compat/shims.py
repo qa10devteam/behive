@@ -1,7 +1,7 @@
 """Legacy import shims: hive2_* → behive.engine.*
 
 This module installs shims into sys.modules so that legacy imports like:
-    from hive2_drones import get_strategy
+    from behive.engine.drones import get_strategy
     import hive2_db
 
 resolve to the actual behive.engine.* modules.

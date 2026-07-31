@@ -6,7 +6,7 @@ Connection configured via environment variables:
   or individual HIVE_PG_USER, HIVE_PG_PASSWORD, HIVE_PG_DATABASE, HIVE_PG_HOST, HIVE_PG_PORT
 
 Usage:
-    from hive2_pg import get_pg_connection, get_pg_pool
+    from behive.engine.db import get_pg_connection, get_pg_pool
 
 Features vs PostgreSQL:
     - MVCC: unlimited concurrent readers + writers

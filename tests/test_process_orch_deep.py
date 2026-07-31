@@ -57,10 +57,10 @@ class MockProcDB:
 def mock_db():
     import behive.engine.db_helpers as dbh
     dbh._pg_available = True
-    dbh._hive_db = MockProcDB()
+    dbh._db_mod = MockProcDB()
     yield
     dbh._pg_available = None
-    dbh._hive_db = None
+    dbh._db_mod = None
 
 
 # ═══ PROCESS.PY BeeWorker deep tests ═══

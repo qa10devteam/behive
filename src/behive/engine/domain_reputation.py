@@ -21,7 +21,7 @@ Schemat:
     blacklist_reason VARCHAR
 
 Public API:
-    from hive2_domain_reputation import DomainReputation
+    from behive.engine.domain_reputation import DomainReputation
     rep = DomainReputation()
 
     # Przed harvest

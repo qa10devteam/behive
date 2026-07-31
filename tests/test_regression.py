@@ -44,7 +44,7 @@ class TestStuckMissions:
         # Force db_helpers to re-initialize connection with correct env vars
         import behive.engine.db_helpers as dbh
         dbh._pg_available = None
-        dbh._hive_db = None
+        dbh._db_mod = None
         
         from behive.engine.orchestrator import cleanup_stuck_missions
         count = cleanup_stuck_missions(max_age_hours=2)

@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import urlparse
 
-import hive2_db as _hive_db  # PostgreSQL via unified layer
+from behive.engine.db import connect as _db_connect
 
 log = logging.getLogger("HiveFalsifier")
 logging.basicConfig(

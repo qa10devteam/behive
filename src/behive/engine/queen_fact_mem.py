@@ -28,7 +28,7 @@ Różnica od QueenMemory:
   QueenFactMemory.search()   → "fakty semantycznie bliskie query: ..."
 
 Użycie:
-  from hive2_queen_fact_mem import QueenFactMemory
+  from behive.engine.queen_fact_mem import QueenFactMemory
 
   mem = QueenFactMemory()
 

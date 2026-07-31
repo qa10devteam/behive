@@ -29,10 +29,10 @@ def mock_all_db():
         def connect(self, **kw): return _MockConn()
     
     dbh._pg_available = True
-    dbh._hive_db = _MockDB()
+    dbh._db_mod = _MockDB()
     yield
     dbh._pg_available = None
-    dbh._hive_db = None
+    dbh._db_mod = None
 
 
 # ═══ PRESCOUT: TrueScout + PreScoutDancer ═══

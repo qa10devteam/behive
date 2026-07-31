@@ -28,7 +28,7 @@ except ImportError:
 def _emit(mission_id: str, phase: str, event_type: str, data=None, **kw):
     """Emit a HIVE event. Silently swallows all errors."""
     try:
-        from hive2_events import emit_event, ensure_events_table
+        from behive.engine.events import emit_event, ensure_events_table
         ensure_events_table(DB_PATH)
         emit_event(DB_PATH, mission_id, phase, event_type, data=data, **kw)
     except Exception as e:
@@ -527,7 +527,7 @@ Return ONLY the JSON array."""
         # ═══ PHASE 0: MEMORY RECALL — Queen loads operational memory ═══
         log.debug(f'  👑 Queen loading operational memory...')
         try:
-            from hive2_queen_memory import QueenMemory
+            from behive.engine.queen_memory import QueenMemory
             memory    = QueenMemory(self.topic)
             mem_ctx   = memory.recall()
             mem_block = mem_ctx.to_prompt_block()
@@ -552,7 +552,7 @@ Return ONLY the JSON array."""
 
         # ═══ PHASE 0b: CALIBRATION — Queen loads calibration profile ═══
         try:
-            from hive2_queen_calibrator import QueenCalibrator
+            from behive.engine.queen_calibrator import QueenCalibrator
             calibrator = QueenCalibrator()
             calib_block = calibrator.generate_calibration_block(self.topic)
             if calib_block and len(calib_block) > 100:
@@ -567,7 +567,7 @@ Return ONLY the JSON array."""
 
         # ═══ PHASE 0c: SEMANTIC FACT MEMORY — Queen loads semantic facts ═══
         try:
-            from hive2_queen_fact_mem import QueenFactMemory
+            from behive.engine.queen_fact_mem import QueenFactMemory
             fact_mem = QueenFactMemory()
             fact_block = fact_mem.recall(self.topic, top_k=8)
             if fact_block:
@@ -1296,7 +1296,7 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
 
     # ═══ PHASE -1: QUERY CLARIFICATION ═══════════════════════════
     try:
-        from hive2_preprocessor import preprocess_query
+        from behive.engine.preprocessor import preprocess_query
         prep = preprocess_query(topic, interactive=True, force=force)
         if not prep.ok:
             log.info(f"\n  ❌  {prep.message}")
@@ -1329,7 +1329,7 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     # Load primer from previous missions on similar topics.
     # Gives Queen access to trusted domains + gap queries sbefore full scout.
     try:
-        from hive2_queen_primer import QueenPrimer
+        from behive.engine.queen_primer import QueenPrimer
         _qp = QueenPrimer(mission_id)
         _primer = _qp.load_for_topic(topic, max_age_days=45)
         if _primer:
@@ -1475,7 +1475,7 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
     log.debug('    🪲 Wall-breakers probing domains before harvest...')
     t_drone = time.time()
     try:
-        from hive2_drones import extract_domains_from_sources, run_recon
+        from behive.engine.drones import extract_domains_from_sources, run_recon
         drone_domains = extract_domains_from_sources(mission_id)
         if drone_domains:
             drone_report = run_recon(mission_id, drone_domains)
@@ -1497,7 +1497,7 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
     try:
         import asyncio as _aio
         import os as _os
-        from hive2_prescout import run_prescout_pipeline
+        from behive.engine.prescout import run_prescout_pipeline
         _bm_mode   = "manual" if _os.environ.get("HIVE_BM_MANUAL") else "auto"
         _seeds_raw = _os.environ.get("HIVE_BM_SEEDS", "")
         _seed_urls = json.loads(_seeds_raw) if _seeds_raw else None
@@ -1771,8 +1771,8 @@ Return JSON array of 5 strings only."""
     # ── REC-05b: QMP Primer flush ─────────────────────────────────
     # After synthesis, save this mission as primer for similar topics in future.
     try:
-        from hive2_queen_primer import QueenPrimer
-        import hive2_db as _hive_db_qp
+        from behive.engine.queen_primer import QueenPrimer
+        from behive.engine.db import connect as _db_connect_qp
         _con_qp = _hive_db_qp.connect(read_only=True)
         _qp_row = _con_qp.execute(
             "SELECT COALESCE(quality_confidence, 0.5) FROM hive_missions WHERE id=?",

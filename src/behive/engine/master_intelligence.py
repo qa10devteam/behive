@@ -43,7 +43,7 @@ except ImportError:
 
 # PostgreSQL backend (preferred)
 try:
-    import hive2_db as _hive_db
+    from behive.engine.db import connect as _db_connect
     _pg_available = (_hive_db.DB_BACKEND == "postgres")
 except ImportError:
     _pg_available = False
@@ -54,7 +54,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelna
 
 # ─── Queen Tools (optional — graceful degradation) ─────────────────────────────
 try:
-    from hive2_queen_tools import QUEEN_TOOLS, dispatch_tool
+    from behive.engine.queen_tools import QUEEN_TOOLS, dispatch_tool
 except ImportError:
     QUEEN_TOOLS = []
     def dispatch_tool(*args, **kwargs): return None
@@ -742,7 +742,7 @@ def main():
     import time as _time, os as _os, re as _re_lock
     for _attempt in range(12):
         try:
-            con = _hive_db.connect() if _pg_available else _hive_db.connect(read_only=False)
+            con = _db_connect() if _pg_available else _db_connect(read_only=False)
             break
         except Exception as _lock_err:
             _err_str = str(_lock_err)
@@ -797,7 +797,7 @@ def main():
     rag_eval_metrics: dict = {}
     try:
         pass  # Removed: hardcoded path. Use package imports or PYTHONPATH.
-        from hive2_rag import retrieve, corrective_retrieve, hybrid_retrieve, cross_mission_retrieve, cross_mission_retrieve_enhanced, evaluate_rag
+        from behive.engine.rag import retrieve, corrective_retrieve, hybrid_retrieve, cross_mission_retrieve, cross_mission_retrieve_enhanced, evaluate_rag
 
         # Translate query to English for better vector similarity (corpus is English)
         def _translate_query_to_en(q: str) -> str:
@@ -1010,7 +1010,7 @@ def main():
     # ── RAG Evaluation — context_precision z synthesis ───────────────────────
     if rag_eval_metrics and (report or queen_output):
         try:
-            from hive2_rag import evaluate_rag, rag_eval_summary, verify_citations
+            from behive.engine.rag import evaluate_rag, rag_eval_summary, verify_citations
             synthesis_text = report if report else json.dumps(queen_output, ensure_ascii=False)
             # Nadpisz ostatni rekord eval z context_precision
             evaluate_rag(
@@ -1108,7 +1108,7 @@ def main():
 
     # ── P5: SEMANTIC FACT MEMORY — zapisz fakty z syntezy ──────────────────────
     try:
-        from hive2_queen_fact_mem import QueenFactMemory
+        from behive.engine.queen_fact_mem import QueenFactMemory
         synthesis_for_facts = report if report else (
             json.dumps(queen_output, ensure_ascii=False) if isinstance(queen_output, dict) else ""
         )
@@ -1129,7 +1129,7 @@ def main():
     try:
         from hive3_prompt_evolution import post_mission_prompt_evolution        # Collect bee outputs from processing phase (stored in DB)
         bee_outputs = {}
-        con2 = _hive_db.connect(read_only=True) if _pg_available else _hive_db.connect(read_only=False)
+        con2 = _db_connect(read_only=True) if _pg_available else _db_connect(read_only=False)
         bee_rows = con2.execute("""
             SELECT operation_name, output_json FROM hive_bee_results
             WHERE mission_id = ? AND output_json IS NOT NULL

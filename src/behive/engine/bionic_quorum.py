@@ -30,7 +30,7 @@ Scheme:
   └──────────────────────────────────────────────────────────┘
 
 Public API:
-    from hive2_bionic_quorum import QuorumChecker
+    from behive.engine.bionic_quorum import QuorumChecker
     qc = QuorumChecker(mission_id)
     result = qc.check()       # QuorumResult
     if result.needs_expansion:

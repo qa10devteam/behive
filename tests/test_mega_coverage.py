@@ -53,7 +53,7 @@ class MockConnection:
 
 
 class MockHiveDB:
-    """Mock hive2_db module."""
+    """Mock _db_connect module."""
     DB_BACKEND = "postgres"
     
     @staticmethod
@@ -65,7 +65,7 @@ def mock_db_helpers():
     """Patch db_helpers to use our mock."""
     import behive.engine.db_helpers as dbh
     dbh._pg_available = True
-    dbh._hive_db = MockHiveDB()
+    dbh._db_mod = MockHiveDB()
 
 
 # ═══ PROCESS.PY (1097 uncovered lines) ═══

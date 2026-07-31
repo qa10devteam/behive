@@ -280,8 +280,8 @@ class DroneRecon:
         self._init_db()
 
     def _init_db(self):
-        import hive2_db as _hive_db
-        db = _hive_db.connect(read_only=False)
+        from behive.engine.db import connect as _db_connect
+        db = _db_connect(read_only=False)
         db.execute("""
             CREATE TABLE IF NOT EXISTS drone_map (
                 mission_id    VARCHAR,
@@ -750,8 +750,8 @@ class DroneRecon:
 
     def save_to_db(self) -> None:
         """Persist recon results to database."""
-        import hive2_db as _hive_db
-        db = _hive_db.connect(read_only=False)
+        from behive.engine.db import connect as _db_connect
+        db = _db_connect(read_only=False)
         rows = []
         for domain, res in self._results.items():
             rows.append((
@@ -864,8 +864,8 @@ def run_recon(mission_id: str, domains: list[str]) -> dict:
 def get_strategy(mission_id: str, domain: str) -> dict:
     """Get strategy for domain from drone_map. Used by harvest."""
     try:
-        import hive2_db as _hive_db
-        db = _hive_db.connect(read_only=True)
+        from behive.engine.db import connect as _db_connect
+        db = _db_connect(read_only=True)
         row = db.execute("""
             SELECT strategy, block_type, working_ua, cffi_target, primp_target,
                    delay_ms, via_jina, via_wayback, via_archive_ph,
@@ -901,8 +901,8 @@ def extract_domains_from_sources(mission_id: str, max_domains: int = 50) -> list
     Capped at max_domains to keep drone recon tractable.
     """
     try:
-        import hive2_db as _hive_db
-        db = _hive_db.connect(read_only=True)
+        from behive.engine.db import connect as _db_connect
+        db = _db_connect(read_only=True)
         # Top sources by score_total, relevance-filtered
         rows = db.execute("""
             SELECT url FROM hive_sources

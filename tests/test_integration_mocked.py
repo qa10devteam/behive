@@ -1,5 +1,5 @@
 """Integration-style tests with mocked DB layer.
-Exercise actual function bodies by mocking hive2_db at the wrapper level."""
+Exercise actual function bodies by mocking _db_connect at the wrapper level."""
 import pytest
 from unittest.mock import patch, MagicMock, call
 import os

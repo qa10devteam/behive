@@ -8,10 +8,10 @@ def reset_db_state():
     """Reset DB state between tests."""
     import behive.engine.db_helpers as dbh
     old_pg = dbh._pg_available
-    old_hive = dbh._hive_db
+    old_mod = dbh._db_mod
     yield
     dbh._pg_available = old_pg
-    dbh._hive_db = old_hive
+    dbh._db_mod = old_mod
 
 
 @pytest.fixture

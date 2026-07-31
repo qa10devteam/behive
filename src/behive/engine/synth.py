@@ -168,7 +168,7 @@ class Queen:
     def _import_pg(self):
         # PostgreSQL backend (preferred — always available)
         try:
-            import hive2_db
+            from behive.engine.db import connect as _db_connect
             self._pg_available = (hive2_db.DB_BACKEND == "postgres")
             self._hive_db = hive2_db
         except ImportError:
@@ -184,11 +184,11 @@ class Queen:
 
     def _connect_ro(self):
         """Return a read-only connection (PostgreSQL)."""
-        return self._hive_db.connect(read_only=True)
+        return self._db_connect(read_only=True)
 
     def _connect_rw(self):
         """Return a read-write connection (PostgreSQL)."""
-        return self._hive_db.connect(read_only=False)
+        return self._db_connect(read_only=False)
 
     # ── Data loading ─────────────────────────────────────────────────────────
 
@@ -1737,7 +1737,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
         quality_confidence = None
 
         try:
-            con_r = self._hive_db.connect(read_only=True)
+            con_r = self._db_connect(read_only=True)
             mid = self.mission_id
 
             # coverage: % sources with full content (word_count > 0)
@@ -1900,7 +1900,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
 
         # ── QueenMemory persist — key_findings to cross-mission memory ──────
         try:
-            from hive2_queen_memory import QueenMemory
+            from behive.engine.queen_memory import QueenMemory
             qm = QueenMemory(topic)
             key_findings = synthesis.get("follow_up_queries", [])
             brief_lines = [

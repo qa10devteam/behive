@@ -23,7 +23,7 @@ Scoring: 4 ortogonalne sygnały (każdy 0.0–1.0, ważone)
 Threshold: quality_score < 0.32 → "covertly infected" → penalizuj w scoring
 
 Public API:
-    from hive2_content_quality import score_content, is_covert_infected
+    from behive.engine.content_quality import score_content, is_covert_infected
     q = score_content(raw_text)        # 0.0–1.0
     bad = is_covert_infected(raw_text) # True/False
     details = score_content_detailed(raw_text)  # dict with all signals

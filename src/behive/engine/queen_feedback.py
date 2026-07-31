@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import hive2_db as _hive_db  # PostgreSQL via unified layer
+from behive.engine.db import connect as _db_connect
 
 # ---------------------------------------------------------------------------
 # CONFIG
@@ -117,7 +117,7 @@ def _db_connect(read_only: bool = False, retries: int = 10) -> Any:
     """Otwiera połączenie PostgreSQL z retries (plik może być locked)."""
     for attempt in range(retries):
         try:
-            return _hive_db.connect(read_only=read_only)
+            return _db_connect(read_only=read_only)
         except Exception as exc:
             if attempt < retries - 1:
                 wait = min(5 * (attempt + 1), 30)

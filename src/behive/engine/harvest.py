@@ -209,12 +209,12 @@ def _get_markitdown():
 
 
 # -- database --
-import hive2_db as _hive_db
+from behive.engine.db import connect as _db_connect
 
 
 def _get_db_connection(read_only: bool = False):
     """Get database connection via unified hive2_db layer (PostgreSQL)."""
-    return _hive_db.connect(read_only=read_only)
+    return _db_connect(read_only=read_only)
 
 
 # -- requests --
@@ -327,7 +327,7 @@ def _get_drone_strategy(mission_id: str, domain: str) -> dict:
     if cache_key in _drone_strategy_cache:
         return _drone_strategy_cache[cache_key]
     try:
-        from hive2_drones import get_strategy
+        from behive.engine.drones import get_strategy
         result = get_strategy(mission_id, domain)
     except Exception as e:
         log.debug(f"Suppressed in harvest.py: {e}")
@@ -411,7 +411,7 @@ class HarvesterBee:
 
         # ── REC-01: Quorum check (waggle dance gate) ───────────────────────────
         try:
-            from hive2_bionic_quorum import QuorumChecker
+            from behive.engine.bionic_quorum import QuorumChecker
             qc = QuorumChecker(self.mission_id)
             quorum = qc.check()
             log.debug(quorum.summary())
@@ -425,7 +425,7 @@ class HarvesterBee:
 
         # ── REC-02: Pre-filter via domain reputation (grooming) ───────────────
         try:
-            from hive2_domain_reputation import get_reputation
+            from behive.engine.domain_reputation import get_reputation
             _rep = get_reputation()
             before = len(sources)
             sources = [s for s in sources if not _rep.should_skip(s.get("url", ""))]
@@ -608,7 +608,7 @@ class HarvesterBee:
             # ── REC-04: Covert Degradation Detection (DWV analog) ──────────
             # Replaces naive _score_quality with multi-signal bionic scorer
             try:
-                from hive2_content_quality import score_content_detailed, quality_label
+                from behive.engine.content_quality import score_content_detailed, quality_label
                 cq = score_content_detailed(base["text"])
                 base["quality_score"] = cq["quality_score"]
                 base["success"] = base["word_count"] >= 50 and not cq["covert_infected"]
@@ -622,7 +622,7 @@ class HarvesterBee:
 
         # ── REC-02: Domain Reputation update (grooming behavior) ─────────────
         try:
-            from hive2_domain_reputation import get_reputation
+            from behive.engine.domain_reputation import get_reputation
             get_reputation().update(url, base.get("quality_score", 0.0), base.get("success", False))
         except Exception as e:
             log.debug(f"Suppressed: {e}")
@@ -1084,7 +1084,7 @@ class HarvesterBee:
         # ── REC-07: Domain Reputation flush (grooming behavior) ──────────────
         # After saving results, update domain reputation in cross-mission memory.
         try:
-            from hive2_domain_reputation import get_reputation
+            from behive.engine.domain_reputation import get_reputation
             _rep = get_reputation()
             _rep.flush()
             log.debug(f"🐝 Grooming: domain reputation flushed ({len(self.results)} entries)")

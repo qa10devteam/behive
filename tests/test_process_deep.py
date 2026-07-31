@@ -5,7 +5,7 @@ import json
 import os
 
 # Mock DB before import
-with patch("behive.engine.process.hive2_db", MagicMock()):
+with patch("behive.engine.process._db_connect", MagicMock()):
     from behive.engine.process import (
         BeeWorker,
         DeduplicationDrone,

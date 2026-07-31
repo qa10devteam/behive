@@ -65,11 +65,11 @@ class TestQueenClass:
         # Install mock before construction
         import behive.engine.db_helpers as dbh
         dbh._pg_available = True
-        dbh._hive_db = MockQueenDB()
+        dbh._db_mod = MockQueenDB()
         
         q = Queen("test-queen-deep")
         q._pg_available = True
-        q._hive_db = MockQueenDB()
+        q._db_mod = MockQueenDB()
         # duckdb attribute removed — using PostgreSQL
         return q
 

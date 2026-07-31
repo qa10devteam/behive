@@ -18,7 +18,7 @@ Tabela: hive_queen_primers
   recommended_queries (JSON), depth_modifier FLOAT, primer_quality FLOAT, created_at
 
 Public API:
-    from hive2_queen_primer import QueenPrimer
+    from behive.engine.queen_primer import QueenPrimer
     primer = QueenPrimer(mission_id)
 
     # Po syntezie — zapisz primer

@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-import hive2_db as _hive_db  # PostgreSQL via unified layer
+from behive.engine.db import connect as _db_connect
 
 log = logging.getLogger("hive_intel_summary")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [INTEL] %(message)s")
@@ -301,7 +301,7 @@ def build_intel_summary(trigger_mission: str = "", max_missions: int = 25) -> di
     Build or refresh the cross-mission intelligence summary.
     Returns dict with summary_md, topics, key_findings, etc.
     """
-    con = _hive_db.connect(read_only=False)
+    con = _db_connect(read_only=False)
     _init_db(con)
 
     # Collect data
@@ -403,7 +403,7 @@ def get_latest_summary(con: Any = None) -> Optional[dict]:
     """Get the most recent intel summary from DB."""
     close_after = con is None
     if con is None:
-        con = _hive_db.connect(read_only=True)
+        con = _db_connect(read_only=True)
     try:
         tables = [t[0] for t in con.execute("SHOW TABLES").fetchall()]
         if "hive_intel_summary" not in tables:
@@ -434,7 +434,7 @@ def get_latest_summary(con: Any = None) -> Optional[dict]:
 
 def get_topic_clusters(limit: int = 20) -> list[dict]:
     """Get all topic clusters."""
-    con = _hive_db.connect(read_only=True)
+    con = _db_connect(read_only=True)
     try:
         tables = [t[0] for t in con.execute("SHOW TABLES").fetchall()]
         if "hive_intel_topics" not in tables:

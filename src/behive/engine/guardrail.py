@@ -12,7 +12,7 @@ Architektura — 3 warstwy:
   Layer 3: Entropy / encoding detection — base64, rot13, obfuscation (<1ms)
 
 Użycie:
-  from hive2_guardrail import GuardrailResult, scan_chunk, scan_batch
+  from behive.engine.guardrail import GuardrailResult, scan_chunk, scan_batch
 
   result = scan_chunk(chunk_text, url="https://example.com")
   if result.blocked:

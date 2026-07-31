@@ -44,10 +44,10 @@ def mock_all():
         def connect(self, **kw): return MockConn()
     
     dbh._pg_available = True
-    dbh._hive_db = MockDB()
+    dbh._db_mod = MockDB()
     yield
     dbh._pg_available = None
-    dbh._hive_db = None
+    dbh._db_mod = None
 
 
 # ═══ SYNTH — cover the 945 lines ═══

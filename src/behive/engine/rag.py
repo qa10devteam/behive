@@ -539,7 +539,7 @@ def build_rag_index(mission_id: str, con: Any) -> int:
             # ── P1: INPUT GUARDRAIL ──────────────────────────────────────
             # Filtruj chunki zawierające prompt injection PRZED embeddingiem
             try:
-                from hive2_guardrail import scan_batch
+                from behive.engine.guardrail import scan_batch
                 clean_chunks, blocked = scan_batch(
                     chunks, url_key="url", text_key="chunk_text", fast=False
                 )
@@ -1171,7 +1171,7 @@ def corrective_retrieve(
     if count == 0:
         log.warning("C-RAG: No chunks for mission %s — triggering P2:WEB_FALLBACK", mission_id)
         try:
-            from hive2_rag_extensions import web_search_fallback
+            from behive.engine.rag_extensions import web_search_fallback
             ctx = web_search_fallback(query, max_results=4)
             if ctx:
                 return ctx
@@ -1190,7 +1190,7 @@ def corrective_retrieve(
     # Deterministyczne przepisanie query → warianty → multi-query RRF
     if enable_transform:
         try:
-            from hive2_rag_extensions import rewrite_query_fast, multi_query_rrf
+            from behive.engine.rag_extensions import rewrite_query_fast, multi_query_rrf
             variants = rewrite_query_fast(query)
             if len(variants) > 1:
                 log.info("P4:RRR — %d query variants, multi-query retrieval", len(variants))
@@ -1208,7 +1208,7 @@ def corrective_retrieve(
     if not raw_chunks:
         log.info("C-RAG: No chunks above sim %.2f — triggering P2:WEB_FALLBACK", min_similarity)
         try:
-            from hive2_rag_extensions import web_search_fallback
+            from behive.engine.rag_extensions import web_search_fallback
             ctx = web_search_fallback(query, max_results=4)
             if ctx:
                 return ctx
@@ -1288,7 +1288,7 @@ def corrective_retrieve(
     # ── P3: CROSSENCODER RERANKING ────────────────────────────────────
     # Rerankuj RELEVANT+PARTIAL przed obcięciem do top_k
     try:
-        from hive2_rag_extensions import rerank_chunks
+        from behive.engine.rag_extensions import rerank_chunks
         # Krotki: (id, chunk_text, url, domain, score, grade)
         # rerank_chunks oczekuje (id, chunk_text, ...) — format zgodny
         reranked = rerank_chunks(query, ordered_final, top_k=top_k)
@@ -1312,7 +1312,7 @@ def corrective_retrieve(
         # Lokalny RAG jest pusty → szukamy w internecie
         log.warning("C-RAG: Raw fallback also empty — triggering P2:WEB_FALLBACK")
         try:
-            from hive2_rag_extensions import web_search_fallback
+            from behive.engine.rag_extensions import web_search_fallback
             return web_search_fallback(query, max_results=4)
         except ImportError:
             pass
@@ -2266,7 +2266,7 @@ def cross_mission_retrieve_enhanced(
         # ── P3: CrossEncoder reranking ───────────────────────────────────────
         if enable_rerank:
             try:
-                from hive2_rag_extensions import rerank_text_blocks
+                from behive.engine.rag_extensions import rerank_text_blocks
                 ctx = rerank_text_blocks(query, ctx, top_k=top_k)
                 log.info("Cross-mission P3:RERANK applied")
             except ImportError:
@@ -2277,7 +2277,7 @@ def cross_mission_retrieve_enhanced(
     if enable_web_fallback:
         log.warning("Cross-mission: 0 chunks — triggering P2:WEB_FALLBACK")
         try:
-            from hive2_rag_extensions import web_search_fallback
+            from behive.engine.rag_extensions import web_search_fallback
             return web_search_fallback(query, max_results=4)
         except ImportError:
             pass

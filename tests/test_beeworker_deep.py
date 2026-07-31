@@ -24,10 +24,10 @@ def mock_db():
         DB_BACKEND = "postgres"
         def connect(self, **kw): return MockCon()
     dbh._pg_available = True
-    dbh._hive_db = MDB()
+    dbh._db_mod = MDB()
     yield
     dbh._pg_available = None
-    dbh._hive_db = None
+    dbh._db_mod = None
 
 
 class TestSaveEntitiesDeep:

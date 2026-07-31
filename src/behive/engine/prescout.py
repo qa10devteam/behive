@@ -413,7 +413,7 @@ def route_resource(
     # If domain has high quality history → override LOW tier → MEDIUM
     _rep_boost = 0.0
     try:
-        from hive2_domain_reputation import get_reputation
+        from behive.engine.domain_reputation import get_reputation
         _rep_entry = get_reputation().get(domain)
         if _rep_entry:
             _rep_boost = _rep_entry.get("avg_quality", 0.0)
@@ -1305,7 +1305,7 @@ async def run_prescout_pipeline(
 
     Wywołać z hive2.py cmd_run() MIĘDZY scout a harvest:
 
-        from hive2_prescout import run_prescout_pipeline
+        from behive.engine.prescout import run_prescout_pipeline
         routing_map = asyncio.run(run_prescout_pipeline(mission_id))
         # routing_map: [{url, routing_final, extraction_method, priority, ...}]
 
@@ -1339,7 +1339,7 @@ async def run_prescout_pipeline(
     # If too few harvestable URLs → generate expansion queries instead
     # send drones on unproductive harvest.
     try:
-        from hive2_bionic_quorum import QuorumChecker
+        from behive.engine.bionic_quorum import QuorumChecker
         _qc = QuorumChecker(mission_id)
         _qr = _qc.check()
         log.warning(f"  🐝 Quorum: {_qr.harvestable_count}/{_qr.total_sources} harvestable "

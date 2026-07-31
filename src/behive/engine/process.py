@@ -49,8 +49,8 @@ except ImportError:
 
 # PostgreSQL backend (preferred — no lock issues)
 try:
-    import hive2_db
-    _pg_available = (hive2_db.DB_BACKEND == "postgres")
+    from behive.engine.db import connect as _db_connect
+    _pg_available = True  # PostgreSQL is the only backend
 except ImportError:
     _pg_available = False
 
@@ -61,28 +61,28 @@ _boto3_available = False  # kept for backward compat checks
 # HIVE 2.0 Operations Registry
 # ---------------------------------------------------------------------------
 try:
-    from hive2_ops import (
+    from behive.engine.ops import (
         BeeOperation,
         Tier,
         Specialty,
         get_operation,
         get_tier_ops,
     )
-    from hive2_ops.tier1_recon import TIER1_OPERATIONS
-    from hive2_ops.tier2_harvest import TIER2_OPERATIONS
-    from hive2_ops.tier3_analysis import TIER3_OPERATIONS
-    from hive2_ops.tier4_validation import TIER4_OPERATIONS
-    from hive2_ops.tier5_synthesis import TIER5_OPERATIONS
-    from hive2_ops.tier6_warriors import TIER6_OPERATIONS
-    from hive2_ops.tier7_queen import TIER7_OPERATIONS
+    from behive.engine.ops.tier1_recon import TIER1_OPERATIONS
+    from behive.engine.ops.tier2_harvest import TIER2_OPERATIONS
+    from behive.engine.ops.tier3_analysis import TIER3_OPERATIONS
+    from behive.engine.ops.tier4_validation import TIER4_OPERATIONS
+    from behive.engine.ops.tier5_synthesis import TIER5_OPERATIONS
+    from behive.engine.ops.tier6_warriors import TIER6_OPERATIONS
+    from behive.engine.ops.tier7_queen import TIER7_OPERATIONS
     # HIVE 3.0 — Biomimetic Intelligence Tiers
-    from hive2_ops.tier8_neural import TIER8_OPERATIONS
-    from hive2_ops.tier9_immune import TIER9_OPERATIONS
-    from hive2_ops.tier10_mycelium import TIER10_OPERATIONS
-    from hive2_ops.tier11_evolution import TIER11_OPERATIONS
-    from hive2_ops.tier12_quantum import TIER12_OPERATIONS
-    from hive2_ops.tier13_stigmergy import TIER13_OPERATIONS
-    from hive2_ops.tier14_resonance import TIER14_OPERATIONS
+    from behive.engine.ops.tier8_neural import TIER8_OPERATIONS
+    from behive.engine.ops.tier9_immune import TIER9_OPERATIONS
+    from behive.engine.ops.tier10_mycelium import TIER10_OPERATIONS
+    from behive.engine.ops.tier11_evolution import TIER11_OPERATIONS
+    from behive.engine.ops.tier12_quantum import TIER12_OPERATIONS
+    from behive.engine.ops.tier13_stigmergy import TIER13_OPERATIONS
+    from behive.engine.ops.tier14_resonance import TIER14_OPERATIONS
     _ops_available = True
     ALL_OPERATIONS: list[BeeOperation] = (
         TIER1_OPERATIONS + TIER2_OPERATIONS + TIER3_OPERATIONS +
@@ -140,7 +140,7 @@ def _db_connect_retry(path: str = DB_PATH, read_only: bool = False, max_retries:
     import time as _t
     for attempt in range(max_retries):
         try:
-            con = _hive_db.connect(read_only=read_only)
+            con = _db_connect(read_only=read_only)
             return con
         except Exception as e:
             if 'IO Error' in str(e) or 'lock' in str(e).lower() or 'busy' in str(e).lower():
@@ -149,7 +149,7 @@ def _db_connect_retry(path: str = DB_PATH, read_only: bool = False, max_retries:
                 _t.sleep(wait)
             else:
                 raise
-    return _hive_db.connect(read_only=read_only)
+    return _db_connect(read_only=read_only)
 
 
 # LLM model selection — resolved at runtime via llm.py BYOK layer
@@ -1874,7 +1874,7 @@ class ProcessingDrones:
                     _last_pct = _cur_pct
                     # Emit progress event for SSE
                     try:
-                        from hive2_events import emit_event
+                        from behive.engine.events import emit_event
                         emit_event(None, mission_id, 'process', 'progress', data={
                             'pct': _cur_pct,
                             'docs_done': _docs_done,
@@ -1998,7 +1998,7 @@ class ProcessingDrones:
                 log.info(f"  Extractor stats: {extractor.stats}")
                 # Emit V4 extraction event for SSE
                 try:
-                    from hive2_events import emit_event
+                    from behive.engine.events import emit_event
                     emit_event(None, mission_id, 'process', 'v4_extraction', data={
                         'claims': v4_claims,
                         'model': 'bedrock-haiku+sonnet',

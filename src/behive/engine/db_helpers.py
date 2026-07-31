@@ -13,33 +13,28 @@ log = logging.getLogger(__name__)
 
 # Module-level state
 _pg_available: bool | None = None
-_hive_db = None
+_db_mod = None
 
 
 def _ensure_pg() -> bool:
     """Lazy PostgreSQL availability check."""
-    global _pg_available, _hive_db
+    global _pg_available, _db_mod
     if _pg_available is not None:
         return _pg_available
     try:
-        import hive2_db
-        _hive_db = hive2_db
-        _pg_available = (hive2_db.DB_BACKEND == "postgres")
+        from behive.engine import db as _db_module
+        _db_mod = _db_module
+        _pg_available = True  # PostgreSQL is the only backend
     except Exception:
-        try:
-            from behive.engine import db as _db_mod
-            _hive_db = _db_mod
-            _pg_available = (_db_mod.DB_BACKEND == "postgres")
-        except Exception:
-            _pg_available = False
+        _pg_available = False
     return _pg_available
 
 
 def _connect_db(read_only: bool = False):
     """Connect to the active database backend (PostgreSQL only)."""
     _ensure_pg()
-    if _pg_available and _hive_db:
-        return _hive_db.connect(read_only=read_only)
+    if _pg_available and _db_mod:
+        return _db_mod.connect(read_only=read_only)
     raise RuntimeError(
         "PostgreSQL not available. Ensure PostgreSQL is running and configured.\n"
         "Set: HIVE_PG_HOST, HIVE_PG_PORT, HIVE_PG_USER, HIVE_PG_PASSWORD, HIVE_PG_DATABASE\n"
