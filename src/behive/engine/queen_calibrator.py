@@ -1,7 +1,7 @@
 """
 QueenCalibrator — HIVE Auto-Calibration Module
 ================================================
-Analyzes historical HIVE mission data (DuckDB) i generuje wektory
+Analyzes historical HIVE mission data (PostgreSQL) i generuje wektory
 kalibracyjne dla Queen: które źródła, wzorce i strategie działają
 najlepiej per topic_domain.
 
@@ -162,7 +162,7 @@ class QueenCalibrator:
     def __init__(self, db_path: str | Path = DB_PATH):
         self.db_path = Path(db_path)
         if not self.db_path.exists():
-            raise FileNotFoundError(f"HIVE DuckDB nie znaleziono: {self.db_path}")
+            raise FileNotFoundError(f"HIVE PostgreSQL nie znaleziono: {self.db_path}")
         log.info("QueenCalibrator init — DB: %s", self.db_path)
 
     # ------------------------------------------------------------------

@@ -7,7 +7,7 @@ HIVE 2.0 — hive2_process.py
 BPMN Operations Pipeline: Routes documents through the intelligence operations registry.
 
 Architecture:
-  Document → RelevanceFilter → OperationRouter → BeeWorker(s) → DuckDB
+  Document → RelevanceFilter → OperationRouter → BeeWorker(s) → PostgreSQL
 
 Usage:
   python3 hive2_process.py <mission_id> [--relevance-threshold 0.4] [--max-ops 10] [--debug]
@@ -43,9 +43,9 @@ from urllib.parse import urlparse
 # Required dependencies
 # ---------------------------------------------------------------------------
 try:
-    pass  # duckdb removed — PostgreSQL is primary
+    pass  # pg removed — PostgreSQL is primary
 except ImportError:
-    duckdb = None  # Not fatal — Postgres is primary
+    pg = None  # Not fatal — Postgres is primary
 
 # PostgreSQL backend (preferred — no lock issues)
 try:
@@ -149,7 +149,7 @@ def _db_connect_retry(path: str = DB_PATH, read_only: bool = False, max_retries:
         except Exception as e:
             if 'IO Error' in str(e) or 'lock' in str(e).lower() or 'busy' in str(e).lower():
                 wait = 2 ** attempt * 2
-                log.warning(f"DuckDB connect retry {attempt+1}/{max_retries}: {e}, waiting {wait}s")
+                log.warning(f"PostgreSQL connect retry {attempt+1}/{max_retries}: {e}, waiting {wait}s")
                 _t.sleep(wait)
             else:
                 raise
@@ -2266,7 +2266,7 @@ class ProcessingDrones:
         log.debug("=" * 65)
         log.debug(f"  Documents input     : {docs_input}")
         log.debug(f"  Docs filtered out   : {filtered}  (relevance < {self.relevance_threshold})")
-        # Explicitly close DuckDB to release write lock before exit
+        # Explicitly close PostgreSQL to release write lock before exit
         try:
             self.con.close()
         except Exception as e:

@@ -93,10 +93,10 @@ def _extract_domain(url: str) -> str:
         return url[:100]
 
 
-def _duckdb_connect(read_only: bool = False):
+def _pg_connect(read_only: bool = False):
     """Connect via hive2_db (PostgreSQL)."""
-    import hive2_db as _hive_db
-    return _hive_db.connect(read_only=read_only)
+    from behive.engine.db import connect as _db_connect
+    return _db_connect(read_only=read_only)
 
 
 class DomainReputation:
@@ -112,7 +112,7 @@ class DomainReputation:
 
     def _ensure_schema(self):
         try:
-            con = _duckdb_connect()
+            con = _pg_connect()
             con.execute(_SCHEMA_SQL)
             con.close()
         except Exception as e:
@@ -123,7 +123,7 @@ class DomainReputation:
         if domain in self._cache:
             return self._cache[domain]
         try:
-            con = _duckdb_connect(read_only=True)
+            con = _pg_connect(read_only=True)
             row = con.execute("""
                 SELECT domain, avg_quality, harvest_count, success_count,
                        last_harvest_at, last_bad_at, consecutive_bad,
@@ -312,7 +312,7 @@ class DomainReputation:
             })
 
         try:
-            con = _duckdb_connect()
+            con = _pg_connect()
             con.execute("BEGIN")
             for r in records:
                 con.execute("""
@@ -357,7 +357,7 @@ class DomainReputation:
     def report(self) -> str:
         """Drukuje raport reputacji — top bad + top good domains."""
         try:
-            con = _duckdb_connect(read_only=True)
+            con = _pg_connect(read_only=True)
             total = con.execute("SELECT COUNT(*) FROM hive_domain_reputation").fetchone()[0]
             blacklisted = con.execute(
                 "SELECT COUNT(*) FROM hive_domain_reputation WHERE blacklisted=TRUE"
@@ -443,7 +443,7 @@ if __name__ == "__main__":
             idx = sys.argv.index("--blacklist")
             domain = sys.argv[idx + 1]
             reason = sys.argv[idx + 2] if len(sys.argv) > idx + 2 else "manual"
-            con = _duckdb_connect()
+            con = _pg_connect()
             con.execute(_SCHEMA_SQL)
             con.execute("""
                 INSERT INTO hive_domain_reputation

@@ -542,7 +542,7 @@ def master_intelligence_process(
     2. Enriches with mission metadata
     3. Applies confidence calibration
     4. Formats final decision-grade intelligence report
-    5. Saves assessment to DuckDB
+    5. Saves assessment to PostgreSQL
     """
     qa = queen_output.get("queen_assessment", {})
     must_know = queen_output.get("must_know_insight", "")
@@ -569,7 +569,7 @@ def master_intelligence_process(
     data_richness = min(1.0, (bee_count / 50) * 0.5 + (rag_count / 200) * 0.5)
     calibrated_confidence = confidence_val * data_richness if confidence_val > 0 else 0.0
 
-    # Save to DuckDB — main con is now write (opened after parent releases lock)
+    # Save to PostgreSQL — main con is now write (opened after parent releases lock)
     try:
         con.execute("""
             CREATE TABLE IF NOT EXISTS hive_queen_assessments (
@@ -704,7 +704,7 @@ def master_intelligence_process(
     lines += [
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         f"*HIVE 3.0 Yaotl-Hausdorff Intelligence Swarm | Mission {mission_id}*",
-        f"*Assessment saved to DuckDB hive_queen_assessments*",
+        f"*Assessment saved to PostgreSQL hive_queen_assessments*",
     ]
 
     # ─── Post-Mission Evolution ─────────────────────────────────────────────────
@@ -733,9 +733,9 @@ def main():
     parser.add_argument("--top-k", type=int, default=15, help="RAG retrieval top-k chunks")
     args = parser.parse_args()
 
-    # Retry loop — parent hive2.py może nadal trzymać DuckDB lock przez ~1-2s
+    # Retry loop — parent hive2.py może nadal trzymać PostgreSQL lock przez ~1-2s
     # po setsid detach. Retry z backoff.
-    # DuckDB może też reportować stale PID (poprzedni crash) — ignorujemy PID,
+    # PostgreSQL może też reportować stale PID (poprzedni crash) — ignorujemy PID,
     # sprawdzamy czy proces faktycznie żyje przez os.kill(pid, 0).
     import time as _time, os as _os, re as _re_lock
     for _attempt in range(12):
@@ -752,7 +752,7 @@ def main():
                     _os.kill(_locker_pid, 0)  # process alive?
                     print(f"[master_intel] DB locked by PID {_locker_pid} (alive), retry {_attempt+1}/12 in 5s")
                 except ProcessLookupError:
-                    # Stale PID — force-remove DuckDB WAL lock file if exists
+                    # Stale PID — force-remove PostgreSQL WAL lock file if exists
                     _wal_path = DB_PATH + ".wal"
                     _lock_path = DB_PATH + ".lock"
                     for _lf in [_wal_path, _lock_path]:

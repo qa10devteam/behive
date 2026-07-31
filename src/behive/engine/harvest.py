@@ -24,7 +24,7 @@ from urllib.parse import urlparse
 # This keeps module-level import time < 0.05 s.
 #
 # Lazily loaded:
-#   duckdb, requests, fitz (pymupdf),
+#   pg, requests, fitz (pymupdf),
 #   curl_cffi, httpx, newspaper, trafilatura, langdetect, markitdown, crawl4ai
 # ---------------------------------------------------------------------------
 

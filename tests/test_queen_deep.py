@@ -70,7 +70,7 @@ class TestQueenClass:
         q = Queen("test-queen-deep")
         q._pg_available = True
         q._hive_db = MockQueenDB()
-        q.duckdb = None
+        # duckdb attribute removed — using PostgreSQL
         return q
 
     def test_queen_init(self):

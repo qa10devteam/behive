@@ -212,7 +212,7 @@ if __name__ == "__main__":
             print("Usage: python3 hive2_content_quality.py --audit-mission <mission_id>")
             sys.exit(1)
 
-        # duckdb removed — using hive2_db
+        # pg removed — using hive2_db
         con = _hive_db.connect(read_only=True)
         rows = con.execute("""
             SELECT id, url, full_text, word_count

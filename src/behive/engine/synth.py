@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 HIVE 2.0 — hive2_synth.py  (QUEEN 3.0 — Multi-Layer Intelligence Synthesis)
-The QUEEN: reads structured honey from DuckDB, produces final intelligence brief
+The QUEEN: reads structured honey from PostgreSQL, produces final intelligence brief
 via a 4-pass epistemological analysis pipeline.
 
 Architecture:
@@ -163,9 +163,9 @@ class Queen:
     """Queen synthesizer — multi-pass evidence hierarchy, narrative generation, and PDF output."""
     def __init__(self, mission_id: str):
         self.mission_id = mission_id
-        self._import_duckdb()
+        self._import_pg()
 
-    def _import_duckdb(self):
+    def _import_pg(self):
         # PostgreSQL backend (preferred — always available)
         try:
             import hive2_db
@@ -174,13 +174,13 @@ class Queen:
         except ImportError:
             self._pg_available = False
         try:
-            pass  # duckdb removed
-            self.duckdb = None
+            pass  # pg removed
+            self.pg = None
         except Exception as e:
             log.debug(f"Suppressed in synth.py: {e}")
-            self.duckdb = None  # Not fatal — PostgreSQL is primary
+            self.pg = None  # Not fatal — PostgreSQL is primary
 
-    # ── DuckDB connection helper ──────────────────────────────────────────────
+    # ── PostgreSQL connection helper ──────────────────────────────────────────────
 
     def _connect_ro(self):
         """Return a read-only connection (PostgreSQL)."""
@@ -193,7 +193,7 @@ class Queen:
     # ── Data loading ─────────────────────────────────────────────────────────
 
     def _load_honey(self) -> dict:
-        """Load all structured honey from DuckDB for this mission."""
+        """Load all structured honey from PostgreSQL for this mission."""
         con = self._connect_ro()
         mid = self.mission_id
 
@@ -1571,11 +1571,11 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
             "pdf": str(pdf_path) if pdf_path else None,
         }
 
-    # ── DuckDB persistence ────────────────────────────────────────────────────
+    # ── PostgreSQL persistence ────────────────────────────────────────────────────
 
     def _persist_to_db(self, synthesis: dict, honey: dict, report_text: str = ""):
         """
-        Persist Queen outputs to DuckDB:
+        Persist Queen outputs to PostgreSQL:
           1. hive_queen_assessments  — FUIR + confidence + brief
           2. hive3_mission_memory    — key_findings from synthesis
           3. hive3_calibration_log   — PRED entries as verifiable predictions
@@ -1842,10 +1842,10 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
         # Save report
         paths = self.save_report(report, self.mission_id, topic)
 
-        # Persist to DuckDB
+        # Persist to PostgreSQL
         _t_persist = time.time()
         self._persist_to_db(synthesis, honey, report_text=report)
-        log.info(f"[QUEEN] Persistence DuckDB: {time.time() - _t_persist:.1f}s")
+        log.info(f"[QUEEN] Persistence PostgreSQL: {time.time() - _t_persist:.1f}s")
 
         # Mark done (passes report text so synthesis column gets populated)
         self._mark_done(report_text=report, synthesis=synthesis)

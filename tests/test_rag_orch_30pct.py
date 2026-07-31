@@ -364,7 +364,7 @@ class TestQualityDeep:
                 pass
 
     def test_score_content_detailed_branches(self):
-        from behive.engine.quality import score_content_detailed
+        from behive.engine.content_quality import score_content_detailed
         # Very short text
         r1 = score_content_detailed("Hi")
         assert r1["score"] <= 0.3

@@ -26,7 +26,7 @@ from datetime import datetime
 from urllib.parse import urlparse, quote_plus
 from typing import Optional
 
-import hive2_db as _hive_db
+from behive.engine.db import connect as _db_connect
 import feedparser
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -36,9 +36,9 @@ import feedparser
 DB_PATH = ""  # Legacy — PostgreSQL is primary
 
 
-def _duckdb_connect_retry(path: str = DB_PATH, read_only: bool = False, max_retries: int = 5):
+def _pg_connect_retry(path: str = DB_PATH, read_only: bool = False, max_retries: int = 5):
     """Connect via hive2_db (PostgreSQL)."""
-    return _hive_db.connect(read_only=read_only)
+    return _db_connect(read_only=read_only)
 
 AUTHORITY_DOMAINS: dict[str, int] = {
     "statista.com":     15,
@@ -95,7 +95,7 @@ class SwarmScout:
     def __init__(self, mission_id: str, topic: str = ""):
         self.mission_id = mission_id
         self.topic = topic
-        self.db = _duckdb_connect_retry(DB_PATH)
+        self.db = _pg_connect_retry(DB_PATH)
         # Semaphores — maximised for swarm multiplication
         self._ddg_sem   = asyncio.Semaphore(32)   # 32 parallel DDG calls
         self._http_sem  = asyncio.Semaphore(24)   # 24 parallel HTTP fetches

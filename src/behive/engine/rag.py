@@ -1,10 +1,10 @@
 """
 HIVE 2.0 RAG Knowledge Base Engine
 ====================================
-Embedding pipeline + DuckDB VSS vector store for Queen query retrieval.
+Embedding pipeline + PostgreSQL VSS vector store for Queen query retrieval.
 
 Architecture:
-  Build : hive_content docs → chunk(500 words, 50 overlap) → Titan embed-text-v2 → DuckDB hive_rag_chunks
+  Build : hive_content docs → chunk(500 words, 50 overlap) → Titan embed-text-v2 → PostgreSQL hive_rag_chunks
   Query : queen_query → embed → cosine_similarity HNSW search → top-k chunks → formatted context string
 
 Corrective RAG (C-RAG) extension — hive2_rag v2.1
@@ -44,7 +44,7 @@ import hive2_db as _hive_db  # PostgreSQL via unified layer
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-DUCKDB_PATH = ""  # Legacy DuckDB removed — PostgreSQL is primary
+DUCKDB_PATH = ""  # Legacy PostgreSQL removed — PostgreSQL is primary
 BEDROCK_REGION = "eu-central-1"
 EMBED_MODEL_ID = "amazon.titan-embed-text-v2:0"
 EMBED_DIMS = 512
@@ -70,8 +70,8 @@ logging.basicConfig(
 log = logging.getLogger("hive2_rag")
 
 # ---------------------------------------------------------------------------
-# Qdrant Vector Store — primary backend (replaces DuckDB VSS)
-# DuckDB hive_rag_chunks kept as legacy / fallback read source.
+# Qdrant Vector Store — primary backend (replaces PostgreSQL VSS)
+# PostgreSQL hive_rag_chunks kept as legacy / fallback read source.
 # ---------------------------------------------------------------------------
 QDRANT_HOST       = "localhost"
 QDRANT_PORT       = 6333
@@ -106,7 +106,7 @@ def _get_qdrant():
             log.info("Qdrant collection '%s' created (512-dim Cosine)", QDRANT_COLLECTION)
         return _qdrant_client
     except Exception as e:
-        log.warning("Qdrant unavailable (%s) — falling back to DuckDB VSS", e)
+        log.warning("Qdrant unavailable (%s) — falling back to PostgreSQL VSS", e)
         _qdrant_ok = False
         return None
 
@@ -441,9 +441,9 @@ def ensure_schema(con: Any) -> None:
     except Exception:
         pass  # kolumna już istnieje
 
-    # HNSW index - create only once; DuckDB VSS doesn't support IF NOT EXISTS on index
+    # HNSW index - create only once; PostgreSQL VSS doesn't support IF NOT EXISTS on index
     existing_indexes = con.execute(
-        "SELECT index_name FROM duckdb_indexes() WHERE table_name='hive_rag_chunks'"
+        "SELECT index_name FROM pg_indexes() WHERE table_name='hive_rag_chunks'"
     ).fetchall()
     if not any("hive_rag_hnsw" in str(r) for r in existing_indexes):
         try:
@@ -610,17 +610,17 @@ def build_rag_index(mission_id: str, con: Any) -> int:
 
 def _upsert_chunks(con: Any, chunks: List[dict]) -> None:
     """
-    Insert chunks into Qdrant (primary) + DuckDB hive_rag_chunks (legacy/fallback).
+    Insert chunks into Qdrant (primary) + PostgreSQL hive_rag_chunks (legacy/fallback).
 
     Qdrant write is async (wait=False) — no write lock.
-    DuckDB write is best-effort — errors are logged but not raised.
+    PostgreSQL write is best-effort — errors are logged but not raised.
     """
     # ── PRIMARY: Qdrant (no write lock, concurrent-safe) ─────────────────
     q_inserted = _qdrant_upsert(chunks)
     if q_inserted > 0:
         log.debug("Qdrant: upserted %d chunks", q_inserted)
 
-    # ── FALLBACK: DuckDB (kept for legacy retrieve / hybrid BM25 search) ─
+    # ── FALLBACK: PostgreSQL (kept for legacy retrieve / hybrid BM25 search) ─
     try:
         con.executemany(
             """
@@ -647,7 +647,7 @@ def _upsert_chunks(con: Any, chunks: List[dict]) -> None:
             ],
         )
     except Exception as exc:
-        log.warning("DuckDB hive_rag_chunks insert failed (non-critical): %s", exc)
+        log.warning("PostgreSQL hive_rag_chunks insert failed (non-critical): %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -665,7 +665,7 @@ def retrieve(
     Embed *query*, search for top_k chunks, return formatted context string.
 
     Primary: Qdrant (no lock, concurrent-safe).
-    Fallback: DuckDB VSS cosine_similarity (original path).
+    Fallback: PostgreSQL VSS cosine_similarity (original path).
     """
     ensure_schema(con)
     query_emb = embed_text(query)
@@ -680,13 +680,13 @@ def retrieve(
         log.info("Qdrant retrieve: %d chunks (mission=%s)", len(qdrant_hits), mission_id)
         return "\n\n".join(parts)
 
-    # ── FALLBACK: DuckDB VSS ──────────────────────────────────────────────
-    log.info("Qdrant returned 0 results — trying DuckDB VSS fallback")
+    # ── FALLBACK: PostgreSQL VSS ──────────────────────────────────────────────
+    log.info("Qdrant returned 0 results — trying PostgreSQL VSS fallback")
     count = con.execute(
         "SELECT COUNT(*) FROM hive_rag_chunks WHERE mission_id=?", [mission_id]
     ).fetchone()[0]
     if count == 0:
-        log.warning("No chunks found for mission %s in DuckDB either — run build first.", mission_id)
+        log.warning("No chunks found for mission %s in PostgreSQL either — run build first.", mission_id)
         return ""
 
     rows = con.execute(
@@ -736,11 +736,11 @@ HYBRID_BM25_B      = 0.75    # BM25 document length normalization
 def _ensure_fts_index(con: Any, mission_id: str) -> bool:
     """
     Tworzy FTS index na hive_rag_chunks dla danej misji (jeśli nie istnieje).
-    Używa DuckDB FTS extension z BM25 scoring.
+    Używa PostgreSQL FTS extension z BM25 scoring.
 
     Returns True jeśli index istnieje/stworzony, False przy błędzie.
 
-    UWAGA: DuckDB FTS 1.5.x wymaga minimum 2 tokenów w query do match_bm25.
+    UWAGA: PostgreSQL FTS 1.5.x wymaga minimum 2 tokenów w query do match_bm25.
     Dla single-word queries używamy fallback: query duplikowany ('word word').
     """
     try:
@@ -768,7 +768,7 @@ def _bm25_search(
     Szuka chunków przez BM25 full-text search.
     Zwraca listę (chunk_id, bm25_score) posortowaną malejąco.
 
-    DuckDB FTS caveats:
+    PostgreSQL FTS caveats:
     - match_bm25 wymaga 2+ tokenów w query → single-word queries duplikujemy
     - match_bm25 operuje na CAŁEJ tabeli hive_rag_chunks (brak filtrowania po mission_id)
       → wyniki filtrowane post-hoc po mission_id
@@ -779,7 +779,7 @@ def _bm25_search(
     # Normalizuj query — usuń nadmiarowe spacje, lower
     q = " ".join(query.lower().split())
 
-    # DuckDB FTS wymaga 2+ tokenów — duplikuj single-word queries
+    # PostgreSQL FTS wymaga 2+ tokenów — duplikuj single-word queries
     tokens = q.split()
     if len(tokens) == 1:
         q = f"{q} {q}"
@@ -1158,7 +1158,7 @@ def corrective_retrieve(
     ---------
     query            : zapytanie (może być po polsku — tłumaczone wewnętrznie)
     mission_id       : ID misji HIVE
-    con              : połączenie DuckDB
+    con              : połączenie PostgreSQL
     top_k            : ile chunków pobrać w pierwszym kroku
     min_similarity   : próg cosine (niższy niż w retrieve() — gradujemy zamiast twardego progu)
     enable_grading   : wyłącz ocenianie (fallback do zwykłego retrieve())
@@ -1556,7 +1556,7 @@ def verify_citations(
     ----------
     mission_id        : ID misji
     rag_context       : wynik cross_mission_retrieve (stringowy blok)
-    con               : DuckDB connection (write dla update)
+    con               : PostgreSQL connection (write dla update)
     update_hive_claims : jeśli True, doda kolumnę rag_verified do hive_claims
 
     Returns
@@ -1749,7 +1749,7 @@ def evaluate_rag(
     query             : zapytanie Queen
     rag_context       : wynik cross_mission_retrieve / hybrid_retrieve
     mission_id        : ID misji
-    con               : połączenie DuckDB (write)
+    con               : połączenie PostgreSQL (write)
     top_k_requested   : ile chunków było żądanych
     synthesis_text    : opcjonalnie tekst syntezy Queen (dla context_precision)
     retrieval_latency_ms : czas retrieve w ms

@@ -8,7 +8,7 @@ hive2_events.py — HIVE 2.0 Event Bus & SSE Streaming Infrastructure
 
 log = logging.getLogger(__name__)
 Provides:
-  - hive_events DuckDB table DDL + management
+  - hive_events PostgreSQL table DDL + management
   - emit_event()       — write a structured event to the DB
   - get_events()       — query events for a mission (since_id pagination)
   - get_latest_quality() — fetch last quality_metrics for a mission
@@ -57,7 +57,7 @@ ALTER TABLE hive_missions ADD COLUMN IF NOT EXISTS quality_confidence FLOAT DEFA
 # ---------------------------------------------------------------------------
 
 def _connect(db_path: str = DB_PATH):
-    """Return a duckdb connection (read-write)."""
+    """Return a pg connection (read-write)."""
     _hive_db = __import__("hive2_db")
     return _hive_db.connect(read_only=False)
 
@@ -68,7 +68,7 @@ def ensure_events_table(db_path: str = DB_PATH) -> None:
     """
     con = _connect(db_path)
     try:
-        # Create sequence first (must be separate from table DDL in DuckDB)
+        # Create sequence first (must be separate from table DDL in PostgreSQL)
         con.execute("CREATE SEQUENCE IF NOT EXISTS hive_events_seq START 1")
         con.execute("""
             CREATE TABLE IF NOT EXISTS hive_events (
@@ -361,7 +361,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='hive2_events self-test')
     parser.add_argument('--test', action='store_true', help='Run self-test')
-    parser.add_argument('--db', default=DB_PATH, help='DuckDB path')
+    parser.add_argument('--db', default=DB_PATH, help='PostgreSQL path')
     args = parser.parse_args()
 
     if not args.test:

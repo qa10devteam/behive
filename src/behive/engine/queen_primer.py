@@ -117,10 +117,10 @@ def _keyword_overlap(kw1: List[str], kw2: List[str]) -> float:
     return len(intersection) / len(union)
 
 
-def _duckdb_connect(read_only: bool = False):
+def _pg_connect(read_only: bool = False):
     """Connect via hive2_db (PostgreSQL)."""
-    import hive2_db as _hive_db
-    return _hive_db.connect(read_only=read_only)
+    from behive.engine.db import connect as _db_connect
+    return _db_connect(read_only=read_only)
 
 
 class QueenPrimer:
@@ -134,7 +134,7 @@ class QueenPrimer:
 
     def _ensure_schema(self):
         try:
-            con = _duckdb_connect()
+            con = _pg_connect()
             con.execute(_SCHEMA_SQL)
             con.close()
         except Exception as e:
@@ -161,7 +161,7 @@ class QueenPrimer:
             keywords            = _extract_keywords(topic)
             depth_mod           = self._compute_depth_modifier(quality_score)
 
-            con = _duckdb_connect()
+            con = _pg_connect()
             con.execute(_SCHEMA_SQL)
             con.execute("""
                 INSERT INTO hive_queen_primers
@@ -190,7 +190,7 @@ class QueenPrimer:
 
     def _get_top_domains(self, limit: int = 15) -> List[str]:
         try:
-            con = _duckdb_connect(read_only=True)
+            con = _pg_connect(read_only=True)
             rows = con.execute("""
                 SELECT domain,
                        COUNT(*) as cnt,
@@ -223,7 +223,7 @@ class QueenPrimer:
 
     def _get_gap_queries(self, limit: int = 8) -> List[str]:
         try:
-            con = _duckdb_connect(read_only=True)
+            con = _pg_connect(read_only=True)
             rows = con.execute("""
                 SELECT gap_query
                 FROM hive_gaps
@@ -240,7 +240,7 @@ class QueenPrimer:
 
     def _get_key_entities(self, limit: int = 20) -> List[str]:
         try:
-            con = _duckdb_connect(read_only=True)
+            con = _pg_connect(read_only=True)
             rows = con.execute("""
                 SELECT value, COUNT(*) as cnt
                 FROM hive_entities
@@ -284,7 +284,7 @@ class QueenPrimer:
             if not new_kw:
                 return None
 
-            con = _duckdb_connect(read_only=True)
+            con = _pg_connect(read_only=True)
             rows = con.execute("""
                 SELECT mission_id, topic, topic_keywords, top_domains,
                        recommended_queries, key_entities, depth_modifier,
@@ -335,11 +335,11 @@ class QueenPrimer:
 # CLI
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import sys, duckdb
+    import sys
 
     if "--list" in sys.argv or len(sys.argv) == 1:
         try:
-            con = _duckdb_connect(read_only=True)
+            con = _pg_connect(read_only=True)
             rows = con.execute("""
                 SELECT mission_id, topic, primer_quality, depth_modifier,
                        JSON_ARRAY_LENGTH(top_domains),

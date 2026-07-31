@@ -746,7 +746,7 @@ class DroneRecon:
 
         return self._results
 
-    # ── Save to DuckDB ────────────────────────────────────────────────────────
+    # ── Save to PostgreSQL ────────────────────────────────────────────────────────
 
     def save_to_db(self) -> None:
         """Persist recon results to database."""

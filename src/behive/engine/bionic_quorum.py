@@ -86,10 +86,10 @@ class QuorumResult:
         )
 
 
-def _duckdb_connect(read_only: bool = False):
-    """Connect via hive2_db (PostgreSQL)."""
-    import hive2_db as _hive_db
-    return _hive_db.connect(read_only=read_only)
+def _pg_connect(read_only: bool = False):
+    """Connect to PostgreSQL (via connection pool)."""
+    from behive.engine.db import connect
+    return connect(read_only=read_only)
 
 
 def _extract_keywords(topic: str) -> List[str]:
@@ -113,7 +113,7 @@ class QuorumChecker:
 
     def _load_topic(self) -> str:
         try:
-            con = _duckdb_connect(read_only=True)
+            con = _pg_connect(read_only=True)
             row = con.execute(
                 "SELECT topic FROM hive_missions WHERE id=?", [self.mission_id]
             ).fetchone()
@@ -126,7 +126,7 @@ class QuorumChecker:
     def _load_expansion_count(self) -> int:
         """Jak wiele range expansions już zrobiliśmy dla tej misji."""
         try:
-            con = _duckdb_connect(read_only=True)
+            con = _pg_connect(read_only=True)
             row = con.execute("""
                 SELECT COUNT(*) FROM hive_quorum_expansions
                 WHERE mission_id = ?
@@ -140,7 +140,7 @@ class QuorumChecker:
     def check(self) -> QuorumResult:
         """Main check — returns QuorumResult with decision and optional expansion queries."""
         try:
-            con = _duckdb_connect(read_only=True)
+            con = _pg_connect(read_only=True)
             total = con.execute(
                 "SELECT COUNT(*) FROM hive_sources WHERE mission_id=?",
                 [self.mission_id]
@@ -268,7 +268,7 @@ Return ONLY a JSON array of {EXPANSION_QUERIES} strings:
     def _record_expansion(self, harvestable: int):
         """Zapisuje fakt ekspansji do DB (żeby nie loopować w nieskończoność)."""
         try:
-            con = _duckdb_connect()
+            con = _pg_connect()
             con.execute("""
                 CREATE TABLE IF NOT EXISTS hive_quorum_expansions (
                     id          VARCHAR DEFAULT gen_random_uuid()::VARCHAR PRIMARY KEY,

@@ -3,7 +3,7 @@
 HIVE2 Graph Engine — State-of-Art Intelligence Knowledge Graph
 ==============================================================
 Pipeline:
-  DuckDB → [incremental delta] → Entity Resolution (HDBSCAN+ANN)
+  PostgreSQL → [incremental delta] → Entity Resolution (HDBSCAN+ANN)
   → NetworkX DiGraph → HDBSCAN Claim Clustering (C0 coarse + C1 fine)
   → Qdrant Semantic Index (100% claims ≥0.65) → GraphRAG Hierarchical Search
 
@@ -36,7 +36,7 @@ log = logging.getLogger("hive_graph_engine")
 logging.basicConfig(level=logging.INFO, stream=sys.stderr,
                     format="%(asctime)s [GRAPH] %(levelname)s %(message)s")
 
-DB_PATH = ""  # Legacy DuckDB removed — PostgreSQL is primary
+DB_PATH = ""  # Legacy PostgreSQL removed — PostgreSQL is primary
 GRAPH_DIR  = Path(os.environ.get("HIVE_GRAPH_DIR", os.path.expanduser("~/hive-intelligence-graph")))
 GRAPH_FILE       = GRAPH_DIR / "graph.json"
 COMMUNITIES_FILE = GRAPH_DIR / "communities.json"   # C1 fine clusters
@@ -135,7 +135,7 @@ def _ensure_collection(recreate: bool = False) -> bool:
         log.info("Created Qdrant collection '%s'", COLLECTION)
     return True
 
-# ── DuckDB ────────────────────────────────────────────────────────────────────
+# ── PostgreSQL ────────────────────────────────────────────────────────────────────
 
 def _fetch(query: str, params: list = []) -> list[tuple]:
     con = _hive_db.connect(read_only=True)
@@ -269,7 +269,7 @@ def build_canonical_entities() -> dict[str, dict]:
 # ── 2. Graph Builder ──────────────────────────────────────────────────────────
 
 def build_graph() -> nx.DiGraph:
-    """Build full knowledge graph from DuckDB. Returns nx.DiGraph."""
+    """Build full knowledge graph from PostgreSQL. Returns nx.DiGraph."""
     GRAPH_DIR.mkdir(parents=True, exist_ok=True)
     log.info("=== Building HIVE Knowledge Graph ===")
     t0 = time.time()

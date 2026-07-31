@@ -13,7 +13,7 @@ Narzędzia pogrupowane w 7 domen:
   4. SEARCH     — DuckDuckGo, Firecrawl/Trafilatura deep-fetch
   5. JOBS       — Open Skills, JobDataLake
   6. GEO        — REST Countries, GeoNames, Warnely, IPInfo
-  7. HIVE       — DuckDB RAG query, HIVE sources top, HIVE mission stats
+  7. HIVE       — PostgreSQL RAG query, HIVE sources top, HIVE mission stats
 """
 
 import os, json, re, time, urllib.request, urllib.parse, logging
@@ -21,7 +21,7 @@ from typing import Optional
 
 import hive2_db as _hive_db  # PostgreSQL via unified layer
 
-DB_PATH = ""  # Legacy DuckDB removed — PostgreSQL is primary
+DB_PATH = ""  # Legacy PostgreSQL removed — PostgreSQL is primary
 log = logging.getLogger("hive.queen.tools")
 
 
@@ -408,7 +408,7 @@ def ipinfo_lookup(ip: str) -> dict:
 # 7. HIVE INTERNAL TOOLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def duckdb_rag_query(mission_id: str, query: str, top_k: int = 10) -> list[dict]:
+def rag_query(mission_id: str, query: str, top_k: int = 10) -> list[dict]:
     """Odpytaj lokalne RAG chunks — dane już zebrane przez scouty."""
     try:
         db = _hive_db.connect(read_only=False)
@@ -544,9 +544,9 @@ def hive_claims_top(mission_id: str, min_confidence: float = 0.7, top_n: int = 5
 QUEEN_TOOLS = [
     # ── HIVE INTERNAL (pierwsze — dane już zebrane przez rój) ─────────────────
     {
-        "name": "duckdb_rag_query",
+        "name": "rag_query",
         "description": (
-            "FIRST TOOL TO USE. Query the local HIVE knowledge base (DuckDB) for this mission. "
+            "FIRST TOOL TO USE. Query the local HIVE knowledge base (PostgreSQL) for this mission. "
             "Returns the most relevant document chunks already collected by scout bees. "
             "Always query this BEFORE making external API calls — data may already be in the hive."
         ),
@@ -1347,7 +1347,7 @@ def pubmed_search(query: str, max_results: int = 10, sort: str = "relevance") ->
 
 
 TOOL_MAP = {
-    "duckdb_rag_query": duckdb_rag_query,
+    "rag_query": rag_query,
     "hive_sources_top": hive_sources_top,
     "hive_mission_stats": hive_mission_stats,
     "hive_entities_top": hive_entities_top,

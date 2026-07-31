@@ -31,7 +31,7 @@ import hive2_db as _hive_db  # PostgreSQL via unified layer
 log = logging.getLogger("hive_intel_summary")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [INTEL] %(message)s")
 
-DB_PATH = ""  # Legacy DuckDB removed — PostgreSQL is primary
+DB_PATH = ""  # Legacy PostgreSQL removed — PostgreSQL is primary
 HIVE_DIR = os.environ.get("HIVE_DIR", os.path.expanduser("~"))
 SGLANG_URL = os.environ.get("SGLANG_URL", "http://localhost:8002/v1")
 

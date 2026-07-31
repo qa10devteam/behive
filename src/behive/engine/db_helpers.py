@@ -48,9 +48,9 @@ def _connect_db(read_only: bool = False):
     )
 
 
-def _get_duckdb():
-    """Legacy — kept for backward compatibility but should never be called."""
-    raise RuntimeError("DuckDB removed from HIVE pipeline. Use PostgreSQL (hive2_db.connect()).")
+def _get_pg():
+    """Legacy stub — DuckDB removed, use behive.engine.db.connect() instead."""
+    raise RuntimeError("DuckDB removed from HIVE. Use behive.engine.db.connect() for PostgreSQL.")
 
 
 def _strip_sql_comments(sql: str) -> str:

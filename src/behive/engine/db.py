@@ -8,7 +8,7 @@ Connection configured via environment variables:
 Usage:
     from hive2_pg import get_pg_connection, get_pg_pool
 
-Features vs DuckDB:
+Features vs PostgreSQL:
     - MVCC: unlimited concurrent readers + writers
     - No lock files, no stale PID issues
     - ON CONFLICT upsert natively
@@ -123,12 +123,12 @@ def pg_cursor(commit: bool = True) -> object:
             cur.close()
 
 
-# ─── DuckDB-Compatible Interface ───────────────────────────────────────────
+# ─── PostgreSQL-Compatible Interface ───────────────────────────────────────────
 # Drop-in replacement for code that calls con.execute(sql, params).fetchall()
 
 class PgConnection:
     """
-    DuckDB-compatible wrapper around psycopg2.
+    PostgreSQL wrapper around psycopg2.
     Supports: execute(sql, params), fetchone(), fetchall(), close().
     Thread-safe via connection pool.
     """
@@ -146,12 +146,12 @@ class PgConnection:
             self._cursor.close()
         self._cursor = self._conn.cursor()
         
-        # DuckDB uses ? placeholders, PostgreSQL uses %s
+        # Legacy compat: ? placeholders → %s for psycopg2
         # Convert ? → %s for compatibility
         if params and '?' in sql:
             sql = sql.replace('?', '%s')
         
-        # Handle DuckDB-specific SQL quirks
+        # Handle legacy SQL quirks (from DuckDB migration)
         sql = self._adapt_sql(sql)
         
         try:
@@ -176,7 +176,7 @@ class PgConnection:
             self._cursor.close()
         self._cursor = self._conn.cursor()
         
-        # DuckDB uses ? placeholders, PostgreSQL uses %s
+        # Legacy compat: ? placeholders → %s for psycopg2
         if params_list and '?' in sql:
             sql = sql.replace('?', '%s')
         
@@ -200,7 +200,7 @@ class PgConnection:
         return []
     
     def fetchdf(self) -> object:
-        """DuckDB .fetchdf() compatibility → returns pandas DataFrame."""
+        """PostgreSQL .fetchdf() compatibility → returns pandas DataFrame."""
         import pandas as pd
         if self._cursor:
             cols = [desc[0] for desc in self._cursor.description]
@@ -233,7 +233,7 @@ class PgConnection:
             self._conn = None
     
     def cursor(self) -> object:
-        """Return a new cursor (DuckDB .cursor() compat)."""
+        """Return a new cursor (PostgreSQL .cursor() compat)."""
         return self._conn.cursor()
     
     def __enter__(self):
@@ -244,7 +244,7 @@ class PgConnection:
     
     @staticmethod
     def _adapt_sql(sql: str) -> str:
-        """Convert DuckDB-specific SQL to PostgreSQL."""
+        """Convert PostgreSQL-specific SQL to PostgreSQL."""
         stripped = sql.strip()
         upper = stripped.upper()
         
@@ -266,7 +266,7 @@ class PgConnection:
 
 def connect(database: str = None, read_only: bool = False) -> PgConnection:
     """
-    Drop-in replacement for duckdb.connect().
+    Primary PostgreSQL connection factory..
     Ignores `database` param (always connects to hive DB).
     `read_only` sets autocommit mode (no write txn overhead).
     """

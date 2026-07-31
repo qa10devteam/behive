@@ -46,7 +46,7 @@ logging.basicConfig(
     format="%(asctime)s [HiveFalsifier] %(levelname)-5s — %(message)s",
 )
 
-DB_PATH = ""  # Legacy DuckDB removed — PostgreSQL is primary
+DB_PATH = ""  # Legacy PostgreSQL removed — PostgreSQL is primary
 
 # ── Unit normalization table ──────────────────────────────────────────────────
 UNIT_CANON: dict[str, str] = {
@@ -996,7 +996,7 @@ class NumericalFalsificationPipeline:
             db.commit()
         else:
             # In dry-run: run computation (for stats), then rollback writes.
-            # DuckDB may silently auto-commit ALTER TABLE but UPDATEs inside
+            # PostgreSQL may silently auto-commit ALTER TABLE but UPDATEs inside
             # an explicit transaction can be rolled back.
             corroboration_stats = {"total_claims": 0, "single_source": 0, "multi_source": 0, "corroborated": 0}
             try:

@@ -39,12 +39,12 @@ PYTHON   = 'python3'
 HIVE_DIR = Path(os.environ.get('BEHIVE_HOME', os.path.expanduser('~')))
 
 # ---------------------------------------------------------------------------
-# Inline DuckDB schema (sourced from hive2_schema.sql)
+# Inline PostgreSQL schema (sourced from hive2_schema.sql)
 # ---------------------------------------------------------------------------
 
 SCHEMA_SQL = """
 -- ============================================================
--- HIVE 2.0 — DuckDB Schema (Ul / The Hive)
+-- HIVE 2.0 — PostgreSQL Schema (Ul / The Hive)
 -- Shared state between all bee processes
 -- ============================================================
 
@@ -1014,7 +1014,7 @@ Return ONLY the JSON array."""
 
 
 # ---------------------------------------------------------------------------
-# DuckDB/PostgreSQL helpers
+# PostgreSQL/PostgreSQL helpers
 # ---------------------------------------------------------------------------
 
 # PostgreSQL backend (preferred) — checked lazily to avoid import-order issues
@@ -1027,9 +1027,9 @@ def _ensure_pg():
     return _ep()
 
 
-def _get_duckdb():
-    """Legacy — kept for backward compatibility but should never be called."""
-    raise RuntimeError("DuckDB removed from HIVE pipeline. Use PostgreSQL (hive2_db.connect()).")
+def _get_pg():
+    """Legacy stub — DuckDB removed, use behive.engine.db.connect() instead."""
+    raise RuntimeError("DuckDB removed from HIVE. Use behive.engine.db.connect() for PostgreSQL.")
 
 
 def _connect_db(read_only: bool = False):
@@ -1227,7 +1227,7 @@ def run_phase(script: str, args: list[str], phase_name: str,
 
     try:
         # Launch via nohup shell — survives session close
-        # HIVE_PARENT_PID=os.getpid() — child can wait for parent death (DuckDB lock)
+        # HIVE_PARENT_PID=os.getpid() — child can wait for parent death (PostgreSQL lock)
         import shlex as _shlex
         _safe_cmd = ' '.join(_shlex.quote(str(a)) for a in cmd)
         # Pass env vars to subprocess (HIVE_USE_BATCH, HIVE_BM_MANUAL, etc.)
@@ -1292,7 +1292,7 @@ def _bar(phase: str, elapsed: float, width: int = 20) -> str:
 
 def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = False, scale: int = 200) -> None:
     """Full pipeline with Queen-first planning: plan → scout → harvest → process → synth."""
-    _init_db(None)  # No-ops on PostgreSQL, creates tables on DuckDB legacy
+    _init_db(None)  # No-ops on PostgreSQL, creates tables on PostgreSQL legacy
 
     # ═══ PHASE -1: QUERY CLARIFICATION ═══════════════════════════
     try:
@@ -1530,7 +1530,7 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
         # Don't raise — proceed with whatever content we scraped before failure
     # Emit harvest completed event
     try:
-        # import duckdb as _ddb  # removed — using _connect_db()
+        # import pg as _ddb  # removed — using _connect_db()
         _con = _connect_db(read_only=True)
         _n_harvested = _con.execute(
             "SELECT COUNT(*) FROM hive_content WHERE mission_id=?", [mission_id]
@@ -1556,7 +1556,7 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
         # Don't raise — synth can work with whatever claims exist
     # Emit process completed event
     try:
-        # import duckdb as _ddb  # removed — using _connect_db()
+        # import pg as _ddb  # removed — using _connect_db()
         _con = _connect_db(read_only=True)
         _n_docs = _con.execute(
             "SELECT COUNT(*) FROM hive_entities WHERE mission_id=?", [mission_id]
@@ -1587,7 +1587,7 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
     # Only runs if < 30 claims were collected (signal that harvest was thin).
     log.debug('  ┌─ PHASE 3.7 · STORM GAP-FILL ───────────────────────┐')
     try:
-        # import duckdb as _ddb  # removed — using _connect_db()
+        # import pg as _ddb  # removed — using _connect_db()
         _con = _connect_db(read_only=True)
         _claim_count = _con.execute(
             "SELECT COUNT(*) FROM hive_claims WHERE mission_id=?", [mission_id]
@@ -1658,7 +1658,7 @@ Return JSON array of 5 strings only."""
     log.debug('  ┌─ PHASE 3.9 · HARVEST QUALITY GATE ────────────────┐')
     _quality_warning = ""
     try:
-        # duckdb import removed — _connect_db() handles routing
+        # pg import removed — _connect_db() handles routing
         _qcon = _connect_db(read_only=True)
         _total_src = _qcon.execute(
             "SELECT COUNT(*) FROM hive_sources WHERE mission_id=?", [mission_id]
@@ -1873,7 +1873,7 @@ Return JSON array of 5 strings only."""
 
 def cmd_scout(topic: str) -> None:
     """Scout only — Queen plans first, then runs hive2_scout.py."""
-    # duckdb removed — PG is primary
+    # pg removed — PG is primary
     _init_db(None)
 
     mission_id = new_mission_id(topic)
@@ -1941,7 +1941,7 @@ def cmd_plan(topic: str, output_file: str | None = None) -> None:
 
 def cmd_harvest(mission_id: str) -> None:
     """Harvest existing mission."""
-    # duckdb removed — PG is primary
+    # pg removed — PG is primary
     _init_db(None)
     if not _get_mission(mission_id):
         log.info(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.")
@@ -1954,7 +1954,7 @@ _PHASE_ORDER = ['scout', 'harvest', 'process', 'synth', 'done']
 
 def cmd_resume(mission_id: str) -> None:
     """Resume mission from last completed phase (checkpoint)."""
-    # duckdb removed — PG is primary
+    # pg removed — PG is primary
     _init_db(None)
     m = _get_mission(mission_id)
     if not m:
@@ -2039,7 +2039,7 @@ def cmd_resume(mission_id: str) -> None:
 
 def cmd_process(mission_id: str) -> None:
     """Process existing mission."""
-    # duckdb removed — PG is primary
+    # pg removed — PG is primary
     _init_db(None)
     if not _get_mission(mission_id):
         log.info(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.")
@@ -2059,7 +2059,7 @@ def cmd_process(mission_id: str) -> None:
 
 def cmd_synth(mission_id: str) -> None:
     """Synthesize existing mission."""
-    # duckdb removed — PG is primary
+    # pg removed — PG is primary
     _init_db(None)
     if not _get_mission(mission_id):
         log.info(f"[HIVE] Misja '{mission_id}' nie znaleziona w DB.")

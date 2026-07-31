@@ -16,7 +16,7 @@ Beeqeen to NIE jest jednorazowy prompt. To jest PAMIĘĆ OPERACYJNA — struktur
 która akumuluje wiedzę między misjami i kieruje wektory kolejnych misji.
 
 Co robi ten moduł:
-  1. RECALL — przed planowaniem nowej misji Queen ładuje z DuckDB:
+  1. RECALL — przed planowaniem nowej misji Queen ładuje z PostgreSQL:
        - FUIR (Follow-Up Intelligence Requirements) z poprzednich ocen
        - Luki badawcze (hive_gaps) z powiązanych misji
        - Kluczowe ustalenia (hive3_mission_memory) z podobnych tematów

@@ -33,7 +33,7 @@ from datetime import datetime
 from typing import Literal
 from urllib.parse import urlparse
 
-import hive2_db as _hive_db  # PostgreSQL via unified layer
+from behive.engine.db import connect as _db_connect
 
 DB_PATH = os.environ.get("BEHIVE_LEGACY_DB", "")  # Legacy — PostgreSQL is primary
 
@@ -446,17 +446,17 @@ def route_resource(
 # SECTION 5 — PRE-SCOUT DANCER
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _duckdb_connect_retry(path: str, read_only: bool = False, retries: int = 4) -> Any:
+def _pg_connect_retry(path: str, read_only: bool = False, retries: int = 4) -> Any:
     for attempt in range(retries):
         try:
-            return _hive_db.connect(read_only=read_only)
+            return _db_connect(read_only=read_only)
         except Exception as e:
             log.debug(f"Exception in prescout.py: {e}")
             if "lock" in str(e).lower() or "IO Error" in str(e):
                 time.sleep(2 ** attempt)
             else:
                 raise
-    return _hive_db.connect(read_only=read_only)
+    return _db_connect(read_only=read_only)
 
 
 def _ensure_prescout_schema(con: Any) -> None:
@@ -535,7 +535,7 @@ class PreScoutDancer:
         self.db_path    = db_path
         # Pobierz topic misji dla DQ filter
         try:
-            con = _duckdb_connect_retry(db_path, read_only=True)
+            con = _pg_connect_retry(db_path, read_only=True)
             row = con.execute(
                 "SELECT topic FROM hive_missions WHERE id=?", [mission_id]
             ).fetchone()
@@ -546,7 +546,7 @@ class PreScoutDancer:
             self.topic = ""
 
     def _get_sources(self) -> list[dict]:
-        con = _duckdb_connect_retry(self.db_path, read_only=True)
+        con = _pg_connect_retry(self.db_path, read_only=True)
         try:
             rows = con.execute("""
                 SELECT url, title, snippet, source_type, score_total
@@ -569,7 +569,7 @@ class PreScoutDancer:
         ]
 
     def _save_map(self, entries: list[dict]) -> None:
-        con = _duckdb_connect_retry(self.db_path)
+        con = _pg_connect_retry(self.db_path)
         try:
             _ensure_prescout_schema(con)
             con.execute("BEGIN")
@@ -700,7 +700,7 @@ class BeeMasterGate:
         self.db_path    = db_path
 
     def _load_map(self) -> list[dict]:
-        con = _duckdb_connect_retry(self.db_path, read_only=True)
+        con = _pg_connect_retry(self.db_path, read_only=True)
         try:
             rows = con.execute("""
                 SELECT url, domain, domain_tier, resource_type, routing_decision,
@@ -791,7 +791,7 @@ class BeeMasterGate:
 
     def _apply_auto(self, entries: list[dict]) -> None:
         """Auto mode: approve all non-skip sources; skip paywalls and skip-routed."""
-        con = _duckdb_connect_retry(self.db_path)
+        con = _pg_connect_retry(self.db_path)
         try:
             _ensure_prescout_schema(con)
             con.execute("BEGIN")
@@ -869,7 +869,7 @@ class BeeMasterGate:
             else:
                 log.debug("  Commands: [Enter]/done | s <url> | a <url> | add <url>")
 
-        con = _duckdb_connect_retry(self.db_path)
+        con = _pg_connect_retry(self.db_path)
         try:
             _ensure_prescout_schema(con)
             con.execute("BEGIN")
@@ -912,7 +912,7 @@ class BeeMasterGate:
         """Dodaje seed URLs podane przez Bee Master (API/CLI)."""
         if not seed_urls:
             return
-        con = _duckdb_connect_retry(self.db_path)
+        con = _pg_connect_retry(self.db_path)
         try:
             _ensure_prescout_schema(con)
             con.execute("BEGIN")
@@ -943,7 +943,7 @@ class BeeMasterGate:
 
     def _log_session(self, entries: list[dict]) -> None:
         """Audit trail: zapisz wynik sesji do hive_bm_sessions."""
-        con = _duckdb_connect_retry(self.db_path)
+        con = _pg_connect_retry(self.db_path)
         try:
             _ensure_prescout_schema(con)
             approved  = sum(1 for e in entries if e.get("bm_decision") == "approved")
@@ -986,7 +986,7 @@ class BeeMasterGate:
         # Reload with decisions
         entries_with_dec = self._load_map()
         # Re-read with bm_decision
-        con = _duckdb_connect_retry(self.db_path, read_only=True)
+        con = _pg_connect_retry(self.db_path, read_only=True)
         try:
             rows = con.execute("""
                 SELECT url, domain_tier, resource_type, routing_decision,
@@ -1224,7 +1224,7 @@ class TrueScout:
         return result
 
     def _save_true_scout(self, results: list[dict]) -> None:
-        con = _duckdb_connect_retry(self.db_path)
+        con = _pg_connect_retry(self.db_path)
         try:
             _ensure_prescout_schema(con)
             con.execute("BEGIN")
@@ -1352,7 +1352,7 @@ async def run_prescout_pipeline(
                 _scout_mod = importlib.import_module('hive2')
                 # Save queries to hive_gaps for next runquerycycle
                 try:
-                    pass  # duckdb removed
+                    pass  # pg removed
                     _gc = _ddb2.connect(db_path)
                     for _eq in _qr.expansion_queries[:5]:
                         _gc.execute(

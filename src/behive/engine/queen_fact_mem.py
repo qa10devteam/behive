@@ -8,7 +8,7 @@ Uzupełnia istniejący hive2_queen_memory.py o warstwę SEMANTYCZNĄ:
   hive2_queen_fact_mem.py → pamięć SEMANTYCZNA (fakty z tekstu, vector search)
 
 Architektura — wzorzec z mem0 V3:
-  add(text)   → 1 LLM call (Haiku) → ekstrahuje fakty → embed → DuckDB hive_queen_facts
+  add(text)   → 1 LLM call (Haiku) → ekstrahuje fakty → embed → PostgreSQL hive_queen_facts
   search(q)   → embed query → cosine similarity + BM25 → hybrid ranking → top-k faktów
   recall(q)   → search() + formatowanie do bloku promptu
 
@@ -267,7 +267,7 @@ class QueenFactMemory:
         Wzorzec mem0 V3 pipeline:
           1. LLM extraction (1 Haiku call) → lista faktów
           2. MD5 dedup (bez LLM)
-          3. Batch embed → DuckDB insert
+          3. Batch embed → PostgreSQL insert
           4. Linked IDs — powiązanie z istniejącymi
 
         Parameters
@@ -606,7 +606,7 @@ if __name__ == "__main__":
 
     print("=== QueenFactMemory — Schema test ===")
 
-    # Test z in-memory DuckDB (bez Bedrock)
+    # Test z in-memory PostgreSQL (bez Bedrock)
     test_con = __import__("hive2_db").connect(read_only=False)
 
     # Manual schema (without HNSW, only cosine similarity via brute force)

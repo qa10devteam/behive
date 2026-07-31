@@ -32,7 +32,7 @@ import hive2_db as _hive_db  # PostgreSQL via unified layer
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------
-DB_PATH = ""  # Legacy DuckDB removed — PostgreSQL is primary
+DB_PATH = ""  # Legacy PostgreSQL removed — PostgreSQL is primary
 BEDROCK_REGION = "eu-central-1"
 MODEL_HAIKU = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
 MODEL_SONNET = "eu.anthropic.claude-sonnet-4-6"
@@ -155,7 +155,7 @@ def _llm_call(
 # ---------------------------------------------------------------------------
 
 def _db_connect(read_only: bool = False, retries: int = 10) -> Any:
-    """Otwiera połączenie DuckDB z retries (plik może być locked)."""
+    """Otwiera połączenie PostgreSQL z retries (plik może być locked)."""
     for attempt in range(retries):
         try:
             return _hive_db.connect(read_only=read_only)
@@ -165,7 +165,7 @@ def _db_connect(read_only: bool = False, retries: int = 10) -> Any:
                 log.warning(f"DB locked, retrying in {wait}s (attempt {attempt+1}/{retries})...")
                 time.sleep(wait)
             else:
-                raise RuntimeError(f"Cannot open DuckDB after {retries} attempts: {exc}") from exc
+                raise RuntimeError(f"Cannot open PostgreSQL after {retries} attempts: {exc}") from exc
     raise RuntimeError("Unreachable")
 
 
@@ -318,7 +318,7 @@ Odpowiedz w formacie JSON jak opisano w instrukcji systemowej."""
             )
             predictions.append(pred)
 
-        # Zapisz do DuckDB
+        # Zapisz do PostgreSQL
         saved = self._save_predictions(predictions)
         log.info(
             f"[PredictionExtractor] Extracted {len(predictions)} predictions, saved {saved}"

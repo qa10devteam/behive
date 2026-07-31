@@ -155,7 +155,7 @@ class TestRouteResource:
 
 
 class TestPreScoutDancer:
-    @patch("behive.engine.prescout._duckdb_connect_retry")
+    @patch("behive.engine.prescout._pg_connect_retry")
     def test_init(self, mock_db):
         mock_con = MagicMock()
         mock_con.execute.return_value.fetchall.return_value = []
@@ -167,7 +167,7 @@ class TestPreScoutDancer:
         except Exception:
             pass
 
-    @patch("behive.engine.prescout._duckdb_connect_retry")
+    @patch("behive.engine.prescout._pg_connect_retry")
     def test_get_sources(self, mock_db):
         mock_con = MagicMock()
         mock_con.execute.return_value.fetchall.return_value = [
@@ -183,7 +183,7 @@ class TestPreScoutDancer:
         except Exception:
             pass
 
-    @patch("behive.engine.prescout._duckdb_connect_retry")
+    @patch("behive.engine.prescout._pg_connect_retry")
     def test_save_map(self, mock_db):
         mock_con = MagicMock()
         mock_con.execute.return_value.fetchall.return_value = []
@@ -201,7 +201,7 @@ class TestPreScoutDancer:
 
 
 class TestBeeMasterGate:
-    @patch("behive.engine.prescout._duckdb_connect_retry")
+    @patch("behive.engine.prescout._pg_connect_retry")
     @patch("behive.engine.llm.complete")
     def test_gate_auto(self, mock_llm, mock_db):
         mock_llm.return_value = json.dumps({"approved": True, "score": 0.85})
@@ -218,7 +218,7 @@ class TestBeeMasterGate:
         except Exception:
             pass
 
-    @patch("behive.engine.prescout._duckdb_connect_retry")
+    @patch("behive.engine.prescout._pg_connect_retry")
     @patch("behive.engine.llm.complete")
     def test_generate_report(self, mock_llm, mock_db):
         mock_llm.return_value = "## Source Quality Report\nAll sources verified."
@@ -237,7 +237,7 @@ class TestBeeMasterGate:
         except Exception:
             pass
 
-    @patch("behive.engine.prescout._duckdb_connect_retry")
+    @patch("behive.engine.prescout._pg_connect_retry")
     @patch("behive.engine.llm.complete")
     def test_apply_auto(self, mock_llm, mock_db):
         mock_llm.return_value = json.dumps({"approved": ["http://a.com"]})
