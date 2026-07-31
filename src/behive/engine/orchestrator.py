@@ -38,6 +38,33 @@ DB_PATH  = ''
 PYTHON   = 'python3'
 HIVE_DIR = Path(os.environ.get('BEHIVE_HOME', os.path.expanduser('~')))
 
+
+def _resolve_cmd(script: str) -> list[str]:
+    """Resolve hive2_X.py to subprocess command list [PYTHON, ...].
+    
+    Priority: local file > package module (-m invocation).
+    """
+    local_path = HIVE_DIR / script
+    if local_path.exists():
+        return [PYTHON, str(local_path)]
+    # Package module fallback
+    _MODULE_MAP = {
+        'hive2_scout.py': 'behive.engine.scout',
+        'hive2_harvest.py': 'behive.engine.harvest',
+        'hive2_process.py': 'behive.engine.process',
+        'hive2_synth.py': 'behive.engine.synth',
+        'hive2_falsifier.py': 'behive.engine.falsifier',
+        'hive2_master_intelligence.py': 'behive.engine.master_intelligence',
+        'hive2_intel_summary.py': 'behive.engine.intel_summary',
+        'hive2_graph_engine.py': 'behive.engine.graph_engine',
+        'hive2_prescout.py': 'behive.engine.prescout',
+        'hive2_drones.py': 'behive.engine.drones',
+    }
+    module_name = _MODULE_MAP.get(script)
+    if module_name:
+        return [PYTHON, '-m', module_name]
+    return [PYTHON, str(local_path)]  # will error naturally
+
 # ---------------------------------------------------------------------------
 # Inline PostgreSQL schema (sourced from hive2_schema.sql)
 # ---------------------------------------------------------------------------
@@ -1428,8 +1455,8 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
     # ═══ PHASE 1: SCOUT ══════════════════════════════════════════
     log.debug('  ┌─ PHASE 1 · SCOUT SWARM ────────────────────────────┐')
     t1 = time.time()
-    scout_script = str(HIVE_DIR / 'hive2_scout.py')
-    scout_cmd = [PYTHON, scout_script, mission_id, '--plan', plan_file]
+    # Resolve scout script — local file or package module
+    scout_cmd = _resolve_cmd('hive2_scout.py') + [mission_id, '--plan', plan_file]
     scout_timeout = int(os.environ.get("BEHIVE_SCOUT_TIMEOUT", "300"))
     sys.stdout.flush()
     
@@ -1790,7 +1817,7 @@ Return JSON array of 5 strings only."""
     try:
         import subprocess as _subp
         _subp.Popen(
-            [PYTHON, str(HIVE_DIR / 'hive2_intel_summary.py'), 'update', mission_id],
+            _resolve_cmd('hive2_intel_summary.py') + ['update', mission_id],
             stdout=open('/tmp/hive_intel_summary.log', 'a'),
             stderr=subprocess.STDOUT,
             env={**os.environ, 'PATH': f'{os.environ.get("PATH","")}'}
@@ -1803,7 +1830,7 @@ Return JSON array of 5 strings only."""
     try:
         import subprocess as _subp2
         _subp2.Popen(
-            [PYTHON, str(HIVE_DIR / 'hive2_graph_engine.py'), 'build'],
+            _resolve_cmd('hive2_graph_engine.py') + ['build'],
             stdout=open('/tmp/hive_graph_build.log', 'a'),
             stderr=subprocess.STDOUT,
             env={**os.environ, 'PATH': f'{os.environ.get("PATH","")}'}
@@ -1829,7 +1856,7 @@ Return JSON array of 5 strings only."""
             with open(gap_plan_file, 'w') as gf:
                 json.dump(gap_plan, gf, ensure_ascii=False)
             try:
-                gap_scout_cmd = [PYTHON, str(HIVE_DIR / 'hive2_scout.py'),
+                gap_scout_cmd = _resolve_cmd('hive2_scout.py') + [
                                  gap_mission_id, '--plan', gap_plan_file]
                 subprocess.run(gap_scout_cmd, check=False)
                 run_phase('hive2_harvest.py', [gap_mission_id], f'gap-{i}-harvest')
@@ -1892,8 +1919,7 @@ def cmd_scout(topic: str) -> None:
     log.debug(f'╚═══ Plan ready: {len(plan)} tasks → {plan_file} ({time.time()-t0:.1f}s) ═══╝\n')
 
     # Launch scout with plan
-    scout_script = str(HIVE_DIR / 'hive2_scout.py')
-    scout_cmd = [PYTHON, scout_script, mission_id, '--plan', plan_file]
+    scout_cmd = _resolve_cmd('hive2_scout.py') + [mission_id, '--plan', plan_file]
     log.debug(f"🐝  [SCOUT] {' '.join(scout_cmd)}")
     sys.stdout.flush()
     try:

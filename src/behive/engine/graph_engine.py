@@ -58,12 +58,7 @@ MENTION_MAX_PER_ENT = 200   # max claim-mention edges per entity
 
 # ── Bedrock ───────────────────────────────────────────────────────────────────
 
-_bedrock_client: Optional[Any] = None  # Legacy — unused
-
-
-def _get_bedrock() -> Any:
-    """Legacy stub — replaced by llm.complete()."""
-    return None
+# _bedrock_client removed — LLM calls routed via llm.py
 
 def call_bedrock(prompt: str, system: str = "", max_tokens: int = 512) -> str:
     """LLM call via BYOK llm.complete()."""
