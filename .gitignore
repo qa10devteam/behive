@@ -63,3 +63,4 @@ docker-data/
 neo4j-data/
 postgres-data/
 qdrant-data/
+hive-reports/
