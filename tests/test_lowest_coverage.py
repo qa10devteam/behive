@@ -155,7 +155,7 @@ class TestRunnerDeep:
     @patch("subprocess.run")
     def test_run_phase_scout(self, mock_sub):
         mock_sub.return_value = MagicMock(returncode=0, stdout="Scout complete", stderr="")
-        from behive.engine.runner import run_phase
+        from behive.engine.orchestrator import run_phase
         try:
             run_phase("scout", "test-runner-001")
         except (TypeError, Exception):
@@ -164,7 +164,7 @@ class TestRunnerDeep:
     @patch("subprocess.run")
     def test_run_phase_all_phases(self, mock_sub):
         mock_sub.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
-        from behive.engine.runner import run_phase
+        from behive.engine.orchestrator import run_phase
         for phase in ["scout", "harvest", "process", "synth"]:
             try:
                 run_phase(phase, f"test-runner-{phase}")
@@ -174,7 +174,7 @@ class TestRunnerDeep:
     @patch("subprocess.run")
     def test_run_phase_failure(self, mock_sub):
         mock_sub.return_value = MagicMock(returncode=1, stdout="", stderr="Error!")
-        from behive.engine.runner import run_phase
+        from behive.engine.orchestrator import run_phase
         try:
             result = run_phase("scout", "test-fail")
         except (Exception,):
@@ -242,7 +242,7 @@ class TestQueenDeep:
     @patch("behive.engine.llm.complete")
     def test_queen_functions(self, mock_llm):
         mock_llm.return_value = json.dumps({"directive": "proceed", "priority": "high"})
-        import behive.engine.queen as q
+        import behive.engine.orchestrator as q
         fns = [f for f in dir(q) if not f.startswith('_') and callable(getattr(q, f))]
         for fn_name in fns[:5]:
             fn = getattr(q, fn_name)

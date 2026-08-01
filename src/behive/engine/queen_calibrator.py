@@ -169,7 +169,8 @@ class QueenCalibrator:
     # INTERNAL: connection helper
     # ------------------------------------------------------------------
     def _conn(self) -> Any:
-        return __import__("hive2_db").connect(read_only=True)
+        from behive.engine.db import connect as _db_connect
+        return _db_connect(read_only=True)
 
     # ------------------------------------------------------------------
     # HELPER: infer domain from topic string
