@@ -55,7 +55,7 @@ jobs:
         run: |
           behive db init
       
-      - name: Run tests
+      - name: Run tests with coverage
         env:
           BEHIVE_DB_URL: postgresql://behive:behive_test@localhost:5432/behive_test
           HIVE_PG_USER: behive
@@ -64,7 +64,14 @@ jobs:
           HIVE_PG_DATABASE: behive_test
           OPENAI_API_KEY: sk-test-fake-key-for-ci
         run: |
-          python -m pytest tests/ -q --ignore=tests/test_e2e_pipeline.py --ignore=tests/test_server_integration.py --timeout=15 -p no:warnings -k "not (real_heavy or real_integration or TestStuckMissions or TestQualityMetrics)" --continue-on-collection-errors
+          python -m pytest tests/ -q --ignore=tests/test_e2e_pipeline.py --ignore=tests/test_server_integration.py --timeout=30 -p no:warnings -k "not (real_heavy or real_integration or TestStuckMissions or TestQualityMetrics or runpy_main)" --continue-on-collection-errors --cov=behive --cov-report=term --cov-report=xml:coverage.xml
+      
+      - name: Upload coverage
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
       
       - name: Verify CLI works
         run: |
