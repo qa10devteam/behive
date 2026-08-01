@@ -199,7 +199,8 @@ class QueenFactMemory:
 
     def _get_con(self) -> Any:
         if self._con is None:
-            self._con = __import__("hive2_db").connect(read_only=False)
+            from behive.engine.db import connect as _db_connect
+            self._con = _db_connect(read_only=False)
             self._ensure_schema()
         return self._con
 
@@ -577,7 +578,8 @@ if __name__ == "__main__":
     print("=== QueenFactMemory — Schema test ===")
 
     # Test z in-memory PostgreSQL (bez Bedrock)
-    test_con = __import__("hive2_db").connect(read_only=False)
+    from behive.engine.db import connect as _db_connect
+    test_con = _db_connect(read_only=False)
 
     # Manual schema (without HNSW, only cosine similarity via brute force)
     test_con.execute("""

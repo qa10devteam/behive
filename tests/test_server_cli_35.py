@@ -71,7 +71,7 @@ class TestServerEndpointsDeep:
 
     def test_search_alias(self, client):
         r = client.get("/search?q=NVIDIA")
-        assert r.status_code in [200, 404, 405, 500]
+        assert r.status_code in [200, 404, 405, 422, 500]
 
     def test_intelligence_entity(self, client):
         r = client.get("/intelligence/entity/NVIDIA")

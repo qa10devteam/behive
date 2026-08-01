@@ -262,7 +262,7 @@ class TestQueenPlannerDeep:
     @patch("behive.engine.llm.complete")
     def test_all_functions(self, mock_llm):
         mock_llm.return_value = json.dumps({"plan": ["step1", "step2"]})
-        import behive.engine.queen_planner_extracted as qpe
+        import behive.engine.orchestrator as qpe  # queen_planner_extracted merged into orchestrator
         fns = [f for f in dir(qpe) if not f.startswith('_') and callable(getattr(qpe, f))]
         for fn_name in fns[:5]:
             fn = getattr(qpe, fn_name)

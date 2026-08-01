@@ -58,7 +58,7 @@ ALTER TABLE hive_missions ADD COLUMN IF NOT EXISTS quality_confidence FLOAT DEFA
 
 def _connect(db_path: str = DB_PATH):
     """Return a pg connection (read-write)."""
-    _hive_db = __import__("hive2_db")
+    from behive.engine import db as _hive_db
     return _hive_db.connect(read_only=False)
 
 

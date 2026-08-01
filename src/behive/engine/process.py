@@ -130,7 +130,7 @@ def _db_connect_retry(path: str = DB_PATH, read_only: bool = False, max_retries:
     if _pg_available:
         for attempt in range(max_retries):
             try:
-                return hive2_db.connect(path, read_only=read_only)
+                return _db_connect(read_only=read_only)
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise

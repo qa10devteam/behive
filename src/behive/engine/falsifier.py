@@ -121,7 +121,8 @@ _ENTITY_TRIGGERS = [
 
 
 def _db_connect(read_only: bool = False) -> Any:
-    return __import__("hive2_db").connect(read_only=read_only)
+    from behive.engine.db import connect as _db_connect
+    return _db_connect(read_only=read_only)
 
 
 def _ensure_tables(db: Any) -> None:
