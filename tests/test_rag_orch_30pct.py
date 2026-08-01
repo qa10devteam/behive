@@ -368,15 +368,15 @@ class TestQualityDeep:
         from behive.engine.content_quality import score_content_detailed
         # Very short text
         r1 = score_content_detailed("Hi")
-        assert r1["score"] <= 1.0
+        assert r1["quality_score"] <= 1.0
         # Very long, good text
         good_text = "The artificial intelligence market grew 23% in 2024. " * 50
         r2 = score_content_detailed(good_text)
-        assert r2["score"] > 0.5
+        assert r2["quality_score"] > 0.5
         # Text with boilerplate
         boilerplate = "Click here. Subscribe. Cookie policy. " * 50
         r3 = score_content_detailed(boilerplate)
-        assert r3["score"] < r2["score"]
+        assert r3["score"] < r2["quality_score"]
 
 
 # ═══ QUEEN FEEDBACK ═══

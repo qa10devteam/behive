@@ -67,7 +67,7 @@ class TestOrchestratorPipeline:
             fn = getattr(orch, fn_name)
             if callable(fn):
                 try:
-                    fn("test-orch-run", "AI market", depth=1)
+                    fn("test-orch-run")
                 except TypeError:
                     try:
                         fn("test-orch-run")

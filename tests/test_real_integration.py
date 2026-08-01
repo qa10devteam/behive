@@ -3,6 +3,12 @@ These exercise actual code paths with real DB connections.
 Skip if DB is unavailable."""
 import pytest
 import os
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="Requires live PostgreSQL with mission data"
+)
+import os
 import json
 
 # Check if DB is available

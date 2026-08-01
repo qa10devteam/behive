@@ -398,7 +398,7 @@ class TestDronesLogic:
 
     def test_get_strategy(self):
         from behive.engine.drones import get_strategy
-        strategy = get_strategy("reuters.com")
+        strategy = get_strategy("test_mission", "reuters.com")
         assert strategy is not None or True  # May return None for unknown
 
     def test_extract_domains(self):

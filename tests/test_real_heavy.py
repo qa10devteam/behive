@@ -2,6 +2,12 @@
 These target the biggest uncovered code blocks: Scout, Harvest, Synth."""
 import pytest
 import os
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="Requires live PostgreSQL with mission data"
+)
+import os
 import json
 
 try:

@@ -9,6 +9,12 @@ import sys
 import time
 import json
 import pytest
+import os
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="Requires live PostgreSQL with correct credentials"
+)
 import psycopg2
 from unittest.mock import patch, MagicMock
 
@@ -24,7 +30,7 @@ class TestStuckMissions:
         import os
         # Ensure db_helpers can connect to same DB
         os.environ["HIVE_PG_USER"] = "hive_app"
-        os.environ["HIVE_PG_PASSWORD"] = "hive_2026_prod"
+        os.environ["HIVE_PG_PASSWORD"] = os.environ.get("HIVE_PG_PASSWORD", "behive_test")
         os.environ["HIVE_PG_DATABASE"] = "hive"
         os.environ["HIVE_PG_HOST"] = "127.0.0.1"
         
@@ -55,7 +61,8 @@ class TestStuckMissions:
         )
         row = pg_cursor.fetchone()
         assert row is not None, "Test mission disappeared"
-        assert row[0] == "error", f"Expected 'error', got '{row[0]}'"
+        status = row['status'] if isinstance(row, dict) else row[0]
+        assert status == "error", f"Expected 'error', got '{status}'"
         
         # Cleanup
         pg_cursor.execute("DELETE FROM hive_missions WHERE id = 'test_stuck_001'")

@@ -239,7 +239,7 @@ class TestOrchestratorDeep:
     def test_run_phase_module_fallback(self, mock_sub):
         """Should fallback to module execution."""
         mock_sub.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
-        from behive.engine.runner import run_phase
+        from behive.engine.orchestrator import run_phase
         try:
             run_phase("scout", "test-fallback")
         except Exception:
