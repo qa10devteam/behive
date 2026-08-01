@@ -22,6 +22,15 @@ pytestmark = pytest.mark.skipif(not DB_AVAILABLE, reason="PostgreSQL not availab
 class TestSwarmScoutReal:
     """Test SwarmScout with real DB (methods that don't need network)."""
 
+    @pytest.fixture(autouse=True)
+    def reset_db_pool(self):
+        """Ensure clean pool state."""
+        import behive.engine.db as db_mod
+        yield
+        if db_mod._pool and not db_mod._pool.closed:
+            db_mod._pool.closeall()
+            db_mod._pool = None
+
     @pytest.fixture
     def scout(self):
         from behive.engine.scout import SwarmScout
@@ -54,6 +63,14 @@ class TestSwarmScoutReal:
 
 
 class TestHarvesterBeeReal:
+
+    @pytest.fixture(autouse=True)
+    def reset_db_pool(self):
+        import behive.engine.db as db_mod
+        yield
+        if db_mod._pool and not db_mod._pool.closed:
+            db_mod._pool.closeall()
+            db_mod._pool = None
     """Test HarvesterBee with real DB."""
 
     @pytest.fixture
@@ -94,6 +111,14 @@ class TestHarvesterBeeReal:
 
 
 class TestQueenSynthReal:
+
+    @pytest.fixture(autouse=True)
+    def reset_db_pool(self):
+        import behive.engine.db as db_mod
+        yield
+        if db_mod._pool and not db_mod._pool.closed:
+            db_mod._pool.closeall()
+            db_mod._pool = None
     """Test Queen synthesis with real DB."""
 
     @pytest.fixture
@@ -133,7 +158,14 @@ class TestDbOperations:
         """Reset DB pool state between tests."""
         import behive.engine.db_helpers as dbh
         dbh._pg_available = None
+        dbh._db_mod = None
         yield
+        # Force close any open connections
+        try:
+            if hasattr(dbh, '_pool') and dbh._pool:
+                dbh._pool.closeall()
+        except Exception:
+            pass
 
     def test_connect_and_query(self):
         from behive.engine.db_helpers import _connect_db

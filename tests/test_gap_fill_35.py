@@ -186,7 +186,7 @@ class TestRunnerModule:
     """Runner module (11%) — cover the subprocess runner."""
 
     def test_runner_functions(self):
-        import behive.engine.runner as r
+        import behive.engine.orchestrator as r
         fns = [(n, getattr(r, n)) for n in dir(r)
                if not n.startswith('_') and callable(getattr(r, n))]
         for fn_name, fn in fns[:5]:

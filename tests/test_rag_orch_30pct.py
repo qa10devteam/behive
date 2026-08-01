@@ -251,7 +251,7 @@ class TestOrchestratorAsync:
     @patch("subprocess.run")
     def test_run_phase_all(self, mock_sub):
         mock_sub.return_value = MagicMock(returncode=0, stdout="OK\n", stderr="")
-        from behive.engine.runner import run_phase
+        from behive.engine.orchestrator import run_phase
         for phase in ["scout", "harvest", "process", "synth", "falsifier"]:
             try:
                 run_phase(phase, "test-async-001")
@@ -261,7 +261,7 @@ class TestOrchestratorAsync:
     @patch("subprocess.run")
     def test_run_phase_failure_handling(self, mock_sub):
         mock_sub.return_value = MagicMock(returncode=1, stdout="", stderr="ModuleNotFoundError")
-        from behive.engine.runner import run_phase
+        from behive.engine.orchestrator import run_phase
         try:
             result = run_phase("scout", "test-fail")
         except Exception:
@@ -317,7 +317,7 @@ class TestDomainReputationDeep:
         from behive.engine.domain_reputation import get_reputation
         for domain in ["reuters.com", "arxiv.org", "bbc.co.uk", "nature.com",
                        "github.com", "medium.com", "blogspot.com", "random-xyz.com"]:
-            result = get_reputation(domain)
+            result = get_reputation().get_reputation_summary(f"https://{domain}/page")
             assert result is not None
 
     def test_get_reputation_urls(self):
@@ -346,7 +346,7 @@ class TestQualityDeep:
     """Exercise quality.py branches."""
 
     def test_all_quality_functions(self):
-        import behive.engine.quality as q
+        import behive.engine.content_quality as q
         fns = [f for f in dir(q) if not f.startswith('_') and callable(getattr(q, f))]
         for fn_name in fns:
             fn = getattr(q, fn_name)

@@ -19,7 +19,7 @@ class TestMissionLifecycle:
 
     def test_create_mission(self, pg_cursor):
         """Can insert a new mission."""
-        mission_id = "test_lifecycle_001"
+        mission_id = "test_lifecycle_xunit_001"
         pg_cursor.execute("""
             INSERT INTO hive_missions (id, topic, status, phase, created_at)
             VALUES (%s, 'test lifecycle', 'scout', 'scout', NOW())
@@ -28,7 +28,7 @@ class TestMissionLifecycle:
         pg_cursor.connection.commit()
         
         pg_cursor.execute("SELECT status FROM hive_missions WHERE id = %s", (mission_id,))
-        assert pg_cursor.fetchone()[0] == "scout"
+        assert list(pg_cursor.fetchone().values())[0] == "scout"
         
         # Cleanup
         pg_cursor.execute("DELETE FROM hive_missions WHERE id = %s", (mission_id,))
@@ -59,7 +59,7 @@ class TestMissionLifecycle:
             pg_cursor.connection.commit()
             
             pg_cursor.execute("SELECT status FROM hive_missions WHERE id=%s", (mission_id,))
-            assert pg_cursor.fetchone()[0] == new_status
+            assert list(pg_cursor.fetchone().values())[0] == new_status
         
         # Cleanup
         pg_cursor.execute("DELETE FROM hive_missions WHERE id = %s", (mission_id,))
@@ -73,7 +73,7 @@ class TestClaimsTable:
         """Can insert a claim with all fields."""
         # Get max ID
         pg_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM hive_claims")
-        new_id = pg_cursor.fetchone()[0]
+        new_id = list(pg_cursor.fetchone().values())[0]
         
         pg_cursor.execute("""
             INSERT INTO hive_claims (id, mission_id, claim, evidence, source_url,
@@ -85,8 +85,8 @@ class TestClaimsTable:
         
         pg_cursor.execute("SELECT claim, quality_score FROM hive_claims WHERE id = %s", (new_id,))
         row = pg_cursor.fetchone()
-        assert row[0] == "Test claim text"
-        assert abs(row[1] - 0.78) < 0.01
+        assert list(row.values())[0] == "Test claim text"
+        assert abs(list(row.values())[1] - 0.78) < 0.01
         
         # Cleanup
         pg_cursor.execute("DELETE FROM hive_claims WHERE id = %s", (new_id,))
@@ -95,7 +95,7 @@ class TestClaimsTable:
     def test_quality_score_range_constraint(self, pg_cursor):
         """Quality score must be 0.0 - 1.0."""
         pg_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM hive_claims")
-        new_id = pg_cursor.fetchone()[0]
+        new_id = list(pg_cursor.fetchone().values())[0]
         
         # This should work (valid range)
         pg_cursor.execute("""
@@ -115,7 +115,7 @@ class TestSourcesTable:
     def test_insert_source(self, pg_cursor):
         """Can insert a source URL."""
         pg_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM hive_sources")
-        new_id = pg_cursor.fetchone()[0]
+        new_id = list(pg_cursor.fetchone().values())[0]
         
         pg_cursor.execute("""
             INSERT INTO hive_sources (id, mission_id, url, title, snippet, source_type)
@@ -126,8 +126,8 @@ class TestSourcesTable:
         
         pg_cursor.execute("SELECT url, title FROM hive_sources WHERE id = %s", (new_id,))
         row = pg_cursor.fetchone()
-        assert row[0] == "https://test.example.com/page"
-        assert row[1] == "Test Page Title"
+        assert list(row.values())[0] == "https://test.example.com/page"
+        assert list(row.values())[1] == "Test Page Title"
         
         # Cleanup
         pg_cursor.execute("DELETE FROM hive_sources WHERE id = %s", (new_id,))
@@ -136,7 +136,7 @@ class TestSourcesTable:
     def test_url_deduplication_per_mission(self, pg_cursor):
         """Same URL in same mission should be rejected (unique constraint)."""
         pg_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM hive_sources")
-        id1 = pg_cursor.fetchone()[0]
+        id1 = list(pg_cursor.fetchone().values())[0]
         id2 = id1 + 1
         
         pg_cursor.execute("""
