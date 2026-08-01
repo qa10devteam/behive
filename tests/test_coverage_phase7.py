@@ -285,6 +285,7 @@ class TestLLM:
         assert callable(complete)
         assert callable(embed)
 
+    @pytest.mark.timeout(15)
     def test_embed_returns_list(self):
         from behive.engine.llm import embed
         # Without working embedding provider, should either return zeros or raise

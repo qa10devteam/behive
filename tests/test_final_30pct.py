@@ -193,21 +193,27 @@ class TestPreprocessorDeep:
 
     def test_long_queries(self):
         from behive.engine.preprocessor import preprocess_query
+        from unittest.mock import patch
+        import io
         long_q = "artificial intelligence " * 50
-        result = preprocess_query(long_q)
-        assert result.ok is True or result.ok is False
+        with patch('sys.stdin', io.StringIO("n\n")):
+            result = preprocess_query(long_q)
+            assert result.ok is True or result.ok is False
 
     def test_special_chars(self):
         from behive.engine.preprocessor import preprocess_query
+        from unittest.mock import patch
+        import io
         queries = [
             "AI market $184B ± 5%",
             "AI 人工智能 market",
             "AI & ML | NLP",
         ]
         for q in queries:
-            result = preprocess_query(q)
-            assert result is not None
-            assert hasattr(result, "refined_topic")
+            with patch('sys.stdin', io.StringIO("n\n")):
+                result = preprocess_query(q)
+                assert result is not None
+                assert hasattr(result, "refined_topic")
 
     def test_specificity_score(self):
         from behive.engine.preprocessor import preprocess_query

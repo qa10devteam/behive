@@ -208,6 +208,7 @@ class TestFalsifierDeep:
 
 
 # ═══ BEDROCK COMPAT (28%) ═══
+@pytest.mark.skip(reason="bedrock_compat module removed in cleanup phase")
 class TestBedrockCompat:
     def test_functions(self):
         import behive.engine.bedrock_compat as bc
