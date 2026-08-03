@@ -166,6 +166,13 @@ try:
 except ImportError:
     pass
 
+# ─── Federated Knowledge Network ─────────────────────────────────────────────
+try:
+    from behive.federation import router as federation_router
+    app.include_router(federation_router)
+except ImportError:
+    pass
+
 
 # ─── SSE Event Bus ────────────────────────────────────────────────────────────
 
