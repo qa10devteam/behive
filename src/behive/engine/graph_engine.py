@@ -126,7 +126,7 @@ def _ensure_collection(recreate: bool = False) -> bool:
 # ── PostgreSQL ────────────────────────────────────────────────────────────────────
 
 def _fetch(query: str, params: list = []) -> list[tuple]:
-    con = _hive_db.connect(read_only=True)
+    con = _db_connect(read_only=True)
     try:
         return con.execute(query, params).fetchall()
     finally:

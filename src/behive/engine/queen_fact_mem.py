@@ -48,7 +48,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 from behive.engine.db import connect as _db_connect

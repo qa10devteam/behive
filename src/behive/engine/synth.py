@@ -233,6 +233,9 @@ class Queen:
                     return []
 
             # ── Core mission honey ────────────────────────────────────────────
+            all_tables = {row[0] for row in con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
+            ).fetchall()}
 
             if "hive_entities" in all_tables:
                 top_entities = safe_query(
@@ -508,7 +511,7 @@ class Queen:
                 val, unit, ctx, src_count, sources_json, domains_json, conf = row
                 domains = []
                 try:
-                    domains = json.loads(domains_json) if domains_json else []
+                    domains = domains_json if isinstance(domains_json, list) else (json.loads(domains_json) if isinstance(domains_json, str) and domains_json else [])
                 except (json.JSONDecodeError, ValueError, KeyError) as e:
                     log.debug(f"Parse error: {e}")
                 domain_str = ", ".join(domains[:3]) if domains else "—"
@@ -573,7 +576,7 @@ class Queen:
                 val, unit, ctx, src_count, sources_json, domains_json, conf = row
                 domains = []
                 try:
-                    domains = json.loads(domains_json) if domains_json else []
+                    domains = domains_json if isinstance(domains_json, list) else (json.loads(domains_json) if isinstance(domains_json, str) and domains_json else [])
                 except (json.JSONDecodeError, ValueError, KeyError) as e:
                     log.debug(f"Parse error: {e}")
                 domain_str = ", ".join(domains[:2]) if domains else "—"
@@ -609,7 +612,7 @@ class Queen:
                 cid, label, kw_json, doc_count, repr_text = row
                 kws = []
                 try:
-                    kws = json.loads(kw_json) if kw_json else []
+                    kws = kw_json if isinstance(kw_json, list) else (json.loads(kw_json) if isinstance(kw_json, str) and kw_json else [])
                 except (json.JSONDecodeError, ValueError, KeyError) as e:
                     log.debug(f"Parse error: {e}")
                 kw_str = ", ".join(kws[:6]) if kws else "—"
@@ -638,7 +641,7 @@ class Queen:
                 val, unit, ctx, src_count, _, domains_json, conf = row
                 domains = []
                 try:
-                    domains = json.loads(domains_json) if domains_json else []
+                    domains = domains_json if isinstance(domains_json, list) else (json.loads(domains_json) if isinstance(domains_json, str) and domains_json else [])
                 except (json.JSONDecodeError, ValueError, KeyError) as e:
                     log.debug(f"Parse error: {e}")
                 domain_str = ", ".join(domains[:2]) if domains else "?"

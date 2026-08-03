@@ -69,7 +69,7 @@ _pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
 _pool_lock = threading.Lock()
 
 
-def get_pg_pool(minconn: int = 2, maxconn: int = 20) -> psycopg2.pool.ThreadedConnectionPool:
+def get_pg_pool(minconn: int = 2, maxconn: int = 50) -> psycopg2.pool.ThreadedConnectionPool:
     """Get or create the global connection pool."""
     global _pool
     if _pool is None or _pool.closed:

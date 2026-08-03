@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 import logging
+
+log = logging.getLogger(__name__)
 """
 hive2_events.py — HIVE 2.0 Event Bus & SSE Streaming Infrastructure
 

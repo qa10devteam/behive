@@ -38,11 +38,29 @@ class BeHiveClient:
             return "api"
         try:
             import psycopg2
-            psycopg2.connect(self.db_url).close()
+            url = self.db_url or os.environ.get("DATABASE_URL") or \
+                  f"postgresql://{os.environ.get('HIVE_PG_USER', 'behive')}:" \
+                  f"{os.environ.get('HIVE_PG_PASSWORD', 'behive')}@" \
+                  f"{os.environ.get('HIVE_PG_HOST', 'localhost')}:" \
+                  f"{os.environ.get('HIVE_PG_PORT', '5432')}/" \
+                  f"{os.environ.get('HIVE_PG_DATABASE', 'behive')}"
+            psycopg2.connect(url).close()
+            self.db_url = url
             return "local"
         except Exception:
             pass
-        return "api"  # fallback
+        # No API URL and no DB — give clear error
+        if not self.api_url:
+            raise RuntimeError(
+                "No backend configured. Set one of:\n"
+                "  • BEHIVE_API_URL=http://localhost:8091  (connect to running server)\n"
+                "  • DATABASE_URL=postgresql://...          (direct DB access)\n"
+                "  • OPENAI_API_KEY or ANTHROPIC_API_KEY   (then run: behive serve)\n\n"
+                "Quick start:\n"
+                "  1. behive serve        (starts API server)\n"
+                "  2. behive research 'your topic'  (in another terminal)"
+            )
+        return "api"
     
     async def research(
         self,

@@ -114,7 +114,7 @@ except ImportError:
 try:
     import spacy
     _spacy_available = True
-except ImportError:
+except (ImportError, RuntimeError):
     _spacy_available = False
     spacy = None
 
@@ -1450,7 +1450,7 @@ class FactValidationDrone:
             if value is None:
                 continue
             try:
-                srcs = json.loads(sources_json) if sources_json else []
+                srcs = sources_json if isinstance(sources_json, list) else (json.loads(sources_json) if isinstance(sources_json, str) and sources_json else [])
             except Exception as e:
                 log.debug(f"Suppressed in process.py: {e}")
                 srcs = []
@@ -1875,7 +1875,7 @@ class ProcessingDrones:
                     # Emit progress event for SSE
                     try:
                         from behive.engine.events import emit_event
-                        emit_event(None, mission_id, 'process', 'progress', data={
+                        emit_event(None, self.mission_id, 'process', 'progress', data={
                             'pct': _cur_pct,
                             'docs_done': _docs_done,
                             'docs_total': _total_docs,
@@ -1999,7 +1999,7 @@ class ProcessingDrones:
                 # Emit V4 extraction event for SSE
                 try:
                     from behive.engine.events import emit_event
-                    emit_event(None, mission_id, 'process', 'v4_extraction', data={
+                    emit_event(None, self.mission_id, 'process', 'v4_extraction', data={
                         'claims': v4_claims,
                         'model': 'bedrock-haiku+sonnet',
                     })

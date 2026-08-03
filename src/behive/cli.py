@@ -39,6 +39,8 @@ def main():
     research_p.add_argument("--scale", type=int, default=None, help="Task count (30-300)")
     research_p.add_argument("--json", action="store_true", help="Output JSON instead of text")
     research_p.add_argument("--api", default=None, help="Remote API URL (default: local DB)")
+    research_p.add_argument("--no-db", action="store_true",
+                           help="Run without PostgreSQL (results printed but not saved)")
 
     # ─── status ───────────────────────────────────────────────────────────
     status_p = sub.add_parser("status", help="Check server status")
@@ -57,6 +59,9 @@ def main():
 
     # ─── doctor ──────────────────────────────────────────────────────────
     sub.add_parser("doctor", help="Check system health (DB, LLM, browser, dependencies)")
+
+    # ─── quickstart ──────────────────────────────────────────────────────
+    sub.add_parser("quickstart", help="Interactive first-time setup (Docker or manual)")
 
     # ─── version ──────────────────────────────────────────────────────────
     sub.add_parser("version", help="Show version")
@@ -86,6 +91,8 @@ def main():
         cmd_missions(args)
     elif args.command == "doctor":
         cmd_doctor()
+    elif args.command == "quickstart":
+        cmd_quickstart()
     elif args.command == "version":
         from behive import __version__
         print(f"behive {__version__}")
@@ -273,12 +280,26 @@ async def cmd_research(args):
 
     print(f"\033[33m🐝 Researching: {args.topic}\033[0m")
     print(f"   Depth: {args.depth} | Scale: {args.scale or 'auto'}")
+    if getattr(args, 'no_db', False):
+        print(f"   Mode: \033[36mno-db\033[0m (results not saved, no PostgreSQL needed)")
     print()
+
+    if getattr(args, 'no_db', False):
+        # No-DB mode: run lightweight in-memory research
+        await _research_no_db(args)
+        return
 
     if args.api:
         client = BeHiveClient(api_url=args.api)
     else:
-        client = BeHiveClient()
+        try:
+            client = BeHiveClient()
+        except RuntimeError as e:
+            # Offer --no-db as fallback
+            print(f"\033[31m✗ {e}\033[0m")
+            print()
+            print("\033[33mTip:\033[0m Try \033[1mbehive research '{}' --no-db\033[0m to run without database.".format(args.topic))
+            return
 
     result = await client.research(args.topic, depth=args.depth, scale=args.scale)
 
@@ -287,6 +308,172 @@ async def cmd_research(args):
         print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
     else:
         _print_result(result)
+
+
+async def _research_no_db(args):
+    """Run research in no-DB mode — web search + LLM extraction, results to stdout only."""
+    import time
+    import json as json_mod
+
+    topic = args.topic
+    depth = args.depth
+
+    # Scale down for no-db mode (no persistence, so keep it focused)
+    scale_map = {1: 5, 2: 10, 3: 15, 4: 20, 5: 30}
+    n_sources = args.scale or scale_map.get(depth, 15)
+
+    start = time.time()
+
+    # Step 1: Scout — find sources via web search
+    print("\033[36m  ⟳ Scouting sources...\033[0m")
+    try:
+        sources = await _nodb_scout(topic, n_sources)
+    except Exception as e:
+        print(f"\033[31m  ✗ Scout failed: {e}\033[0m")
+        print(f"    Make sure you have a web search backend configured.")
+        print(f"    Chromium: pip install playwright && playwright install chromium")
+        return
+
+    if not sources:
+        print("\033[31m  ✗ No sources found. Check your internet connection.\033[0m")
+        return
+
+    print(f"\033[32m  ✓\033[0m Found {len(sources)} sources")
+
+    # Step 2: Harvest — fetch content
+    print("\033[36m  ⟳ Harvesting content...\033[0m")
+    pages = await _nodb_harvest(sources)
+    print(f"\033[32m  ✓\033[0m Harvested {len(pages)} pages ({sum(len(p.get('text','')) for p in pages)//1000}KB)")
+
+    # Step 3: Extract claims via LLM
+    print("\033[36m  ⟳ Extracting claims...\033[0m")
+    try:
+        claims = await _nodb_extract(topic, pages)
+    except Exception as e:
+        print(f"\033[31m  ✗ LLM extraction failed: {e}\033[0m")
+        print(f"    Set OPENAI_API_KEY or ANTHROPIC_API_KEY")
+        return
+
+    duration = time.time() - start
+    print(f"\033[32m  ✓\033[0m Extracted {len(claims)} claims in {duration:.1f}s")
+    print()
+
+    # Output
+    if getattr(args, 'json', False):
+        output = {
+            "topic": topic,
+            "claims": claims,
+            "sources": sources[:10],
+            "duration_seconds": round(duration, 1),
+            "mode": "no-db",
+        }
+        print(json_mod.dumps(output, indent=2, ensure_ascii=False))
+    else:
+        print(f"\033[33m─── Results: {topic} ───\033[0m")
+        print(f"    {len(claims)} claims | {len(sources)} sources | {duration:.0f}s")
+        print()
+        for i, claim in enumerate(claims[:20], 1):
+            conf = claim.get("confidence", 0)
+            color = "\033[32m" if conf >= 0.8 else "\033[33m" if conf >= 0.6 else "\033[0m"
+            print(f"  {color}[{conf:.2f}]\033[0m {claim['text'][:120]}")
+            if claim.get("source"):
+                print(f"         \033[90m↳ {claim['source'][:80]}\033[0m")
+
+        print()
+        print(f"\033[90m  Mode: no-db (not saved). For persistence: behive serve + behive research '{topic}'\033[0m")
+
+
+async def _nodb_scout(topic: str, n: int) -> list[str]:
+    """Simple web search for sources."""
+    import asyncio
+    try:
+        from behive.engine.search_backends import search
+        results = await search(topic, max_results=n)
+        return [r["url"] for r in results if r.get("url")]
+    except Exception:
+        # Fallback: basic DuckDuckGo via aiohttp
+        import aiohttp
+        import json
+        url = f"https://html.duckduckgo.com/html/?q={topic.replace(' ', '+')}"
+        return []  # DDG HTML parsing too fragile for fallback
+
+
+async def _nodb_harvest(urls: list[str]) -> list[dict]:
+    """Fetch page content without saving to DB."""
+    import asyncio
+    import aiohttp
+
+    pages = []
+    timeout = aiohttp.ClientTimeout(total=15)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        tasks = [_fetch_page(session, url) for url in urls[:20]]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, dict) and r.get("text"):
+                pages.append(r)
+
+    return pages
+
+
+async def _fetch_page(session, url: str) -> dict:
+    """Fetch a single page."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; BeHive/0.4; +https://behive.site)"}
+        async with session.get(url, headers=headers, ssl=False) as resp:
+            if resp.status == 200:
+                text = await resp.text()
+                # Simple text extraction (strip HTML tags)
+                import re
+                clean = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+                clean = re.sub(r'<style[^>]*>.*?</style>', '', clean, flags=re.DOTALL)
+                clean = re.sub(r'<[^>]+>', ' ', clean)
+                clean = re.sub(r'\s+', ' ', clean).strip()
+                return {"url": url, "text": clean[:8000]}
+    except Exception:
+        pass
+    return {}
+
+
+async def _nodb_extract(topic: str, pages: list[dict]) -> list[dict]:
+    """Extract claims from pages using LLM (no DB needed)."""
+    import asyncio
+    from behive.engine.llm import complete
+
+    # Combine page texts
+    combined = "\n\n---\n\n".join(
+        f"Source: {p['url']}\n{p['text'][:3000]}" for p in pages[:10]
+    )
+
+    prompt = f"""You are a research analyst. Extract factual claims from the sources below about: {topic}
+
+Return a JSON array of claims. Each claim should have:
+- "text": the factual statement (specific, verifiable, with numbers when available)
+- "confidence": 0.0-1.0 how well supported by sources
+- "source": source URL
+
+Focus on specific facts, statistics, dates, and concrete information. Ignore opinions and vague statements.
+Return ONLY the JSON array, no other text.
+
+SOURCES:
+{combined[:12000]}"""
+
+    response = await asyncio.to_thread(complete, prompt, max_tokens=4000)
+
+    # Parse JSON from response
+    import json
+    import re
+
+    # Extract JSON array from response
+    text = response if isinstance(response, str) else str(response)
+    match = re.search(r'\[.*\]', text, re.DOTALL)
+    if match:
+        try:
+            claims = json.loads(match.group())
+            return claims if isinstance(claims, list) else []
+        except json.JSONDecodeError:
+            pass
+    return []
 
 
 def _print_result(result):
@@ -581,3 +768,106 @@ def cmd_missions(args):
 
 if __name__ == "__main__":
     main()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# QUICKSTART — Interactive first-time setup
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cmd_quickstart():
+    """Interactive first-time setup for BeHive."""
+    import shutil
+    from behive import __version__
+
+    print(f"\033[33m🐝 BeHive {__version__} — Quick Setup\033[0m")
+    print("=" * 50)
+    print()
+
+    # Step 1: Check LLM key
+    llm_key = _detect_llm_key()
+    if llm_key:
+        print(f"  \033[32m✓\033[0m LLM key detected ({llm_key})")
+    else:
+        print("  \033[31m✗\033[0m No LLM key found")
+        print()
+        print("  Set one of these environment variables:")
+        print("    export OPENAI_API_KEY=sk-...")
+        print("    export ANTHROPIC_API_KEY=sk-ant-...")
+        print("    export GROQ_API_KEY=gsk_...")
+        print()
+        print("  Then run \033[33mbehive quickstart\033[0m again.")
+        return
+
+    # Step 2: Check Docker
+    has_docker = shutil.which("docker") is not None
+    has_compose = shutil.which("docker") is not None  # docker compose is subcommand now
+
+    print()
+    if has_docker:
+        print(f"  \033[32m✓\033[0m Docker found")
+        print()
+        print("  \033[1mOption A: Docker (recommended, 30 seconds)\033[0m")
+        print("  ┌─────────────────────────────────────────────┐")
+        print("  │  git clone https://github.com/qa10devteam/behive")
+        print("  │  cd behive")
+        print("  │  cp .env.example .env   # add your API key")
+        print("  │  docker compose up -d")
+        print("  │")
+        print("  │  # Ready! Test:")
+        print("  │  behive research 'your topic' --api http://localhost:8091")
+        print("  └─────────────────────────────────────────────┘")
+    else:
+        print(f"  ○ Docker not found (optional)")
+
+    # Step 3: Quick mode (no DB)
+    print()
+    print("  \033[1mOption B: Quick research (no database, no setup)\033[0m")
+    print("  ┌─────────────────────────────────────────────┐")
+    print("  │  behive research 'NVIDIA GPU market' --no-db")
+    print("  │")
+    print("  │  Results printed to stdout. Nothing saved.")
+    print("  │  Perfect for trying BeHive before committing")
+    print("  │  to full self-hosted setup.")
+    print("  └─────────────────────────────────────────────┘")
+
+    # Step 4: Full setup
+    print()
+    print("  \033[1mOption C: Full self-hosted (PostgreSQL)\033[0m")
+    print("  ┌─────────────────────────────────────────────┐")
+    print("  │  sudo apt install postgresql")
+    print("  │  behive db init")
+    print("  │  behive serve")
+    print("  │")
+    print("  │  # In another terminal:")
+    print("  │  behive research 'your topic'")
+    print("  └─────────────────────────────────────────────┘")
+
+    # MCP config
+    print()
+    print("  \033[33m─── MCP Integration (Claude/Cursor/Windsurf) ───\033[0m")
+    print("""  Add to your MCP config:
+  {
+    "mcpServers": {
+      "behive": {
+        "url": "http://localhost:8090/mcp",
+        "transport": "streamable-http"
+      }
+    }
+  }""")
+    print()
+    print("  Docs: https://behive.site")
+    print()
+
+
+def _detect_llm_key() -> str:
+    """Check for available LLM API keys."""
+    import os
+    import shutil
+    for name in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY",
+                 "MISTRAL_API_KEY", "GEMINI_API_KEY", "TOGETHER_API_KEY"]:
+        if os.environ.get(name):
+            return name
+    # Check for Ollama
+    if shutil.which("ollama"):
+        return "ollama (local)"
+    return ""

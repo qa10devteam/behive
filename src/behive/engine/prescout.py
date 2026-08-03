@@ -30,7 +30,7 @@ import json
 import re
 import time
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from behive.engine.db import connect as _db_connect

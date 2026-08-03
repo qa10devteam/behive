@@ -29,13 +29,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sys
 import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from behive.engine.db import connect as _db_connect
@@ -192,6 +193,8 @@ class ClaimDeduplicator:
         self.mission_id = mission_id
 
     def deduplicate(self, db: Any) -> list[CanonicalClaim]:
+        # Cap input claims to avoid O(n²) explosion on depth-5 missions
+        _max_claims = int(os.environ.get("BEHIVE_FALSIFIER_MAX_CLAIMS", "500"))
         rows = db.execute("""
             SELECT id, claim, confidence, source_url
             FROM hive_claims
@@ -200,7 +203,8 @@ class ClaimDeduplicator:
               AND claim IS NOT NULL
               AND LENGTH(claim) > 30
             ORDER BY confidence DESC
-        """, [self.mission_id]).fetchall()
+            LIMIT ?
+        """, [self.mission_id, _max_claims]).fetchall()
 
         if not rows:
             return []
@@ -593,6 +597,10 @@ class NumericalConflictDetector:
         self.mission_id = mission_id
 
     def detect(self, canonicals: list[CanonicalClaim]) -> list[NumericalConflict]:
+        # Cap enriched claims to prevent O(n²) explosion (600 claims = 180K pairs)
+        _max_enriched = int(os.environ.get("BEHIVE_FALSIFIER_MAX_ENRICHED", "200"))
+        _max_conflicts = int(os.environ.get("BEHIVE_FALSIFIER_MAX_CONFLICTS", "100"))
+
         # Dla każdego canonical claim — wyciągnij liczby + kategorie + lata
         enriched: list[dict] = []
         for c in canonicals:
@@ -607,6 +615,9 @@ class NumericalConflictDetector:
                 "categories": set(cats),
                 "years": set(years) or {"unknown"},
             })
+            if len(enriched) >= _max_enriched:
+                log.info(f"  Enriched cap reached ({_max_enriched}), truncating")
+                break
 
         if len(enriched) < 2:
             return []
@@ -676,6 +687,13 @@ class NumericalConflictDetector:
                         ))
                         seen_pairs.add(pair_key)
                         break  # jedna kolizja per para claimów wystarczy
+
+                # Early exit — cap max conflicts to prevent combinatorial explosion
+                if len(conflicts) >= _max_conflicts:
+                    log.info(f"  Conflicts cap reached ({_max_conflicts}), stopping detection early")
+                    break
+            if len(conflicts) >= _max_conflicts:
+                break
 
         # Sort by severity + divergence
         severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2}
@@ -817,13 +835,32 @@ Start with [. No markdown."""
         return [{"resolution": "UNRESOLVED", "notes": "LLM parse error"} for _ in conflicts]
 
     def resolve(self, conflicts: list[NumericalConflict]) -> list[tuple[NumericalConflict, dict]]:
-        """Resolve all conflicts in batches. Returns list of (conflict, resolution) tuples."""
+        """Resolve all conflicts in batches. Returns list of (conflict, resolution) tuples.
+        
+        Has internal time budget — if resolution takes too long, remaining
+        conflicts are marked UNRESOLVED (graceful degradation, not failure).
+        """
         if not conflicts:
             return []
+
+        # Time budget for resolution phase (prevents depth-5 explosion)
+        _time_budget = int(os.environ.get("BEHIVE_FALSIFIER_RESOLVE_TIMEOUT", "300"))
+        _start = time.time()
 
         results: list[tuple[NumericalConflict, dict]] = []
 
         for batch_start in range(0, len(conflicts), self.BATCH_SIZE):
+            # Check time budget
+            elapsed = time.time() - _start
+            if elapsed > _time_budget:
+                log.warning(
+                    f"  ⏱️ Resolution time budget exhausted ({_time_budget}s) — "
+                    f"marking remaining {len(conflicts) - batch_start} conflicts as UNRESOLVED"
+                )
+                for conflict in conflicts[batch_start:]:
+                    results.append((conflict, {"resolution": "UNRESOLVED", "notes": "timeout — time budget exhausted"}))
+                break
+
             batch = conflicts[batch_start: batch_start + self.BATCH_SIZE]
             log.info(f"  Resolving batch {batch_start // self.BATCH_SIZE + 1}: {len(batch)} konfliktów")
             resolutions = self._resolve_batch(batch)

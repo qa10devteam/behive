@@ -37,7 +37,7 @@ import logging
 import os
 import sys
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from behive.engine.db import connect as _db_connect
 
@@ -401,10 +401,12 @@ def _build_context_header(doc: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def ensure_schema(con: Any) -> None:
-    """Create hive_rag_chunks table + HNSW index if they don't exist."""
-    con.execute("INSTALL vss; LOAD vss;")
-    # Required for HNSW persistence on disk-backed databases
-    con.execute("SET hnsw_enable_experimental_persistence = true;")
+    """Create hive_rag_chunks table + vector index if they don't exist."""
+    # PostgreSQL: use pgvector extension instead of DuckDB vss
+    try:
+        con.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+    except Exception:
+        pass  # Extension may already exist or not be available
     con.execute("""
         CREATE TABLE IF NOT EXISTS hive_rag_chunks (
             id            VARCHAR PRIMARY KEY,
@@ -431,7 +433,7 @@ def ensure_schema(con: Any) -> None:
 
     # HNSW index - create only once; PostgreSQL VSS doesn't support IF NOT EXISTS on index
     existing_indexes = con.execute(
-        "SELECT index_name FROM pg_indexes() WHERE table_name='hive_rag_chunks'"
+        "SELECT indexname FROM pg_indexes WHERE tablename='hive_rag_chunks'"
     ).fetchall()
     if not any("hive_rag_hnsw" in str(r) for r in existing_indexes):
         try:
@@ -732,7 +734,11 @@ def _ensure_fts_index(con: Any, mission_id: str) -> bool:
     Dla single-word queries używamy fallback: query duplikowany ('word word').
     """
     try:
-        con.execute("INSTALL fts; LOAD fts;")
+        # PostgreSQL: use built-in FTS or pg_trgm instead of DuckDB fts extension
+        try:
+            con.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+        except Exception:
+            pass
         # Sprawdź czy schema fts_main_hive_rag_chunks już istnieje
         schemas = [r[0] for r in con.execute(
             "SELECT schema_name FROM information_schema.schemata"

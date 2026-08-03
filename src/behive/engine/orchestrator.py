@@ -1607,7 +1607,7 @@ def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict,
     # ═══ PHASE 3.5: FALSIFIER (claim dedup + cross-validation) ══
     # Falsifier can explode combinatorially with many claims × depth-5.
     # Cap at 1200s (20min). If it times out, claims are still valid (just unverified).
-    _falsifier_timeout = int(os.environ.get("BEHIVE_FALSIFIER_TIMEOUT", "1200"))
+    _falsifier_timeout = int(os.environ.get("BEHIVE_FALSIFIER_TIMEOUT", "600"))
     log.debug('  ┌─ PHASE 3.5 · FALSIFIER ────────────────────────────┐')
     try:
         timings['falsifier'] = run_phase(
@@ -1810,7 +1810,7 @@ Return JSON array of 5 strings only."""
     try:
         from behive.engine.queen_primer import QueenPrimer
         from behive.engine.db import connect as _db_connect_qp
-        _con_qp = _hive_db_qp.connect(read_only=True)
+        _con_qp = _db_connect_qp(read_only=True)
         _qp_row = _con_qp.execute(
             "SELECT COALESCE(quality_confidence, 0.5) FROM hive_missions WHERE id=?",
             [mission_id]

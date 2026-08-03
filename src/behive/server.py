@@ -58,8 +58,28 @@ def get_db_url_display():
 
 
 def get_db():
-    import psycopg2
-    return psycopg2.connect(get_db_url())
+    """Connect to PostgreSQL. Returns connection or raises with helpful message."""
+    try:
+        import psycopg2
+    except ImportError:
+        raise RuntimeError(
+            "psycopg2 not installed. Run: pip install 'behive[postgres]' or pip install psycopg2-binary"
+        )
+    url = get_db_url()
+    try:
+        return psycopg2.connect(url)
+    except psycopg2.OperationalError as e:
+        err_msg = str(e)
+        raise RuntimeError(
+            f"Cannot connect to PostgreSQL. {err_msg.strip()}\n\n"
+            "Quick setup:\n"
+            "  1. Install PostgreSQL: sudo apt install postgresql\n"
+            "  2. Create database: behive init-db\n"
+            "  3. Or set DATABASE_URL environment variable\n"
+            f"\n  Tried: {get_db_url_display()}"
+        ) from e
+    except Exception as e:
+        raise RuntimeError(f"Database error: {e}") from e
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -105,7 +125,21 @@ _research_limiter = TokenBucket(rate=5, per=60)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Application lifespan — check DB connectivity on startup."""
     print("🐝 BeHive API starting...")
+    # Validate DB connection at startup (non-fatal — API still serves /health as degraded)
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        conn.close()
+        print("✅ PostgreSQL connected")
+    except RuntimeError as e:
+        print(f"⚠️  Database not available: {e}")
+        print("   The API will start but /research will fail until DB is configured.")
+        print("   Run: behive init-db")
+    except Exception as e:
+        print(f"⚠️  Database check failed: {e}")
     yield
     print("🐝 BeHive API shutdown.")
 

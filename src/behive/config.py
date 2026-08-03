@@ -127,7 +127,9 @@ def load_config() -> dict:
         try:
             import yaml
             with open(CONFIG_FILE) as f:
-                cfg = yaml.safe_load(f) or {}
+                cfg = yaml.safe_load(f)
+            if not isinstance(cfg, dict):
+                cfg = {}
             return cfg
         except ImportError:
             # Fallback: simple key=value parsing

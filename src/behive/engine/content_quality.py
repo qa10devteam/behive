@@ -202,6 +202,7 @@ def quality_label(score: float) -> str:
 # CLI + batch analysis
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    from behive.engine.db import connect as _db_connect_cq
     import sys
 
     if "--audit-mission" in sys.argv:
@@ -213,7 +214,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
         # pg removed — using hive2_db
-        con = _hive_db.connect(read_only=True)
+        con = _db_connect_cq(read_only=True)
         rows = con.execute("""
             SELECT id, url, full_text, word_count
             FROM hive_content

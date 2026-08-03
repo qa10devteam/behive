@@ -1,20 +1,7 @@
 """Scout module — query generation, source discovery, RSS/DDG/API routing, and URL scoring."""
 
 import logging
-#!/usr/bin/env python3
-"""
-HIVE 2.0 — Scout Phase (Queen-Planned Swarm Architecture)
-Executes 200+ parallel scouts, each finding 30-40 URLs from a single source+query.
-
-
 log = logging.getLogger(__name__)
-Usage:
-    MODE 1 (queen-planned):
-        python3 hive2_scout.py <mission_id> --plan <plan_json_file>
-
-    MODE 2 (standalone / testing):
-        python3 hive2_scout.py <mission_id> <topic>
-"""
 
 import sys
 import asyncio
