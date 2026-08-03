@@ -1,0 +1,128 @@
+# BeHive — Open-Source Deep Research Engine
+
+> BeHive is an open-source BYOK (Bring Your Own Key) research engine that extracts structured knowledge from any topic. It produces machine-readable intelligence: typed claims with confidence scores, entity relationship graphs, and synthesized reports — not paragraphs of AI slop.
+
+Install: `pip install behive`
+License: MIT
+Author: QA10 sp. z o.o. (hello@qa10.io)
+Repository: https://github.com/qa10devteam/behive
+PyPI: https://pypi.org/project/behive/
+npm (n8n node): https://www.npmjs.com/package/n8n-nodes-behive
+
+## What Makes BeHive Different
+
+Unlike ChatGPT/Perplexity which output unstructured text, BeHive produces:
+- **Scored claims** — each fact has a confidence score (0.0–1.0) and source citations
+- **Entity graphs** — people, organizations, concepts mapped with typed relationships
+- **Structured JSON** — pipe results into any downstream system (CRM, BI, automation)
+- **Falsification** — depth-5 missions actively try to disprove claims before reporting them
+
+## Key Numbers
+
+- 64 data source APIs (38 free, 26 BYOK)
+- Average claim quality: 0.77
+- 4,400 tests / 65% code coverage
+- Supports any LLM via litellm (Anthropic, OpenAI, Groq, Mistral, Ollama, vLLM, Bedrock, etc.)
+
+## Quick Start
+
+```bash
+pip install behive
+export ANTHROPIC_API_KEY=sk-...   # or OPENAI_API_KEY, or any litellm-supported key
+export BEHIVE_DB_URL=postgresql://user:pass@localhost:5432/behive
+behive serve
+# API at http://localhost:8091, MCP at http://localhost:8090
+```
+
+## Integration Methods
+
+1. **MCP (Model Context Protocol)** — native integration with Claude Desktop, Cursor, Windsurf
+2. **REST API** — `POST /research`, `GET /research/{id}/status`, `GET /research/{id}/report`
+3. **Server-Sent Events** — real-time streaming via `GET /research/{id}/events`
+4. **n8n Community Node** — drag-and-drop in n8n workflows
+5. **Python SDK** — `from behive.client import BeHiveClient`
+6. **CLI** — `behive research "your query here"`
+7. **Docker Compose** — `docker compose up -d` (PostgreSQL included)
+
+## Core Architecture
+
+```
+User Query → Scout (find sources) → Harvest (extract content) → Process (score claims)
+         → Synthesize (build report) → [Optional: Falsify (depth 5)]
+```
+
+### Pipeline Phases
+- **Scout**: Multi-backend search (Brave, SearXNG, Serper, Tavily, Playwright/Bing)
+- **Harvest**: Content extraction from discovered URLs
+- **Process**: Claim extraction, entity recognition, confidence scoring
+- **Synthesize**: Report generation with inline citations
+- **Falsify** (depth 5): Adversarial verification — actively searches for counter-evidence
+
+## API Reference
+
+### Start Research
+```
+POST /research
+Body: {"query": "your research question", "depth": 3}
+Response: {"job_id": "hive_..."}
+```
+
+### Check Status
+```
+GET /research/{job_id}/status
+Response: {"phase": "synth", "progress": 0.8, "claims_count": 42}
+```
+
+### Get Report
+```
+GET /research/{job_id}/report
+Response: {"report": "...", "claims": [...], "entities": [...]}
+```
+
+### Search Knowledge
+```
+GET /claims/search?q=keyword
+Response: {"claims": [{"text": "...", "confidence": 0.89, "sources": [...]}]}
+```
+
+### MCP Tools
+- `research_topic(query, depth)` — start a mission
+- `mission_status(job_id)` — check progress
+- `get_report(job_id)` — retrieve completed report
+- `search_knowledge(query)` — search across all missions
+- `list_missions()` — see recent research
+
+## Configuration
+
+Environment variables:
+- `BEHIVE_MODEL` — LLM model (auto-detected from API keys if not set)
+- `BEHIVE_DB_URL` — PostgreSQL connection string
+- `BEHIVE_MAX_CONCURRENT` — max parallel missions (default: 3)
+- `BEHIVE_PHASE_TIMEOUT` — per-phase timeout in seconds (default: 600)
+- `BEHIVE_SEARCH_BACKEND` — preferred search backend
+
+## Use Cases
+
+- **Competitive intelligence** — monitor competitors, extract pricing, track product changes
+- **Due diligence** — verify company claims, find red flags, map relationships
+- **Market research** — size markets, identify trends, find opportunities
+- **Academic research** — literature review, claim verification, gap analysis
+- **Public procurement** — find tenders, analyze requirements, track awards
+- **Journalism** — fact-checking, source discovery, entity mapping
+
+## Project Structure
+
+- [README.md](README.md) — full documentation with examples
+- [src/behive/server.py](src/behive/server.py) — REST API server (12 endpoints)
+- [src/behive/engine/](src/behive/engine/) — research pipeline (37 modules)
+- [src/behive/mcp_server.py](src/behive/mcp_server.py) — MCP server (5 tools)
+- [src/behive/cli.py](src/behive/cli.py) — CLI interface
+- [src/behive/client.py](src/behive/client.py) — Python SDK client
+- [docker-compose.yml](docker-compose.yml) — full stack with PostgreSQL
+- [pyproject.toml](pyproject.toml) — package metadata and dependencies
+
+## Community
+
+- GitHub Issues: https://github.com/qa10devteam/behive/issues
+- License: MIT — use commercially, fork freely, contribute back
+- Built by QA10 (AI-native venture studio, Katowice, Poland)
