@@ -159,6 +159,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─── Free Tools Routers ──────────────────────────────────────────────────────
+try:
+    from behive.brand_check import router as brand_check_router
+    app.include_router(brand_check_router)
+except ImportError:
+    pass
+
 
 # ─── SSE Event Bus ────────────────────────────────────────────────────────────
 
