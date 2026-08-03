@@ -10,7 +10,7 @@ behive = ["init-db.sql", "engine/hive_api_sources.json"]
 
 [project]
 name = "behive"
-version = "0.5.0"
+version = "0.5.1"
 description = "Research engine that builds structured knowledge graphs from any topic"
 readme = "README.md"
 license = "MIT"
@@ -33,6 +33,7 @@ dependencies = [
     "aiohttp>=3.9",
     "httpx>=0.25",
     "psycopg2-binary>=2.9",
+    "duckdb>=1.0",
     "pydantic>=2.0",
     "litellm>=1.40",
     "feedparser>=6.0",

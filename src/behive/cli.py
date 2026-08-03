@@ -40,7 +40,7 @@ def main():
     research_p.add_argument("--json", action="store_true", help="Output JSON instead of text")
     research_p.add_argument("--api", default=None, help="Remote API URL (default: local DB)")
     research_p.add_argument("--no-db", action="store_true",
-                           help="Run without PostgreSQL (results printed but not saved)")
+                           help="Run with DuckDB (zero setup, results saved locally in ~/.behive/)")
 
     # ─── status ───────────────────────────────────────────────────────────
     status_p = sub.add_parser("status", help="Check server status")
@@ -276,18 +276,31 @@ def _check_env():
 
 async def cmd_research(args):
     """Run a research mission and print results."""
+    import os
     from behive import research, BeHiveClient
 
     print(f"\033[33m🐝 Researching: {args.topic}\033[0m")
     print(f"   Depth: {args.depth} | Scale: {args.scale or 'auto'}")
     if getattr(args, 'no_db', False):
-        print(f"   Mode: \033[36mno-db\033[0m (results not saved, no PostgreSQL needed)")
+        print(f"   Mode: \033[36mDuckDB\033[0m (local storage in ~/.behive/research.duckdb)")
     print()
 
     if getattr(args, 'no_db', False):
-        # No-DB mode: run lightweight in-memory research
-        await _research_no_db(args)
-        return
+        # DuckDB mode: set backend env and use normal pipeline
+        os.environ["BEHIVE_BACKEND"] = "duckdb"
+        # Force re-evaluation of backend
+        import behive.engine.db as _db_mod
+        _db_mod._backend_override = "duckdb"
+        
+        # Try local pipeline directly
+        try:
+            from behive.engine.db_duckdb import is_available
+            if not is_available():
+                print("\033[31m✗ DuckDB not installed. Run: pip install duckdb\033[0m")
+                return
+        except ImportError:
+            print("\033[31m✗ DuckDB not available. Run: pip install 'behive[duckdb]'\033[0m")
+            return
 
     if args.api:
         client = BeHiveClient(api_url=args.api)
@@ -819,15 +832,15 @@ def cmd_quickstart():
     else:
         print(f"  ○ Docker not found (optional)")
 
-    # Step 3: Quick mode (no DB)
+    # Step 3: Quick mode (DuckDB)
     print()
-    print("  \033[1mOption B: Quick research (no database, no setup)\033[0m")
+    print("  \033[1mOption B: Local research (DuckDB, zero setup)\033[0m")
     print("  ┌─────────────────────────────────────────────┐")
     print("  │  behive research 'NVIDIA GPU market' --no-db")
     print("  │")
-    print("  │  Results printed to stdout. Nothing saved.")
-    print("  │  Perfect for trying BeHive before committing")
-    print("  │  to full self-hosted setup.")
+    print("  │  Uses DuckDB (~/.behive/research.duckdb).")
+    print("  │  Results are saved locally. No PostgreSQL.")
+    print("  │  Perfect for solo research and prototyping.")
     print("  └─────────────────────────────────────────────┘")
 
     # Step 4: Full setup

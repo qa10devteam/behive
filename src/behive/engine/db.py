@@ -262,14 +262,43 @@ class PgConnection:
         return sql
 
 
-# ─── Migration Helper ──────────────────────────────────────────────────────
+# ─── Backend Detection ─────────────────────────────────────────────────────
 
-def connect(database: str = None, read_only: bool = False) -> PgConnection:
+# BEHIVE_BACKEND: "postgres" (default if DB configured), "duckdb" (zero-setup fallback)
+_backend_override = os.environ.get("BEHIVE_BACKEND", "").lower()
+
+
+def _should_use_duckdb() -> bool:
+    """Determine if DuckDB should be used instead of PostgreSQL."""
+    if _backend_override == "duckdb":
+        return True
+    if _backend_override == "postgres":
+        return False
+    # Auto-detect: try PostgreSQL first, fall back to DuckDB
+    try:
+        pool = get_pg_pool()
+        conn = pool.getconn()
+        pool.putconn(conn)
+        return False  # PostgreSQL works
+    except Exception:
+        # PostgreSQL unavailable — use DuckDB
+        return True
+
+
+def connect(database: str = None, read_only: bool = False):
     """
-    Primary PostgreSQL connection factory..
-    Ignores `database` param (always connects to hive DB).
-    `read_only` sets autocommit mode (no write txn overhead).
+    Primary connection factory — auto-selects backend.
+    
+    Priority:
+      1. BEHIVE_BACKEND=postgres → PostgreSQL only (fails if unavailable)
+      2. BEHIVE_BACKEND=duckdb → DuckDB only
+      3. Auto: try PostgreSQL → fallback to DuckDB (~/.behive/research.duckdb)
+    
+    Returns PgConnection or DuckDBConnection (same interface).
     """
+    if _should_use_duckdb():
+        from behive.engine.db_duckdb import DuckDBConnection
+        return DuckDBConnection(read_only=read_only)
     return PgConnection(read_only=read_only)
 
 

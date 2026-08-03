@@ -36,6 +36,7 @@ class BeHiveClient:
     def _detect_backend(self) -> str:
         if self.api_url:
             return "api"
+        # Try PostgreSQL
         try:
             import psycopg2
             url = self.db_url or os.environ.get("DATABASE_URL") or \
@@ -49,16 +50,23 @@ class BeHiveClient:
             return "local"
         except Exception:
             pass
-        # No API URL and no DB — give clear error
+        # Try DuckDB (zero-setup fallback)
+        try:
+            from behive.engine.db_duckdb import is_available, get_db_path
+            if is_available():
+                os.environ["BEHIVE_BACKEND"] = "duckdb"
+                return "local"
+        except ImportError:
+            pass
+        # No backend available — give clear error
         if not self.api_url:
             raise RuntimeError(
-                "No backend configured. Set one of:\n"
+                "No backend configured. Options:\n"
+                "  • behive research 'topic' --no-db  (uses DuckDB, zero setup)\n"
                 "  • BEHIVE_API_URL=http://localhost:8091  (connect to running server)\n"
-                "  • DATABASE_URL=postgresql://...          (direct DB access)\n"
-                "  • OPENAI_API_KEY or ANTHROPIC_API_KEY   (then run: behive serve)\n\n"
+                "  • DATABASE_URL=postgresql://...          (direct PostgreSQL)\n\n"
                 "Quick start:\n"
-                "  1. behive serve        (starts API server)\n"
-                "  2. behive research 'your topic'  (in another terminal)"
+                "  pip install behive && behive research 'your topic' --no-db"
             )
         return "api"
     
