@@ -359,9 +359,11 @@ def cross_source_corroboration(con: Any, mission_id: str) -> dict:
     """
     log.info(f"  [Layer 1.5] Cross-source corroboration for mission {mission_id}")
 
-    # Ensure 'verified' column exists — the spec defines it but it may be absent in older DBs
+    # Ensure 'verified' column exists — the spec defines it but it may be absent in older DBs.
+    # Catalog check first: the runtime role does not own hive_claims (no DDL noise).
     try:
-        con.execute("ALTER TABLE hive_claims ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE")
+        from behive.engine.db_helpers import ensure_column
+        ensure_column(con, "hive_claims", "verified", "BOOLEAN DEFAULT FALSE")
     except Exception as e:
         log.debug(f"  [Layer 1.5] verified column check: {e}")
 

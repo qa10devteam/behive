@@ -1707,13 +1707,13 @@ class ClaimCrossValidationDrone:
     CONFIDENCE_MAX       = 0.95
 
     def run(self, con: Any, mission_id: str) -> int:
-        # Dodaj evidence_flags if not istnieje
         """Execute the main pipeline loop."""
+        # evidence_flags: catalog check first; the runtime role does not own hive_claims.
         try:
-            con.execute("ALTER TABLE hive_claims ADD COLUMN IF NOT EXISTS evidence_flags VARCHAR")
+            from behive.engine.db_helpers import ensure_column
+            ensure_column(con, "hive_claims", "evidence_flags", "VARCHAR")
         except Exception as e:
             log.debug(f"Suppressed in process.py: {e}")
-            pass  # może not wspierać IF NOT EXISTS — ignoruj
 
         try:
             rows = con.execute("""

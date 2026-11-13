@@ -48,6 +48,38 @@ def _get_pg():
     raise RuntimeError("DuckDB removed from HIVE. Use behive.engine.db.connect() for PostgreSQL.")
 
 
+def column_exists(con, table: str, column: str) -> bool | None:
+    """Whether ``table.column`` is visible on the session's search path.
+
+    Returns None when the catalog cannot be read (non-PostgreSQL backend, test
+    double); callers then keep their previous behaviour.
+    """
+    try:
+        row = con.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_name = ? AND column_name = ? "
+            "AND table_schema = ANY(current_schemas(false)) LIMIT 1",
+            [table, column],
+        ).fetchone()
+    except Exception as exc:
+        log.debug("column check %s.%s unavailable (%s)", table, column, type(exc).__name__)
+        return None
+    return row is not None
+
+
+def ensure_column(con, table: str, column: str, ddl_type: str) -> bool:
+    """Add a missing column; never send DDL for an existing one.
+
+    The runtime role does not own the hive tables. PostgreSQL checks ownership
+    before ``IF NOT EXISTS``, so an unconditional ALTER logs an ERROR on every
+    pass even when the column exists. Returns True when an ALTER was issued.
+    Errors of a really needed ALTER propagate to the caller.
+    """
+    if column_exists(con, table, column):
+        return False
+    con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl_type}")
+    return True
+
+
 def _strip_sql_comments(sql: str) -> str:
     """Strip leading/inline -- comments from a SQL statement block."""
     lines = []
