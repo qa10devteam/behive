@@ -625,6 +625,9 @@ class WikipediaBackend(SearchBackend):
     """MediaWiki search — works when Google/DDG/SearXNG are CAPTCHA'd."""
     name = "wikipedia"
     priority = 90
+    # Wikimedia refuses (403) requests without a descriptive agent. Sent on every
+    # request: SearchEngine's shared session carries no default headers.
+    USER_AGENT = "BeHive/0.6 (https://api.behive.site; wikipedia-fallback)"
     _sem = asyncio.Semaphore(2)
     _cache: dict = {}
     _JUNK = re.compile(
@@ -655,9 +658,7 @@ class WikipediaBackend(SearchBackend):
             return WikipediaBackend._cache[key][:max_results]
         own = session is None
         if own:
-            session = aiohttp.ClientSession(
-                headers={"User-Agent": "BeHive/0.6 (https://api.behive.site; wikipedia-fallback)"}
-            )
+            session = aiohttp.ClientSession(headers={"User-Agent": WikipediaBackend.USER_AGENT})
         try:
             async with WikipediaBackend._sem:
                 params = {
@@ -671,6 +672,7 @@ class WikipediaBackend(SearchBackend):
                 async with session.get(
                     f"https://{language}.wikipedia.org/w/api.php",
                     params=params,
+                    headers={"User-Agent": WikipediaBackend.USER_AGENT},
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status != 200:
