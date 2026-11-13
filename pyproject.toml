@@ -89,6 +89,8 @@ markers = [
     "integration: requires PostgreSQL",
     "e2e: full pipeline end-to-end (slow)",
     "regression: regression tests for past bugs",
+    "pg_harness: needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); skipped in the main suite",
+    "live: needs internet, Qdrant or a real LLM key; skipped unless BEHIVE_RUN_LIVE=1",
 ]
 addopts = "-v --tb=short"
 asyncio_mode = "auto"

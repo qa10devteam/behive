@@ -10,6 +10,24 @@ import os
 import json
 from unittest.mock import patch, MagicMock
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test selection — private PG harness tests and live tests are not part of the
+# default (main suite) run. They are skipped with a reason, never silently dropped.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def pytest_collection_modifyitems(config, items):
+    has_pg_harness = bool(os.environ.get("CLAIM_TEST_PG_DSN"))
+    run_live = os.environ.get("BEHIVE_RUN_LIVE") == "1"
+    skip_pg = pytest.mark.skip(
+        reason="pg_harness: needs the private PostgreSQL harness (CLAIM_TEST_PG_DSN, run_suite.sh pg)")
+    skip_live = pytest.mark.skip(reason="live: needs internet, Qdrant or an LLM key; set BEHIVE_RUN_LIVE=1")
+    for item in items:
+        if not has_pg_harness and item.get_closest_marker("pg_harness") is not None:
+            item.add_marker(skip_pg)
+        if not run_live and item.get_closest_marker("live") is not None:
+            item.add_marker(skip_live)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SINGLETON PgConnection — ONE connection for ALL tests
 # ═══════════════════════════════════════════════════════════════════════════════
