@@ -182,7 +182,70 @@ def _codex_bridge_enabled(strict: bool, model: str) -> bool:
 
 
 _BRIDGE_BUSY_MESSAGE = "Local concurrency limit reached; retry later."
-_BUSY_DEADLINE_MARGIN_S = 2.0
+
+# ── Phase deadline (BEHIVE_PHASE_DEADLINE, epoch seconds, set by run_phase) ──────
+# Every model call of a phase must end before the deadline, with time left to
+# persist its result, and no call starts once too little time is left.
+DEADLINE_MARGIN_S = 5.0         # kept after a call for committing its result
+_MIN_CALL_S_DEFAULT = 10.0      # BEHIVE_LLM_MIN_CALL_S: never start a shorter call
+
+
+class PhaseDeadlineExceeded(RuntimeError):
+    """The phase deadline leaves no time for another model call; nothing was sent."""
+
+
+def _now() -> float:
+    return time.time()
+
+
+def phase_deadline() -> Optional[float]:
+    """BEHIVE_PHASE_DEADLINE as epoch seconds, or None when unset/invalid."""
+    try:
+        value = float(os.environ.get("BEHIVE_PHASE_DEADLINE", ""))
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def deadline_remaining() -> Optional[float]:
+    """Seconds a model call may still use (deadline minus margin); None: no deadline."""
+    deadline = phase_deadline()
+    if deadline is None:
+        return None
+    return deadline - _now() - DEADLINE_MARGIN_S
+
+
+def _min_call_s() -> float:
+    try:
+        value = float(os.environ.get("BEHIVE_LLM_MIN_CALL_S", ""))
+    except (TypeError, ValueError):
+        return _MIN_CALL_S_DEFAULT
+    return value if math.isfinite(value) and value >= 0 else _MIN_CALL_S_DEFAULT
+
+
+def deadline_call_timeout(timeout: Optional[float], stage: str = "process") -> Optional[float]:
+    """The call timeout capped by the phase deadline; raises before a call that
+    could not finish in time (PhaseDeadlineExceeded)."""
+    remaining = deadline_remaining()
+    if remaining is None:
+        return timeout
+    if remaining < _min_call_s():
+        log.info("LLM call not started: phase deadline (stage=%s remaining_s=%.1f)",
+                 stage, max(remaining, 0.0))
+        raise PhaseDeadlineExceeded(
+            f"phase deadline leaves {max(remaining, 0.0):.0f}s for a model call")
+    return remaining if timeout is None else min(timeout, remaining)
+
+
+def is_deadline_timeout(exc: BaseException) -> bool:
+    """A call cut by the phase deadline (refused, or its capped timeout fired)."""
+    if isinstance(exc, PhaseDeadlineExceeded):
+        return True
+    remaining = deadline_remaining()
+    if remaining is None or remaining > 0:
+        return False
+    name = type(exc).__name__.lower()
+    return "timeout" in name or "timedout" in name
 
 
 def _local_bridge_busy(exc: Exception) -> bool:
@@ -234,18 +297,22 @@ class _BridgeBusyWait:
         self.started = time.monotonic()
         self.waited = 0.0
         self.retries = 0
-        try:
-            deadline = float(os.environ.get("BEHIVE_PHASE_DEADLINE", ""))
-        except ValueError:
-            deadline = math.inf
-        self.deadline = deadline if math.isfinite(deadline) else math.inf
+        self.deadline_reached = False
+        deadline = phase_deadline()
+        self.deadline = deadline if deadline is not None else math.inf
 
     def delay(self, exc: Exception) -> float | None:
         if not _local_bridge_busy(exc):
             return None
+        # Never sleep into the window where no call may start any more; stopping
+        # there is the phase deadline's doing (callers defer), not a provider error.
+        window = self.deadline - _now() - DEADLINE_MARGIN_S - _min_call_s()
+        if window <= 0:
+            self.deadline_reached = True
+            return None
         remaining = min(self.limit - self.waited,
                         self.limit - (time.monotonic() - self.started),
-                        self.deadline - time.time() - _BUSY_DEADLINE_MARGIN_S)
+                        window)
         if remaining <= 0:
             return None
         delay = min(5.0 * 2 ** min(self.retries, 3), 30.0, remaining)
@@ -255,12 +322,10 @@ class _BridgeBusyWait:
                  self.retries, delay, type(exc).__name__)
         return delay
 
-    def prepare_retry(self, kwargs: dict) -> bool:
-        remaining = self.deadline - time.time() - _BUSY_DEADLINE_MARGIN_S
-        if remaining <= 0:
-            return False
-        if math.isfinite(remaining):
-            kwargs["timeout"] = min(kwargs.get("timeout") or remaining, remaining)
+    def prepare_retry(self, kwargs: dict, timeout: Optional[float] = None, stage: str = "process") -> bool:
+        """Re-cap the retry by the phase deadline (raises PhaseDeadlineExceeded when
+        no call can start any more)."""
+        kwargs["timeout"] = deadline_call_timeout(timeout if timeout is not None else kwargs.get("timeout"), stage)
         return True
 
 
@@ -287,7 +352,10 @@ def complete(
         Generated text (str). Legacy failures may fall back to direct APIs.
         BEHIVE_LLM_STRICT=1 propagates failures with no provider retries/fallback.
         Only local bridge_busy waits: 5/10/20/30 s backoff, capped by
-        BEHIVE_LLM_BUSY_WAIT_S (default 90) and the phase deadline minus 2 s.
+        BEHIVE_LLM_BUSY_WAIT_S (default 90) and by the phase deadline: every call's
+        timeout ends 5 s before BEHIVE_PHASE_DEADLINE, no call starts with less than
+        BEHIVE_LLM_MIN_CALL_S (default 10 s) left (PhaseDeadlineExceeded), and the
+        busy wait never sleeps into that window.
         BEHIVE_LLM_TIMEOUT: finite seconds in (0, 3600]; default 25 (strict: 180).
         BEHIVE_LLM_CODEX_BRIDGE=1 requires strict + exact model/loopback base;
         only that route omits temperature/max_tokens, without a hard token cap.
@@ -324,7 +392,9 @@ def complete(
         kwargs = {
             "model": model,
             "messages": messages,
-            "timeout": timeout,
+            # Capped by the phase deadline; PhaseDeadlineExceeded before a call
+            # that could not finish in time.
+            "timeout": deadline_call_timeout(timeout, stage),
         }
         if not codex_bridge:
             kwargs.update(max_tokens=max_tokens, temperature=temperature)
@@ -351,14 +421,18 @@ def complete(
                 except Exception as exc:
                     delay = busy.delay(exc)
                     if delay is None:
+                        if busy.deadline_reached:
+                            raise PhaseDeadlineExceeded("bridge busy until the phase deadline") from None
                         raise
                     time.sleep(delay)
-                    if not busy.prepare_retry(kwargs):
-                        raise
+                    busy.prepare_retry(kwargs, timeout, stage)
 
         # Retry with exponential backoff (handles rate limits, transient failures)
         last_error = None
         for attempt in range(3):
+            if attempt:
+                # A retry is a new call: it must fit the phase deadline too.
+                kwargs["timeout"] = deadline_call_timeout(timeout, stage)
             try:
                 response = litellm.completion(**kwargs)
                 return response.choices[0].message.content or ""
@@ -386,7 +460,11 @@ def complete(
             raise
         log.warning("litellm not installed. Falling back to direct API calls.")
         log.warning("Install litellm for 100+ provider support: pip install litellm")
+    except PhaseDeadlineExceeded:
+        raise  # never fall through to another provider call after the deadline
     except Exception as e:
+        if is_deadline_timeout(e):
+            raise PhaseDeadlineExceeded("model call cut by the phase deadline") from None
         if strict:
             raise
         err_str = str(e).lower()
@@ -397,6 +475,7 @@ def complete(
         # Fall through to direct calls as last resort
     
     # Fallback: direct API calls (supports Anthropic, OpenAI, Bedrock only)
+    deadline_call_timeout(timeout, stage)  # no fallback call after the deadline
     return _direct_call(model, prompt, system, max_tokens, temperature)
 
 
@@ -438,6 +517,7 @@ async def complete_async(
         }
         if not codex_bridge:
             kwargs.update(max_tokens=max_tokens, temperature=temperature)
+        timeout = deadline_call_timeout(timeout, stage)
         if timeout is not None:
             kwargs["timeout"] = timeout
         
@@ -462,10 +542,11 @@ async def complete_async(
                 except Exception as exc:
                     delay = busy.delay(exc)
                     if delay is None:
+                        if busy.deadline_reached:
+                            raise PhaseDeadlineExceeded("bridge busy until the phase deadline") from None
                         raise
                     await _busy_asyncio.sleep(delay)
-                    if not busy.prepare_retry(kwargs):
-                        raise
+                    busy.prepare_retry(kwargs, timeout, stage)
 
         response = await litellm.acompletion(**kwargs)
         return response.choices[0].message.content or ""
@@ -475,7 +556,11 @@ async def complete_async(
             raise
         import asyncio
         return await asyncio.to_thread(complete, prompt, stage, system, max_tokens, temperature, json_mode)
+    except PhaseDeadlineExceeded:
+        raise  # callers defer the work; an empty answer would look like a real one
     except Exception as e:
+        if is_deadline_timeout(e):
+            raise PhaseDeadlineExceeded("model call cut by the phase deadline") from None
         if strict:
             raise
         log.error("Async LLM call failed (model=%s, error_type=%s)", model, type(e).__name__)
@@ -531,7 +616,7 @@ def _call_anthropic(model: str, prompt: str, system: str, max_tokens: int, tempe
             "system": system or "You are a research assistant.",
             "messages": [{"role": "user", "content": prompt}],
         },
-        timeout=120.0,
+        timeout=deadline_call_timeout(120.0),  # capped by the phase deadline
     )
     response.raise_for_status()
     data = response.json()
@@ -566,7 +651,7 @@ def _call_openai(model: str, prompt: str, system: str, max_tokens: int, temperat
             "max_tokens": max_tokens,
             "temperature": temperature,
         },
-        timeout=120.0,
+        timeout=deadline_call_timeout(120.0),  # capped by the phase deadline
     )
     response.raise_for_status()
     data = response.json()

@@ -781,10 +781,21 @@ class RelevanceFilter:
                     return await self.score_batch(chunk)
 
         results = await asyncio.gather(*(judge(chunk) for chunk in chunks), return_exceptions=True)
-        failed_batches = 0
+        from behive.engine.llm import is_deadline_timeout
+        failed_batches = deferred_batches = 0
         for chunk, judgments in zip(chunks, results):
             if isinstance(judgments, BaseException) and not isinstance(judgments, Exception):
                 raise judgments  # cancellation is not a provider failure
+            if isinstance(judgments, Exception) and is_deadline_timeout(judgments):
+                # The phase deadline, not the provider, stopped this batch: no
+                # grade and no keyword admission. Without a stored grade the next
+                # pass judges these documents again.
+                deferred_batches += 1
+                for doc in chunk:
+                    doc['_relevance_method'] = 'deadline_deferred'
+                    doc['_relevance_reason'] = 'phase_deadline'
+                    doc['_relevance_score'] = 0.0
+                continue
             if isinstance(judgments, Exception):
                 failed_batches += 1
                 fallback_kept = 0
@@ -812,6 +823,11 @@ class RelevanceFilter:
                 grade_counts[grade] += 1
                 if grade >= 1:
                     passed.append(doc)
+        if deferred_batches:
+            log.warning('RelevanceFilter: %s of %s model batches deferred by the phase deadline '
+                        '(docs=%s, not admitted)', deferred_batches, len(chunks),
+                        sum(len(c) for c, r in zip(chunks, results)
+                            if isinstance(r, Exception) and is_deadline_timeout(r)))
         if chunks and failed_batches == len(chunks):
             log.error(
                 'RelevanceFilter: all %s model batches failed; keyword-only fallback '

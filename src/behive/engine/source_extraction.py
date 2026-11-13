@@ -84,7 +84,7 @@ async def extract_source_claims(
     Return order and consecutive failures follow document order, not completion
     order. Callers without a callback retain the list-returning interface.
     """
-    from behive.engine.llm import complete
+    from behive.engine.llm import complete, is_deadline_timeout
 
     clock = clock or time.time
     deadline = _phase_deadline()
@@ -97,6 +97,7 @@ async def extract_source_claims(
     active: dict[asyncio.Task, float] = {}
     next_index = 0
     deadline_stop = False
+    deadline_interrupted = 0  # pages whose model call the deadline cut (not attempted)
     fatal: tuple[Exception, str] | None = None
     counts = dict(documents_input=len(docs), documents_considered=0,
                   documents_capped=max(0, len(docs) - MAX_DOCUMENTS),
@@ -125,7 +126,7 @@ async def extract_source_claims(
         return now + DEADLINE_RESERVE_S + expected <= deadline
 
     async def extract_document(index: int, doc: dict) -> None:
-        nonlocal deadline_stop, fatal, last_transient
+        nonlocal deadline_stop, deadline_interrupted, fatal, last_transient
         document_stage = "input"
         try:
             if fatal is not None:
@@ -166,6 +167,13 @@ async def extract_source_claims(
                     )
                     break
                 except Exception as exc:
+                    if is_deadline_timeout(exc):
+                        # Refused or cut by the phase deadline: not a provider
+                        # failure. No commit, so the page stays pending for the
+                        # next pass, and no further pages are admitted.
+                        deadline_stop = True
+                        deadline_interrupted += 1
+                        return
                     if type(exc).__name__ not in TRANSIENT_PROVIDER_ERRORS:
                         raise
                     counts["transient_errors"] += 1
@@ -285,7 +293,8 @@ async def extract_source_claims(
         raise
     finally:
         if deadline_stop:
-            counts["documents_deadline_deferred"] = len(selected_docs) - counts["documents_considered"]
+            counts["documents_deadline_deferred"] = (len(selected_docs) - counts["documents_considered"]
+                                                     + deadline_interrupted)
         if progress is not None:
             progress.status = status
             progress.counts = dict(counts)

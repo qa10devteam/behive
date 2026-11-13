@@ -105,20 +105,37 @@ def test_busy_wait_budget_is_bounded(busy_harness, monkeypatch, mode, budget, ex
     h.direct.assert_not_called()
 
 
+# Contract since 2026-11-13 (diag task 2): every call's timeout ends 5 s before the
+# phase deadline, no call starts with less than 10 s left, and the busy wait never
+# sleeps into that window. (Before, the first call was uncapped and could start 1 s
+# before the deadline.)
 @pytest.mark.parametrize('mode', ['sync', 'async'])
-@pytest.mark.parametrize('deadline,sleeps,attempts', [('1014', [5, 7], 2), ('1001', [], 1)])
-def test_busy_wait_never_crosses_phase_deadline_margin(busy_harness, monkeypatch, mode, deadline, sleeps, attempts):
+def test_busy_wait_never_crosses_phase_deadline_margin(busy_harness, monkeypatch, mode):
     h, clock = busy_harness
+    monkeypatch.setenv('BEHIVE_LLM_STRICT', '1')
+    monkeypatch.setenv('BEHIVE_PHASE_DEADLINE', '1030')
+    called(h, mode).side_effect = rate_error()
+    with pytest.raises(h.llm.PhaseDeadlineExceeded):  # stopped by the deadline, not the busy budget
+        invoke(h, mode)
+    assert clock.sleeps == [5, 10]
+    assert called(h, mode).call_count == 3
+    # Calls start at 1000, 1005 and 1015; each ends by deadline - 5 s.
+    assert [c.kwargs['timeout'] for c in called(h, mode).call_args_list] == [25, 20, 10]
+    assert clock.now <= 1030 - 5 - 10
+    h.direct.assert_not_called()
+
+
+@pytest.mark.parametrize('mode', ['sync', 'async'])
+@pytest.mark.parametrize('deadline', ['1014', '1001'])
+def test_no_call_starts_inside_the_phase_deadline_margin(busy_harness, monkeypatch, mode, deadline):
+    h, clock = busy_harness
+    PhaseDeadlineExceeded = h.llm.PhaseDeadlineExceeded  # the harness's own module copy
     monkeypatch.setenv('BEHIVE_LLM_STRICT', '1')
     monkeypatch.setenv('BEHIVE_PHASE_DEADLINE', deadline)
     called(h, mode).side_effect = rate_error()
-    with pytest.raises(RateLimitError):
+    with pytest.raises(PhaseDeadlineExceeded):
         invoke(h, mode)
-    assert clock.sleeps == sleeps
-    assert called(h, mode).call_count == attempts
-    assert clock.now <= max(1000, float(deadline) - 2)
-    if attempts > 1:
-        assert called(h, mode).call_args_list[1].kwargs['timeout'] <= 7
+    assert called(h, mode).call_count == 0 and clock.sleeps == []
     h.direct.assert_not_called()
 
 

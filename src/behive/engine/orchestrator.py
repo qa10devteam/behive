@@ -1304,6 +1304,12 @@ def run_phase(script: str, args: list[str], phase_name: str,
     is_synth = any(k in script for k in ('master_intelligence', 'synth'))
     default_timeout = 900 if is_synth and timeout == 600 else timeout
     timeout = int(os.environ.get("BEHIVE_PHASE_TIMEOUT", str(default_timeout)))
+    # The child gets an earlier deadline (BEHIVE_PHASE_DEADLINE) than the parent's
+    # kill: model calls are capped by it and no call starts after it, so the phase
+    # ends by itself and commits finished documents. At the parent's timeout the
+    # group gets SIGTERM, then SIGKILL after a short wait.
+    grace = min(max(15.0, 0.1 * timeout), 60.0, timeout / 4)
+    term_wait = min(10.0, max(1.0, timeout / 10))
     cmd = _resolve_cmd(script) + list(args)
     tag = "".join(c if c.isalnum() or c in "-_" else "_"
                   for c in (args[0] if args else "na"))[:48]
@@ -1326,12 +1332,30 @@ def run_phase(script: str, args: list[str], phase_name: str,
             proc = subprocess.Popen(
                 cmd, shell=False, stdout=output, stderr=output,
                 env={**os.environ, "HIVE_PARENT_PID": str(os.getpid()),
-                     "BEHIVE_PHASE_DEADLINE": str(time.time() + timeout)},
+                     "BEHIVE_PHASE_DEADLINE": str(time.time() + timeout - grace)},
                 start_new_session=True,
             )
             try:
                 pid_file.write_text(str(proc.pid))
                 returncode = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                log.warning("[%s] phase timeout (%ss): SIGTERM, SIGKILL after %.0fs",
+                            phase_name, timeout, term_wait)
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    proc.wait(timeout=term_wait)
+                except subprocess.TimeoutExpired:
+                    pass
+                # Descendants too, even if the direct child already exited.
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait()
+                raise
             except BaseException:
                 # The session/group belongs to this Popen, never a stale PID file.
                 # Kill descendants too, even if the direct child already exited.

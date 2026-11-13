@@ -37,7 +37,10 @@ def test_run_phase_exports_effective_wall_clock_deadline(monkeypatch, tmp_path, 
         after = time.time()
         data = json.loads(log.read_text().splitlines()[0])
         deadline = float(data['deadline'])
-        assert before + effective <= deadline <= after + effective
+        # Since 2026-11-13 (diag task 2) the child's deadline precedes the parent's
+        # kill by a grace of min(max(15 s, 10%), 60 s, 25%): the phase ends itself.
+        exported = effective - min(max(15.0, 0.1 * effective), 60.0, effective / 4)
+        assert before + exported <= deadline <= after + exported
         assert before <= data['now'] <= after
         assert data['parent'] == str(os.getpid())
         assert 'EXIT:0' in log.read_text() and not pid.exists()
