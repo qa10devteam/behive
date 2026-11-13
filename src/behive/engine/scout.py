@@ -227,17 +227,47 @@ class SwarmScout:
     # ── Init ──────────────────────────────────────────────────────────────────
 
     def _init_sequence(self):
-        """Create/reset hive_sources_id_seq above current max."""
+        """Make sure hive_sources_id_seq exists and is ahead of max(id). Never drop it.
+
+        The old DROP/CREATE ran on every mission: in production the runtime role
+        does not own the sequence (ERROR 'must be owner' in the PostgreSQL log), and
+        on a fresh install a second concurrent scout could drop the sequence between
+        another scout's DROP and CREATE, failing its inserts. Now: create only when
+        missing, advance (setval) only when behind max(id) and only with the
+        privileges to read and update it; never rewind. A session advisory lock
+        serialises concurrent scouts of this database.
+        """
+        locked = False
         try:
-            max_id = self.db.execute(
-                "SELECT COALESCE(MAX(id), 0) FROM hive_sources"
-            ).fetchone()[0]
-            self.db.execute("DROP SEQUENCE IF EXISTS hive_sources_id_seq")
-            self.db.execute(
-                f"CREATE SEQUENCE hive_sources_id_seq START {max_id + 500}"
-            )
+            self.db.execute("SELECT pg_advisory_lock(hashtextextended('behive:hive_sources_id_seq', 0))")
+            locked = True
+            exists = self.db.execute(
+                "SELECT to_regclass('hive_sources_id_seq') IS NOT NULL").fetchone()[0]
+            if not exists:
+                self.db.execute("CREATE SEQUENCE IF NOT EXISTS hive_sources_id_seq")
+            can_read, can_update = self.db.execute(
+                "SELECT has_sequence_privilege('hive_sources_id_seq', 'SELECT'), "
+                "has_sequence_privilege('hive_sources_id_seq', 'UPDATE')").fetchone()
+            if not (can_read and can_update):
+                log.debug("  [init_seq] no SELECT/UPDATE on hive_sources_id_seq; leaving it as is")
+                return
+            max_id = self.db.execute("SELECT COALESCE(MAX(id), 0) FROM hive_sources").fetchone()[0]
+            last_value, is_called = self.db.execute(
+                "SELECT last_value, is_called FROM hive_sources_id_seq").fetchone()
+            next_value = last_value + 1 if is_called else last_value
+            if next_value <= max_id:
+                # GREATEST keeps any advance made meanwhile by nextval; never rewinds.
+                self.db.execute(
+                    "SELECT setval('hive_sources_id_seq', GREATEST(%s, "
+                    "(SELECT last_value FROM hive_sources_id_seq)), true)", [max_id])
         except Exception as e:
             log.debug(f"  [init_seq] warning: {e}")
+        finally:
+            if locked:
+                try:
+                    self.db.execute("SELECT pg_advisory_unlock(hashtextextended('behive:hive_sources_id_seq', 0))")
+                except Exception as e:
+                    log.debug(f"  [init_seq] unlock warning: {e}")
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
