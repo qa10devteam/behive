@@ -3,6 +3,11 @@ import importlib
 from pathlib import Path
 import sys
 from test_repair1022_support import live_db
+import pytest
+
+# Needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); the main
+# suite skips it with a reason (tests/conftest.py), the PG harness runs it.
+pytestmark = pytest.mark.pg_harness
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 

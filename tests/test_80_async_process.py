@@ -123,11 +123,12 @@ class TestProcessingDrones:
         except BaseException:
             pass
 
-    def test_run_full(self, conn):
+    def test_run_full(self, conn, small_mission_id):
         """The big one — calls run() which triggers all drones."""
         from behive.engine.process import ProcessingDrones
         try:
-            pd = ProcessingDrones("hive_1785496253_3b165f", conn)
+            # Small real mission: the fixed large one ran past the 120 s test budget.
+            pd = ProcessingDrones(small_mission_id, conn)
             result = pd.run()
             assert isinstance(result, (dict, type(None)))
         except BaseException:

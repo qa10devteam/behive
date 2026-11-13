@@ -125,6 +125,10 @@ class TestContentQualityBranches:
         assert is_covert_infected(text) is False
 
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+@pytest.mark.real_subprocess  # real python -m runs; the conftest fake returns no output
 class TestContentQualityCli:
     """Test __main__ CLI paths via subprocess."""
 
@@ -133,7 +137,7 @@ class TestContentQualityCli:
         result = subprocess.run(
             [sys.executable, "-m", "behive.engine.content_quality", "--test"],
             capture_output=True, text=True, timeout=10,
-            cwd="/home/ubuntu/behive-pkg",
+            cwd=_REPO_ROOT,  # was the old /home/ubuntu tree
             env={**os.environ, "PYTHONPATH": "src"}
         )
         assert "Quality" in result.stdout or "EXCELLENT" in result.stdout or result.returncode == 0
@@ -144,7 +148,7 @@ class TestContentQualityCli:
             [sys.executable, "-m", "behive.engine.content_quality"],
             input="AI market grew 23% to $184B in 2024 according to Gartner data.",
             capture_output=True, text=True, timeout=10,
-            cwd="/home/ubuntu/behive-pkg",
+            cwd=_REPO_ROOT,  # was the old /home/ubuntu tree
             env={**os.environ, "PYTHONPATH": "src"}
         )
         assert "Quality" in result.stdout or result.returncode == 0
@@ -155,7 +159,7 @@ class TestContentQualityCli:
             [sys.executable, "-m", "behive.engine.content_quality"],
             input="",
             capture_output=True, text=True, timeout=10,
-            cwd="/home/ubuntu/behive-pkg",
+            cwd=_REPO_ROOT,  # was the old /home/ubuntu tree
             env={**os.environ, "PYTHONPATH": "src"}
         )
         assert "Usage" in result.stdout or result.returncode == 0

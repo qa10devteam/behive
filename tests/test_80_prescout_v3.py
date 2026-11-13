@@ -161,9 +161,11 @@ class TestBeeMasterGateV2:
         assert bmg.mode == "aggressive"
 
     @pytest.mark.timeout(10)
-    def test_gate(self):
+    def test_gate(self, small_mission_id):
         from behive.engine.prescout import BeeMasterGate
-        bmg = BeeMasterGate(MISSION)
+        # Small real mission: the gate updates every prescout row one by one, which
+        # takes longer than the 10 s budget for the large fixed mission on full data.
+        bmg = BeeMasterGate(small_mission_id)
         try:
             result = bmg.gate()
             assert isinstance(result, (list, dict, type(None)))

@@ -6,6 +6,7 @@ import pytest
 import json
 import time
 import os
+import subprocess
 from unittest.mock import patch, MagicMock
 
 

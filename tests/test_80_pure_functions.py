@@ -2,6 +2,7 @@
 Tests every code path through utility functions in prescout, scout, domain_reputation, events.
 Each function exercised with 5-20 inputs → covers ALL branches.
 """
+import os
 import pytest
 import json
 from unittest.mock import patch, MagicMock

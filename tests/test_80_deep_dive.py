@@ -2,6 +2,7 @@
 Strategy: Query actual claims/sources from DB, feed them to processing functions.
 This exercises the MEAT of each module (data transformation, not I/O).
 """
+import os
 import pytest
 import json
 import psycopg2

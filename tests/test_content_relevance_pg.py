@@ -9,6 +9,10 @@ from behive.engine.process import ProcessingDrones, RelevanceFilter
 from test_content_relevance import CAPTURE, PAGES, SUPPLIER, TOPIC, documents, payload_of, recorded_rows_for
 from test_repair1022_support import live_db
 
+# Needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); the main
+# suite skips it with a reason (tests/conftest.py), the PG harness runs it.
+pytestmark = pytest.mark.pg_harness
+
 
 @pytest.mark.parametrize('column_type', ['jsonb', 'json'])
 @pytest.mark.parametrize('outcome', ['mixed', 'rejected', 'failed', 'bypass'])

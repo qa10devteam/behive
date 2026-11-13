@@ -12,6 +12,11 @@ from behive import cli
 from behive.client import BeHiveClient
 from behive.models import ResearchResult
 from test_repair1022_support import live_db
+import pytest
+
+# Needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); the main
+# suite skips it with a reason (tests/conftest.py), the PG harness runs it.
+pytestmark = pytest.mark.pg_harness
 
 
 def test_local_research_reports_active_mission_when_cmd_run_returns_none(live_db, monkeypatch):

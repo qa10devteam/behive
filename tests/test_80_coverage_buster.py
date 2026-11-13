@@ -1,6 +1,7 @@
 """COVERAGE BUSTER — exercises REAL functions with correct signatures.
 Each function called with args that let it proceed past early returns.
 """
+import os
 import pytest
 import json
 import psycopg2

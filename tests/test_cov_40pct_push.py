@@ -402,8 +402,10 @@ class TestServerAllEndpoints:
 class TestConfigPaths:
     """Exercise config.py all paths."""
 
-    def test_get_model_for_all_stages(self):
+    def test_get_model_for_all_stages(self, monkeypatch):
         from behive.config import get_model_for_stage
+        # BYOK: without a configured model the default is empty; configure one offline.
+        monkeypatch.setenv("BEHIVE_MODEL", "openai/behive-test-double")
         stages = ["scout", "harvest", "process", "synth", "falsify", "master", "embed"]
         for stage in stages:
             model = get_model_for_stage(stage)

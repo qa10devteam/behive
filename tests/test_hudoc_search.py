@@ -87,6 +87,7 @@ def test_hudoc_kw_drops_portal_tokens():
     assert _hudoc_kw("echr") == ""
 
 
+@pytest.mark.live  # needs internet (HUDOC)
 def test_hudoc_search_live_privacy():
     doc = hudoc_search("privacy", length=3)
     assert doc is not None

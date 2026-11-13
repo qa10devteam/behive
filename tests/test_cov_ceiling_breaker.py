@@ -129,7 +129,8 @@ class TestOrchestratorPaths:
             assert isinstance(cmd, list)
             assert len(cmd) >= 2
             # Should resolve to either local file or -m module
-            assert cmd[0] == 'python3'
+            # _resolve_cmd pins the running interpreter (sys.executable), not 'python3'.
+            assert cmd[0] == sys.executable
 
     def test_cleanup_stuck_missions_no_db(self):
         from behive.engine.orchestrator import cleanup_stuck_missions

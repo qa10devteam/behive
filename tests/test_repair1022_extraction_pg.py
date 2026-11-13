@@ -18,6 +18,10 @@ from test_repair1022_extraction_diagnostics import (
     CAPTURED_RESPONSE, CAPTURED_SOURCE, CAPTURED_TOPIC, CAPTURED_URL, CLEAN_CLAIM,
 )
 
+# Needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); the main
+# suite skips it with a reason (tests/conftest.py), the PG harness runs it.
+pytestmark = pytest.mark.pg_harness
+
 
 @pytest.fixture
 def private_pg(monkeypatch):

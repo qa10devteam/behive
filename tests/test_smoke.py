@@ -70,10 +70,12 @@ def test_compat_ops_shim():
 
 # ─── Test 3: CLI entry point works ───────────────────────────────────────────
 
+@pytest.mark.real_subprocess
 def test_cli_version():
     """'behive version' returns version string."""
+    # python -m behive.cli == the 'behive' console script; the isolated test PATH has no venv bin.
     result = subprocess.run(
-        ["behive", "version"],
+        [sys.executable, "-m", "behive.cli", "version"],
         capture_output=True,
         text=True,
         timeout=10,
@@ -83,10 +85,11 @@ def test_cli_version():
     assert re.search(r"behive \d+\.\d+\.\d+", result.stdout)
 
 
+@pytest.mark.real_subprocess
 def test_cli_help():
     """'behive --help' shows available commands."""
     result = subprocess.run(
-        ["behive", "--help"],
+        [sys.executable, "-m", "behive.cli", "--help"],
         capture_output=True,
         text=True,
         timeout=10,
@@ -103,9 +106,17 @@ def test_no_hardcoded_secrets():
     src_dir = os.path.join(os.path.dirname(__file__), "..", "src")
     src_dir = os.path.abspath(src_dir)
 
-    forbidden = ["hive_2026_prod", "ghp_", "/home/ubuntu"]
+    forbidden = ["hive_2026_prod", "ghp_"]  # credential markers: anywhere, comments included
+    forbidden_paths = ["/home/ubuntu"]  # deployment paths: only in code and strings
     # Note: "sk-ant-" is intentionally in help text (shows key format) — not a real secret
     violations = []
+
+    import io
+    import tokenize
+
+    def without_comments(text):
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        return " ".join(tok.string for tok in tokens if tok.type != tokenize.COMMENT)
 
     for root, dirs, files in os.walk(src_dir):
         for f in files:
@@ -116,6 +127,10 @@ def test_no_hardcoded_secrets():
                     for secret in forbidden:
                         if secret in content:
                             violations.append(f"{path}: contains '{secret}'")
+                    code = without_comments(content)
+                    for marker in forbidden_paths:
+                        if marker in code:
+                            violations.append(f"{path}: contains '{marker}' outside comments")
 
     assert len(violations) == 0, f"Secrets found: {violations}"
 

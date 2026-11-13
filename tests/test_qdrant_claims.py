@@ -1,4 +1,8 @@
+import pytest
+
 from behive.engine.qdrant_claims import collection_stats, semantic_search
+
+pytestmark = pytest.mark.live  # needs the production Qdrant collection
 
 
 def test_qdrant_collection_live():

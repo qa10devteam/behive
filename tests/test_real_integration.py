@@ -99,10 +99,12 @@ class TestEventsWithDB:
         
         mission_id = "test-pytest-events-001"
         db_path = ""  # Not used for PG
-        emit_event(db_path, mission_id, "scout", "test_event", {"key": "value"})
-        
-        events = get_events(mission_id)
+        event_id = emit_event(db_path, mission_id, "scout", "test_event", {"key": "value"})
+
+        # get_events(db_path, mission_id, since_id=0): the event just written is returned.
+        events = get_events(db_path, mission_id)
         assert isinstance(events, list)
+        assert any(e.get("id") == event_id for e in events)
 
 
 class TestRagWithDB:

@@ -16,13 +16,24 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import psycopg2
+import pytest
+
+# Needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); the main
+# suite skips it with a reason (tests/conftest.py), the PG harness runs it.
+pytestmark = pytest.mark.pg_harness
 
 _CLUSTER = None
 _PREVIOUS_ENV = {}
+_PREVIOUS_DB = None  # (behive.engine.db.DSN, behive.engine.db._pool) of the shared process
 URL = "https://example.test/report"
 CLAIM = "Acme revenue reached 42 million euros in 2025 according to the annual financial report."
 CLAIMS = [CLAIM, "Acme employed 1200 engineers in 2025 according to the published annual financial report.",
           "Acme exports increased by 25 percent in 2025 according to the annual financial report."]
+
+
+def _runuser():
+    # /usr/sbin is not on every test PATH (the isolated main suite uses /usr/bin:/bin).
+    return shutil.which("runuser") or "/usr/sbin/runuser"
 
 
 def setUpModule():
@@ -34,7 +45,7 @@ def setUpModule():
         import pwd
         user = pwd.getpwnam("postgres")
         os.chown(_CLUSTER, user.pw_uid, user.pw_gid)
-        prefix = ["runuser", "-u", "postgres", "--"]
+        prefix = [_runuser(), "-u", "postgres", "--"]
     subprocess.run(prefix + [str(bindir / "initdb"), "-D", str(_CLUSTER / "data"), "-A", "trust", "-U", "postgres", "--no-locale"],
                    check=True, cwd="/tmp", stdout=subprocess.DEVNULL)
     subprocess.run(prefix + [str(bindir / "pg_ctl"), "-D", str(_CLUSTER / "data"), "-l", str(_CLUSTER / "postgres.log"),
@@ -46,6 +57,15 @@ def setUpModule():
     for name, value in {"BEHIVE_DB_URL": dsn, "DATABASE_URL": dsn, "BEHIVE_BACKEND": "postgres"}.items():
         _PREVIOUS_ENV[name] = os.environ.get(name)
         os.environ[name] = value
+    # behive.engine.db computes DSN at import. In a shared pytest process (PG harness:
+    # all *_pg.py files + tests/repair) it was imported earlier with another DSN, so
+    # the writers hit the wrong database (UndefinedTable). Bind it to this cluster
+    # and restore the previous binding in tearDownModule.
+    global _PREVIOUS_DB
+    from behive.engine import db as engine_db
+    _PREVIOUS_DB = (engine_db.DSN, engine_db._pool)
+    engine_db.DSN = dsn
+    engine_db._pool = None
     conn = psycopg2.connect(dsn)
     with conn, conn.cursor() as cur:
         cur.execute("SELECT current_database(), inet_server_addr()")
@@ -73,8 +93,10 @@ def tearDownModule():
     if db._pool:
         db._pool.closeall()
         db._pool = None
+    if _PREVIOUS_DB is not None:
+        db.DSN, db._pool = _PREVIOUS_DB
     bindir = Path(subprocess.check_output(["pg_config", "--bindir"], text=True).strip())
-    prefix = ["runuser", "-u", "postgres", "--"] if os.geteuid() == 0 else []
+    prefix = [_runuser(), "-u", "postgres", "--"] if os.geteuid() == 0 else []
     subprocess.run(prefix + [str(bindir / "pg_ctl"), "-D", str(_CLUSTER / "data"), "-m", "fast", "-w", "stop"],
                    check=True, cwd="/tmp", stdout=subprocess.DEVNULL)
     shutil.rmtree(_CLUSTER)

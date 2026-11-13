@@ -3,6 +3,7 @@
 Strategy: Use real DB connection (available on this machine) to exercise actual
 code paths, not just mock imports. Each test is self-contained and cleans up.
 """
+import sys
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import json
@@ -40,7 +41,8 @@ class TestOrchestratorDeepPaths:
         for script_name, module_path in _SCRIPT_TO_MODULE.items():
             cmd = _resolve_cmd(script_name)
             assert isinstance(cmd, list)
-            assert cmd[0] == "python3"
+            # _resolve_cmd pins the running interpreter (sys.executable), not 'python3'.
+            assert cmd[0] == sys.executable
             # Either local file path or -m module.path
             if "-m" in cmd:
                 assert module_path in cmd[-1]
@@ -557,9 +559,11 @@ class TestLLMDeepPaths:
         # Just verify the function doesn't crash on import
         assert callable(complete)
 
-    def test_get_model_for_stage(self):
+    def test_get_model_for_stage(self, monkeypatch):
         """Test stage-based model selection."""
         from behive.config import get_model_for_stage
+        # BYOK: without a configured model the default is empty; configure one offline.
+        monkeypatch.setenv("BEHIVE_MODEL", "openai/behive-test-double")
         stages = ["scout", "harvest", "process", "synth", "falsify"]
         for stage in stages:
             model = get_model_for_stage(stage)

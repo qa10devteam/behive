@@ -7,6 +7,10 @@ import pytest
 from behive.client import BeHiveClient
 from test_repair1022_support import live_db
 
+# Needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); the main
+# suite skips it with a reason (tests/conftest.py), the PG harness runs it.
+pytestmark = pytest.mark.pg_harness
+
 
 def test_client_loads_live_entities_and_eligible_claims_as_json(live_db, monkeypatch):
     monkeypatch.delenv('BEHIVE_API_URL', raising=False)

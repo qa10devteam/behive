@@ -72,12 +72,13 @@ class TestServerFunctions:
 
     def test_app_has_routes(self):
         from behive.server import app
-        routes = [r.path for r in app.routes]
+        # Newer FastAPI lists included routers (_IncludedRouter) without .path.
+        routes = [r.path for r in app.routes if hasattr(r, "path")]
         assert "/health" in routes or "/healthz" in routes or any("health" in r for r in routes)
 
     def test_app_has_research_route(self):
         from behive.server import app
-        routes = [r.path for r in app.routes]
+        routes = [r.path for r in app.routes if hasattr(r, "path")]
         assert any("research" in r for r in routes)
 
 

@@ -49,8 +49,11 @@ class TestRelevanceFilterAsync:
         result = asyncio.run(run())
         assert isinstance(result, list)
         assert len(result) == 5
+        # score_batch returns model judgments since 2026-10-23 (grade 0/1/2 per index),
+        # not floats; score() keeps the float view (grade / 2).
+        assert [s["index"] for s in result] == list(range(5))
         for s in result:
-            assert isinstance(s, float)
+            assert s["grade"] in (0, 1, 2) and isinstance(s["reason"], str)
 
     def test_filter_docs(self):
         """L562-600: filter() async — filters by threshold."""
@@ -103,13 +106,16 @@ class TestBeeWorkerAsync:
 class TestProcessingDronesRunAsync:
     """process.py L1739-2066: _run_async() — THE MOTHER LODE (327 lines)."""
 
-    def test_run_async_with_real_data(self):
+    def test_run_async_with_real_data(self, small_mission_id):
         """Uses real DB data to traverse _run_async fully."""
         from behive.engine.process import ProcessingDrones
         
         conn = PgConnection(read_only=False)
         try:
-            pd = ProcessingDrones("hive_1785496253_3b165f", conn)
+            # A small real mission keeps the whole pipeline inside the test budget:
+            # the old fixed mission has hundreds of documents on a full data copy
+            # (FactValidationDrone alone exceeded 120 s).
+            pd = ProcessingDrones(small_mission_id, conn)
             
             async def run():
                 result = await pd._run_async()

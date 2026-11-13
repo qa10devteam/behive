@@ -224,7 +224,11 @@ class TestDomainReputationDeep:
     def test_known_academic(self):
         from behive.engine.domain_reputation import DomainReputation
         dr = DomainReputation()
-        result = dr.get_reputation_summary("https://arxiv.org/abs/2024.123")
+        # Reputation is learned from harvest results (no static per-domain prior):
+        # record a good harvest first, then read the summary through a fresh instance.
+        dr.update("https://arxiv.org/abs/2024.123", 0.9, success=True)
+        dr.flush()
+        result = DomainReputation().get_reputation_summary("https://arxiv.org/abs/2024.123")
         assert result["domain"] == "arxiv.org"
         assert result.get("avg_quality", 0) > 0.5
 
@@ -412,13 +416,15 @@ class TestOrchestratorDeep:
             cmd = _resolve_cmd(script)
             assert isinstance(cmd, list)
             assert len(cmd) >= 2
-            assert cmd[0] == 'python3'
+            # _resolve_cmd pins the running interpreter (sys.executable), not 'python3'.
+            assert cmd[0] == sys.executable
 
     def test_resolve_cmd_unknown_script(self):
         from behive.engine.orchestrator import _resolve_cmd
         cmd = _resolve_cmd('hive2_nonexistent.py')
         assert isinstance(cmd, list)
-        assert 'python3' in cmd
+        # _resolve_cmd pins the running interpreter (sys.executable), not 'python3'.
+        assert sys.executable in cmd
 
     def test_mark_mission_error(self):
         from behive.engine.orchestrator import _mark_mission_error

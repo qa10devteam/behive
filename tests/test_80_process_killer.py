@@ -51,9 +51,11 @@ class TestRelevanceFilterSync:
     def test_keyword_overlap_empty(self):
         from behive.engine.process import RelevanceFilter
         rf = RelevanceFilter("AI market")
-        doc = {"title": "X", "content": "Y"}  # Very short — should return 0.5
+        doc = {"title": "X", "content": "Y"}  # Very short document
         overlap = rf._keyword_overlap(doc)
-        assert overlap == 0.5
+        # 0.2 since 2026-10-23: short documents go to model review, the old 0.5
+        # keyword auto-pass was removed (process.RelevanceFilter._keyword_overlap).
+        assert overlap == 0.2
 
     def test_keyword_overlap_various_fields(self):
         from behive.engine.process import RelevanceFilter

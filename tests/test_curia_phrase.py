@@ -1,6 +1,9 @@
+import pytest
+
 from behive.engine.cellar import curia_search, case_to_celex
 
 
+@pytest.mark.live  # needs internet (CURIA / CELLAR)
 def test_curia_still_maps_signature():
     assert case_to_celex("C-128/21") == "62021CJ0128"
     doc = curia_search("C-128/21")
@@ -10,6 +13,7 @@ def test_curia_still_maps_signature():
     assert "62021CJ0128" in text or "C-128/21" in text or "101" in text
 
 
+@pytest.mark.live  # needs internet (CURIA / CELLAR)
 def test_curia_phrase_without_signature():
     doc = curia_search("CURIA Article 101 TFEU")
     assert doc is not None

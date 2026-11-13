@@ -15,6 +15,10 @@ from test_a3_incremental_pg import MISSION, TOPIC, documents, readback, seed
 from test_a3_round_progress_pg import provider, run_round
 from test_repair1022_support import live_db
 
+# Needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); the main
+# suite skips it with a reason (tests/conftest.py), the PG harness runs it.
+pytestmark = pytest.mark.pg_harness
+
 
 class SynthesisReached(BaseException):
     pass

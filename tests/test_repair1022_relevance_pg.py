@@ -10,6 +10,10 @@ import pytest
 from behive.engine import process
 from test_repair1022_support import live_db
 
+# Needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); the main
+# suite skips it with a reason (tests/conftest.py), the PG harness runs it.
+pytestmark = pytest.mark.pg_harness
+
 
 @pytest.fixture
 def loaded_documents(live_db):

@@ -32,7 +32,81 @@ def pytest_collection_modifyitems(config, items):
 # SINGLETON PgConnection — ONE connection for ALL tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-PG_DSN = f"host=localhost port=5432 dbname=hive user=hive_app password={os.environ.get('HIVE_PG_PASSWORD', 'test')}"
+_DEFAULT_PG_DSN = ("host=localhost port=5432 dbname=hive user=hive_app password="
+                   + os.environ.get('HIVE_PG_PASSWORD', 'test'))
+# Target of every connection this conftest opens (raw fixtures, engine pool, env for
+# code that reads BEHIVE_DB_URL). Override with BEHIVE_TEST_PG_DSN.
+PG_DSN = os.environ.get("BEHIVE_TEST_PG_DSN") or _DEFAULT_PG_DSN
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Safety guard — the fixtures below write (PgConnection(read_only=False)) and some
+# tests TRUNCATE. On the BeHive host localhost:5432/hive IS the production database.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _network_isolated() -> bool:
+    """True inside a network namespace whose only interface is loopback.
+
+    /proc/self/net/dev is per network namespace (unlike /sys/class/net, which shows
+    the namespace that mounted sysfs).
+    """
+    try:
+        with open("/proc/self/net/dev", encoding="utf-8") as handle:
+            names = {line.split(":", 1)[0].strip() for line in handle.readlines()[2:] if ":" in line}
+    except OSError:
+        return False
+    return names <= {"lo"}
+
+
+def _describe_dsn(dsn: str) -> str:
+    from psycopg2.extensions import parse_dsn
+    params = parse_dsn(dsn)
+    return "host={} port={} dbname={}".format(params.get("host", "?"), params.get("port", "5432"),
+                                               params.get("dbname", "?"))
+
+
+def _test_db_refusal(dsn: str, *, consent: str | None, isolated: bool) -> str | None:
+    """Why a session must not use ``dsn`` (None when allowed).
+
+    Requires explicit consent (BEHIVE_TEST_DB=1). A database named 'hive' is the
+    production name: it is accepted only over loopback TCP inside an isolated network
+    namespace (the private copy of the harness), never over a Unix socket (socket
+    paths are shared across network namespaces) or a remote host.
+    """
+    from psycopg2.extensions import parse_dsn
+    if consent != "1":
+        return "BEHIVE_TEST_DB=1 is not set (explicit consent that the target is a disposable test database)"
+    params = parse_dsn(dsn)
+    if params.get("dbname") != "hive":
+        return None
+    host = params.get("host", "")
+    if host.startswith("/") or host == "":
+        return "database 'hive' over a Unix socket can be the production database"
+    if host not in _LOOPBACK_HOSTS:
+        return "database 'hive' on a non-loopback host can be a production database"
+    if not isolated:
+        return "localhost:5432/hive outside an isolated network namespace is the production database"
+    return None
+
+
+
+def pytest_configure(config):
+    reason = _test_db_refusal(PG_DSN, consent=os.environ.get("BEHIVE_TEST_DB"), isolated=_network_isolated())
+    if reason:
+        pytest.exit(
+            "Refusing to start: tests/conftest.py connects read-write to " + _describe_dsn(PG_DSN)
+            + " and some tests TRUNCATE tables; " + reason + ". Run the suite in the isolated harness "
+            "(private PostgreSQL copy, own network namespace, BEHIVE_TEST_DB=1) or point BEHIVE_TEST_PG_DSN "
+            "at a disposable database and set BEHIVE_TEST_DB=1.",
+            returncode=4,
+        )
+    # One target for the whole session: the engine pool uses the same database.
+    import behive.engine.db as _db_mod
+    _db_mod.DSN = PG_DSN
+    _db_mod._pool = None
 
 # Module-level singleton — created once, reused everywhere
 _SHARED_PGCONN = None
@@ -41,13 +115,18 @@ _SHARED_RAW_CONN = None
 
 def _get_shared_pgconn():
     """Get or create the singleton PgConnection.
-    Resets pool on first call (important for pytest-xdist forked workers).
+    Resets pool on first call (important for pytest-xdist forked workers); a
+    singleton closed by engine code is replaced from the existing pool.
     """
     global _SHARED_PGCONN
-    if _SHARED_PGCONN is None:
-        # Reset the pool for this worker (may be forked)
+    stale = (_SHARED_PGCONN is not None and (
+        getattr(_SHARED_PGCONN, "_conn", None) is None
+        or getattr(getattr(_SHARED_PGCONN, "_pool", None), "closed", False)))
+    if _SHARED_PGCONN is None or stale:
         import behive.engine.db as _db_mod
-        _db_mod._pool = None
+        if _SHARED_PGCONN is None:
+            # Reset the pool for this worker (may be forked)
+            _db_mod._pool = None
         from behive.engine.db import PgConnection
         _SHARED_PGCONN = PgConnection(read_only=False)
     return _SHARED_PGCONN
@@ -66,6 +145,31 @@ def _get_shared_raw_conn():
 def pg_conn():
     """Raw psycopg2 connection (for tests that need .cursor() directly)."""
     return _get_shared_raw_conn()
+
+
+@pytest.fixture
+def pg_cursor():
+    """Cursor on its own connection to PG_DSN; rows work by index and by column name
+    (DictCursor). Uncommitted work is rolled back."""
+    import psycopg2.extras
+    conn = psycopg2.connect(PG_DSN)
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        yield cur
+    finally:
+        conn.rollback()
+        cur.close()
+        conn.close()
+
+
+@pytest.fixture(scope="module")
+def behive_server_url():
+    """URL of an already running BeHive server; opt-in only (never the production
+    default 127.0.0.1:8091): set BEHIVE_TEST_URL."""
+    url = os.environ.get("BEHIVE_TEST_URL")
+    if not url:
+        pytest.skip("BEHIVE_TEST_URL not set: needs a running BeHive server")
+    return url.rstrip("/")
 
 
 @pytest.fixture
@@ -113,11 +217,31 @@ _MOCK_AXES_RESPONSE = json.dumps([
 
 _call_count = 0
 
+_RELEVANCE_SYSTEM_PREFIX = "You judge document relevance"       # RelevanceFilter._CONTENT_SYSTEM
+_EXTRACTION_SYSTEM_PREFIX = "You select source-backed research claims"  # source_extraction
+
+
+def _relevance_batch_reply(prompt: str) -> str:
+    """A valid RelevanceFilter.score_batch answer: one grade per supplied index."""
+    try:
+        payload = json.loads(prompt.split("\n", 1)[1])
+        indexes = [int(doc["index"]) for doc in payload["documents"]]
+    except (IndexError, KeyError, TypeError, ValueError):
+        return "[]"
+    return json.dumps([{"index": i, "grade": 1, "reason": "test double: relevant"} for i in indexes])
+
+
 def _smart_llm_mock(prompt="", stage="process", system="", max_tokens=4096,
                    temperature=0.3, json_mode=False, **kw):
-    """Smart LLM mock that returns appropriate JSON for different stages."""
+    """LLM double whose answer depends on the kind of call (relevance batch,
+    source extraction, planning, synthesis, generic extraction)."""
     global _call_count
     _call_count += 1
+
+    if isinstance(system, str) and system.startswith(_RELEVANCE_SYSTEM_PREFIX):
+        return _relevance_batch_reply(prompt if isinstance(prompt, str) else "")
+    if isinstance(system, str) and system.startswith(_EXTRACTION_SYSTEM_PREFIX):
+        return "[]"  # valid: no source-backed claims
     
     # SYNTH stage needs long text (multi_role_synthesis checks len > 500)
     if stage == "synth":
@@ -170,13 +294,52 @@ Strong growth trajectory with concentration risk in NVIDIA dominance. [UNVERIFIE
 _MOCK_EMBED = [0.1] * 512
 
 
-@pytest.fixture(autouse=True)
-def mock_llm_globally(monkeypatch):
-    """Auto-mock all LLM calls so tests never hit real APIs."""
+def _patches_llm_provider(request) -> bool:
+    """True when the test itself patches litellm.completion/acompletion (@patch)."""
+    fn = getattr(request.node, "function", None)
+    for patching in getattr(fn, "patchings", None) or []:
+        if getattr(patching, "attribute", None) not in ("completion", "acompletion"):
+            continue
+        try:
+            target = patching.getter()
+        except Exception:
+            continue
+        if getattr(target, "__name__", "").split(".")[0] == "litellm":
+            return True
+    return False
 
-    # Patch at multiple levels to catch all paths
-    monkeypatch.setattr("behive.engine.llm.complete", _smart_llm_mock, raising=False)
+
+@pytest.fixture(autouse=True)
+def mock_llm_globally(monkeypatch, request):
+    """Auto-mock all LLM calls so tests never hit real APIs.
+
+    A test that patches the provider boundary itself (litellm.completion) exercises
+    the real llm.complete() against its own double, with a test-only model name so
+    the BYOK key check passes; no request leaves the process.
+    """
     monkeypatch.setattr("behive.engine.llm.embed", lambda texts, **kw: [_MOCK_EMBED] if isinstance(texts, str) else [_MOCK_EMBED for _ in texts], raising=False)
+    if _patches_llm_provider(request):
+        if not os.environ.get("BEHIVE_MODEL"):
+            monkeypatch.setenv("BEHIVE_MODEL", "openai/behive-test-double")
+        return
+    monkeypatch.setattr("behive.engine.llm.complete", _smart_llm_mock, raising=False)
+    # The falsifier's ConflictResolver probes a local OpenAI-compatible proxy and
+    # retries with sleeps; tests use its documented "no LLM client" path.
+    monkeypatch.setattr("behive.engine.falsifier.ConflictResolver._init_client",
+                        lambda self: None, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiters():
+    """server.py keeps module-level TokenBuckets (60/min, research 5/min): a test
+    must not inherit another test's 429."""
+    import sys
+    server = sys.modules.get("behive.server")
+    for name in ("_rate_limiter", "_research_limiter"):
+        bucket = getattr(server, name, None) if server is not None else None
+        if bucket is not None and hasattr(bucket, "buckets"):
+            bucket.buckets.clear()
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -186,11 +349,16 @@ def mock_subprocess(monkeypatch, request):
     """
     if "real_subprocess" in request.keywords:
         return
-    fake_result = MagicMock()
-    fake_result.returncode = 0
-    fake_result.stdout = b"OK"
-    fake_result.stderr = b""
-    monkeypatch.setattr("subprocess.run", lambda *a, **kw: fake_result, raising=False)
+
+    def fake_run(*a, **kw):
+        # Same output type as subprocess.run: str with text=/universal_newlines=/encoding=.
+        as_text = bool(kw.get("text") or kw.get("universal_newlines") or kw.get("encoding"))
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = "OK" if as_text else b"OK"
+        fake_result.stderr = "" if as_text else b""
+        return fake_result
+    monkeypatch.setattr("subprocess.run", fake_run, raising=False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -207,7 +375,34 @@ _ALL_ENGINE_MODULES = [
 ]
 
 @pytest.fixture(autouse=True)
-def mock_pg_connect_retry(monkeypatch):
+def pin_engine_database():
+    """Each test starts with behive.engine.db bound to PG_DSN and an open pool: some
+    tests reload the module (DSN recomputed from env) or close the shared pool."""
+    import behive.engine.db as _db_mod
+    if _db_mod.DSN != PG_DSN:
+        _db_mod.DSN = PG_DSN
+        _db_mod._pool = None
+    elif _db_mod._pool is not None and _db_mod._pool.closed:
+        _db_mod._pool = None
+    yield
+
+
+@pytest.fixture
+def small_mission_id():
+    """A real mission with 3-10 harvested documents (bounded pipeline runs on a full
+    data copy); the historical fixed id on an empty database."""
+    cur = _get_shared_raw_conn().cursor()
+    try:
+        cur.execute("SELECT mission_id FROM hive_content GROUP BY mission_id "
+                    "HAVING COUNT(*) BETWEEN 3 AND 10 ORDER BY mission_id DESC LIMIT 1")
+        row = cur.fetchone()
+    finally:
+        cur.close()
+    return row[0] if row else "hive_1785496253_3b165f"
+
+
+@pytest.fixture(autouse=True)
+def mock_pg_connect_retry(monkeypatch, pin_engine_database):
     """Return SINGLETON PgConnection for all engine modules.
     
     KEY FIX: PgConnection converts ? → %s (psycopg2 compatibility).
@@ -216,10 +411,13 @@ def mock_pg_connect_retry(monkeypatch):
     
     Singleton = 1 DB connection for entire session (no exhaustion).
     """
-    pgconn = _get_shared_pgconn()
-    
+    _get_shared_pgconn()
+
     def _return_pgconn(*args, **kwargs):
-        return pgconn
+        # Engine code closes the connections it opens (events.emit_event,
+        # db_helpers callers): hand out a live singleton every time instead of a
+        # closed one (closed PgConnection -> "'NoneType' object has no attribute 'cursor'").
+        return _get_shared_pgconn()
     
     # Patch in ALL modules
     for mod in _ALL_ENGINE_MODULES:
@@ -237,13 +435,18 @@ def mock_pg_connect_retry(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def set_pg_env(monkeypatch):
-    """Ensure engine finds the DB."""
-    monkeypatch.setenv("HIVE_PG_HOST", "localhost")
-    monkeypatch.setenv("HIVE_PG_PORT", "5432")
-    monkeypatch.setenv("HIVE_PG_DATABASE", "hive")
-    monkeypatch.setenv("HIVE_PG_USER", "hive_app")
-    monkeypatch.setenv("HIVE_PG_PASSWORD", "test")
-    monkeypatch.setenv("BEHIVE_DB_URL", "postgresql://hive_app:test@localhost:5432/hive")
+    """Point code that reads the environment at the same database as PG_DSN."""
+    from urllib.parse import quote
+    from psycopg2.extensions import parse_dsn
+    params = parse_dsn(PG_DSN)
+    host, port = params.get("host", "localhost"), params.get("port", "5432")
+    user, password, dbname = params.get("user", "hive_app"), params.get("password", ""), params.get("dbname", "hive")
+    monkeypatch.setenv("HIVE_PG_HOST", host)
+    monkeypatch.setenv("HIVE_PG_PORT", str(port))
+    monkeypatch.setenv("HIVE_PG_DATABASE", dbname)
+    monkeypatch.setenv("HIVE_PG_USER", user)
+    monkeypatch.setenv("HIVE_PG_PASSWORD", password)
+    monkeypatch.setenv("BEHIVE_DB_URL", f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}/{dbname}")
     # Disable external calls
     monkeypatch.setenv("BEHIVE_MAX_CONCURRENT", "1")
     monkeypatch.setenv("BEHIVE_PHASE_TIMEOUT", "5")

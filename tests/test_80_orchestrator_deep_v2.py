@@ -9,45 +9,43 @@ MISSION = "hive_1785496253_3b165f"
 
 
 class TestRunPhase:
-    """run_phase() — subprocess-based phase execution."""
+    """run_phase() — a real child process through subprocess.Popen (current contract).
 
-    @pytest.mark.timeout(5)
-    @patch("behive.engine.orchestrator.subprocess.run")
-    def test_run_phase_success(self, mock_subprocess):
+    Migrated 2026-11-13: the old tests patched subprocess.run, which run_phase no
+    longer uses, so they started the real phase scripts against the test database
+    (and timed out on a full data copy).
+    """
+
+    @staticmethod
+    def _child(monkeypatch, code):
+        import sys
+        from behive.engine import orchestrator
+        monkeypatch.setattr(orchestrator, "_resolve_cmd", lambda script: [sys.executable, "-c", code])
+
+    @pytest.mark.timeout(30)
+    def test_run_phase_success(self, monkeypatch):
         from behive.engine.orchestrator import run_phase
-        mock_subprocess.return_value = MagicMock(
-            returncode=0, stdout="Claims: 50", stderr=""
-        )
-        try:
-            result = run_phase("hive2_scout.py", [MISSION, "test"], "scout", timeout=60)
-            assert isinstance(result, tuple)
-        except Exception:
-            pass
+        self._child(monkeypatch, "print('Scout done')")
+        elapsed = run_phase("hive2_scout.py", [MISSION, "test"], "scout", timeout=60)
+        assert isinstance(elapsed, float) and elapsed >= 0
 
-    @pytest.mark.timeout(5)
-    @patch("behive.engine.orchestrator.subprocess.run")
-    def test_run_phase_fail(self, mock_subprocess):
-        from behive.engine.orchestrator import run_phase
-        mock_subprocess.return_value = MagicMock(
-            returncode=1, stdout="", stderr="ImportError"
-        )
-        try:
-            result = run_phase("hive2_harvest.py", [MISSION], "harvest", timeout=60)
-            assert isinstance(result, tuple)
-        except Exception:
-            pass
-
-    @pytest.mark.timeout(5)
-    @patch("behive.engine.orchestrator.subprocess.run")
-    def test_run_phase_timeout(self, mock_subprocess):
+    @pytest.mark.timeout(30)
+    def test_run_phase_fail(self, monkeypatch):
         import subprocess as sp
         from behive.engine.orchestrator import run_phase
-        mock_subprocess.side_effect = sp.TimeoutExpired("cmd", 60)
-        try:
-            result = run_phase("hive2_process.py", [MISSION], "process", timeout=60)
-            assert isinstance(result, tuple)
-        except Exception:
-            pass
+        self._child(monkeypatch, "raise SystemExit(3)")
+        with pytest.raises(sp.CalledProcessError) as failure:
+            run_phase("hive2_harvest.py", [MISSION], "harvest", timeout=60)
+        assert failure.value.returncode == 3
+
+    @pytest.mark.timeout(60)
+    def test_run_phase_timeout(self, monkeypatch):
+        import subprocess as sp
+        from behive.engine.orchestrator import run_phase
+        monkeypatch.setenv("BEHIVE_PHASE_TIMEOUT", "1")
+        self._child(monkeypatch, "import time; time.sleep(30)")
+        with pytest.raises(sp.TimeoutExpired):
+            run_phase("hive2_process.py", [MISSION], "process", timeout=60)
 
 
 class TestBar:

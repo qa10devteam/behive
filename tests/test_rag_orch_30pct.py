@@ -376,7 +376,7 @@ class TestQualityDeep:
         # Text with boilerplate
         boilerplate = "Click here. Subscribe. Cookie policy. " * 50
         r3 = score_content_detailed(boilerplate)
-        assert r3["score"] < r2["quality_score"]
+        assert r3["quality_score"] < r2["quality_score"]  # the result has no "score" key
 
 
 # ═══ QUEEN FEEDBACK ═══

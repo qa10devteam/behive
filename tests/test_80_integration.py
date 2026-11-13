@@ -2,6 +2,7 @@
 Each test exercises entire code paths through real DB queries.
 One test here = 100-300 lines of coverage.
 """
+import os
 import pytest
 import json
 import asyncio
@@ -250,6 +251,7 @@ class TestRagIntegration:
 
     @patch("behive.engine.rag._get_qdrant")
     def test_qdrant_count(self, mock_qdrant):
+        pytest.importorskip("qdrant_client")  # optional extra [qdrant]
         mock_client = MagicMock()
         mock_client.count.return_value = MagicMock(count=42)
         mock_qdrant.return_value = mock_client
@@ -259,6 +261,7 @@ class TestRagIntegration:
 
     @patch("behive.engine.rag._get_qdrant")
     def test_qdrant_search(self, mock_qdrant):
+        pytest.importorskip("qdrant_client")  # optional extra [qdrant]
         mock_client = MagicMock()
         mock_client.search.return_value = [
             MagicMock(id="c1", score=0.95, payload={"chunk_text": "AI grew", "url": "reuters.com"}),

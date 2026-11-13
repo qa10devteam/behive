@@ -179,7 +179,7 @@ class TestDbOperations:
         result = con.execute("SELECT COUNT(*) as cnt FROM hive_missions")
         row = result.fetchone()
         assert row is not None
-        assert row["cnt"] >= 0 or row[0] >= 0
+        assert row[0] >= 0  # PgConnection rows are tuples
 
     def test_insert_and_delete(self):
         from behive.engine.db_helpers import _connect_db

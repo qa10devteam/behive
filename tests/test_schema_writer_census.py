@@ -18,6 +18,10 @@ from psycopg2.extensions import parse_dsn
 from psycopg2.extras import execute_batch
 import pytest
 
+# Needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); the main
+# suite skips it with a reason (tests/conftest.py), the PG harness runs it.
+pytestmark = pytest.mark.pg_harness
+
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE = Path('/root/outputs/behive-repair-2026-10-22/census')
 PHASE = os.environ.get('SCHEMA_CENSUS_PHASE', 'green')

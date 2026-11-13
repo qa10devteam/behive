@@ -421,10 +421,10 @@ class TestProcessAsync:
             pass
 
     @pytest.mark.xfail(reason="ThreadPoolExecutor blocks event loop")
-    def test_run_async_direct(self):
+    def test_run_async_direct(self, small_mission_id):
         """_run_async is the 327-line motherlode."""
         from behive.engine.process import ProcessingDrones
-        pd = ProcessingDrones(MISSION)
+        pd = ProcessingDrones(small_mission_id)  # bounded on a full data copy
         pd.max_ops = 3
         with patch("aiohttp.ClientSession", return_value=_mock_aiohttp_session()):
             try:

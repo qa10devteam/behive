@@ -122,8 +122,10 @@ class TestConfig:
         # Config can be dict or string depending on config.yaml state
         assert cfg is not None
 
-    def test_get_model_for_stage(self):
+    def test_get_model_for_stage(self, monkeypatch):
         from behive.config import get_model_for_stage
+        # BYOK: without a configured model the default is empty; configure one offline.
+        monkeypatch.setenv("BEHIVE_MODEL", "openai/behive-test-double")
         model = get_model_for_stage("process")
         assert isinstance(model, str)
         assert len(model) > 0
@@ -166,7 +168,9 @@ class TestOrchestratorHelpers:
         orch.HIVE_DIR = tmp_path
         try:
             cmd = orch._resolve_cmd('hive2_scout.py')
-            assert cmd == ['python3', str(script)]
+            # Known scripts always run as package modules with the pinned interpreter,
+            # never a ~/hive2_*.py file from HIVE_DIR (orchestrator._resolve_cmd).
+            assert cmd == [orch.PYTHON, '-m', 'behive.engine.scout']
         finally:
             orch.HIVE_DIR = old_dir
 
@@ -178,7 +182,7 @@ class TestOrchestratorHelpers:
         orch.HIVE_DIR = tmp_path  # Empty dir — no scripts
         try:
             cmd = orch._resolve_cmd('hive2_scout.py')
-            assert cmd == ['python3', '-m', 'behive.engine.scout']
+            assert cmd == [orch.PYTHON, '-m', 'behive.engine.scout']  # pinned interpreter
         finally:
             orch.HIVE_DIR = old_dir
 

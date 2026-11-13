@@ -15,7 +15,8 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-pytestmark = pytest.mark.e2e
+# Needs a running server, a real LLM and search backends (internet).
+pytestmark = [pytest.mark.e2e, pytest.mark.live]
 
 TIMEOUT_SECONDS = 600  # 10 min max per mission
 

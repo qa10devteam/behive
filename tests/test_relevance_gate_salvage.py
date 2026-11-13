@@ -10,6 +10,11 @@ from pathlib import Path
 
 from behive.engine import claims_fallback
 from test_repair1022_support import live_db
+import pytest
+
+# Needs the private socket-only PostgreSQL harness (CLAIM_TEST_PG_DSN); the main
+# suite skips it with a reason (tests/conftest.py), the PG harness runs it.
+pytestmark = pytest.mark.pg_harness
 
 FIX = json.loads((Path(__file__).parent / "fixtures/relevance_gate/captured_content.json").read_text())
 ROWS = {("pressto" if "pressto" in r["url"] else "telemetria24"): r for r in FIX["rows"]}
