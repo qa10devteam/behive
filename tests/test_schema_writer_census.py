@@ -308,7 +308,9 @@ def test_shared_gap_allocator_interoperates_with_every_explicit_gap_writer(pg):
     for filename in ('src/behive/engine/orchestrator.py', 'src/behive/engine/prescout.py'):
         found.extend(w for w in tool.scan_source((ROOT / filename).read_text(), filename)['writers']
                      if w['table'] == 'hive_gaps' and w['id_supplied'])
-    assert len(found) == 3
+    # 2 since 2026-11-13: prescout's quorum-expansion INSERT went through the removed
+    # _ddb2/hive2 modules, never executed, and was deleted (ruff F821 fix).
+    assert len(found) == 2
     with pg.cursor() as cur:
         for index, writer in enumerate(found):
             assert writer['values'][0] == "nextval('hive_facts_seq')"
@@ -316,7 +318,7 @@ def test_shared_gap_allocator_interoperates_with_every_explicit_gap_writer(pg):
             cur.execute('SELECT id FROM public.hive_gaps WHERE mission_id=%s', ('explicit_gap_' + str(index),))
             generated.append(cur.fetchone()[0])
     generated.append(_write(pg, 'gap_fallback'))
-    assert len(set(generated)) == 5
+    assert len(set(generated)) == 4
     assert generated == sorted(generated)
     assert "nextval('hive_facts_seq'::regclass)" == _default(pg, 'hive_gaps')
     with pg.cursor() as cur:
