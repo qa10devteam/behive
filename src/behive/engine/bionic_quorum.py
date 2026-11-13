@@ -224,7 +224,6 @@ class QuorumChecker:
 
     def _bedrock_expansion(self, current: int, total: int) -> List[str]:
         from behive.engine.llm import complete
-        import json
 
         prompt = f"""Research topic: "{self._topic}"
 

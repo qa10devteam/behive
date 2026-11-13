@@ -1393,24 +1393,9 @@ async def run_prescout_pipeline(
               f"({'✅ MET' if _qr.quorum_met else '⚠️ NOT MET'})")
         if not _qr.quorum_met:
             if _qr.expansion_queries:
-                log.debug(f"  🐝 Quorum: generating {len(_qr.expansion_queries)} expansion queries")
-                # Inject expansion queries as additional sources to scout
-                import importlib
-                _scout_mod = importlib.import_module('hive2')
-                # Save queries to hive_gaps for next runquerycycle
-                try:
-                    pass  # pg removed
-                    _gc = _ddb2.connect(db_path)
-                    for _eq in _qr.expansion_queries[:5]:
-                        _gc.execute(
-                            "INSERT INTO hive_gaps (id, mission_id, gap_query, gap_type, priority, resolved, created_at) "
-                            "VALUES (nextval('hive_facts_seq'), ?, ?, 'quorum_expansion', 9, FALSE, CURRENT_TIMESTAMP)",
-                            [mission_id, f"[QUORUM-EXPAND] {_eq}"]
-                        )
-                    _gc.close()
-                    log.debug(f"  🐝 Quorum: {len(_qr.expansion_queries[:5])} expansion queries → hive_gaps (priority=9)")
-                except Exception as _gce:
-                    log.debug(f"Suppressed: {_gce}")
+                # Expansion queries are reported, not persisted: the old hive_gaps
+                # write went through the removed DuckDB/hive2 modules and never ran.
+                log.debug(f"  🐝 Quorum: {len(_qr.expansion_queries)} expansion queries generated (not persisted)")
             else:
                 log.debug(f"  🐝 Quorum: insufficient sources, proceeding anyway (no expansions available)")
     except Exception as _qce:

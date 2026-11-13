@@ -39,8 +39,6 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from behive.engine.db import connect as _db_connect
-
 log = logging.getLogger("HiveFalsifier")
 logging.basicConfig(
     level=logging.INFO,

@@ -25,9 +25,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
-from behive.engine.db import connect as _db_connect
+from typing import Any, Optional
 
 # ---------------------------------------------------------------------------
 # CONFIG
@@ -114,10 +112,15 @@ def _llm_call(
 # ---------------------------------------------------------------------------
 
 def _db_connect(read_only: bool = False, retries: int = 10) -> Any:
-    """Otwiera połączenie PostgreSQL z retries (plik może być locked)."""
+    """Otwiera połączenie PostgreSQL z retries (plik może być locked).
+
+    Resolves behive.engine.db.connect at call time. The wrapper used to shadow the
+    imported connect under the same name and called itself (RecursionError).
+    """
+    from behive.engine import db as _db
     for attempt in range(retries):
         try:
-            return _db_connect(read_only=read_only)
+            return _db.connect(read_only=read_only)
         except Exception as exc:
             if attempt < retries - 1:
                 wait = min(5 * (attempt + 1), 30)

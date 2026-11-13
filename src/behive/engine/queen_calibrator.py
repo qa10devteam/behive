@@ -20,8 +20,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from behive.engine.db import connect as _db_connect
-
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------

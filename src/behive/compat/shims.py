@@ -23,7 +23,6 @@ SHIM_MAP = {
     "hive2_process": "behive.engine.process",
     "hive2_synth": "behive.engine.synth",
     "hive2_events": "behive.engine.events",
-    "hive2_content_quality": "behive.engine.quality",
     "hive2_domain_reputation": "behive.engine.domain_reputation",
     "hive2_bionic_quorum": "behive.engine.bionic_quorum",
     "hive2_preprocessor": "behive.engine.preprocessor",
