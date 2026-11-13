@@ -36,6 +36,74 @@ SQL_COMPLETION_CLAIM = """
     )
 """
 
+# Useful claims decide 'done': eligible above AND not deterministic regex salvage.
+# regex_fallback sentences (claims_fallback) may stay as material, but a mission
+# whose only claims are regex salvage is not a research result (diag 2026-11-12:
+# 28 of 43 'done' missions in 30 days had no report or only regex_fallback).
+SQL_USEFUL_CLAIM = SQL_COMPLETION_CLAIM + """    AND COALESCE(c.claim_type, '') <> 'regex_fallback'
+"""
+
+_SQL_WHITESPACE = "chr(32) || chr(9) || chr(10) || chr(13) || chr(11) || chr(12)"
+
+
+def sql_report_present(mission: str = "hive_missions") -> str:
+    """Predicate: the mission row (table or alias ``mission``) has a non-blank report."""
+    return f"length(ltrim(COALESCE({mission}.synthesis, ''), {_SQL_WHITESPACE})) > 0"
+
+
+def sql_done_product(mission: str = "hive_missions") -> str:
+    """Terminal 'done' authority: a non-blank report AND at least one useful claim."""
+    return (f"({sql_report_present(mission)} AND EXISTS (SELECT 1 FROM hive_claims c "
+            f"WHERE c.mission_id = {mission}.id AND {SQL_USEFUL_CLAIM}))")
+
+
+# Phase failures that end a mission as error, whatever material exists.
+PROCESS_FAILURE_PHASES = frozenset({"process_timeout", "process_error"})
+
+
+def classify_completion(*, useful_claims: int, report_present: bool,
+                        sources: int, content: int) -> tuple[str, str]:
+    """(status, phase) of a pipeline that ran to its end without a phase failure."""
+    if int(useful_claims or 0) > 0 and report_present:
+        return "done", "done"
+    if int(useful_claims or 0) > 0:
+        return "error", "synthesis_failed"
+    if int(sources or 0) <= 0 and int(content or 0) <= 0:
+        return "empty", "empty_scout"
+    return "empty", "empty_claims"
+
+
+# Public, payload-free explanations (never exception text or provider output).
+MISSION_REASONS = {
+    "empty_scout": "No sources or qualifying claims were produced.",
+    "empty_claims": "Sources were collected but no qualifying claims were produced.",
+    "process_timeout": "The processing phase exceeded its time limit; no report was produced.",
+    "process_error": "The processing phase failed; no report was produced.",
+    "synthesis_failed": "Qualifying claims were found but no report was produced.",
+    "pipeline_failed": "Pipeline execution failed without a qualifying product.",
+    "claims_fallback_failed": "Claims recovery failed without a qualifying product.",
+    "pipeline_exception": "Pipeline execution raised an exception.",
+    "timeout": "Pipeline execution timed out.",
+    "cancelled": "Mission was cancelled.",
+}
+_STATUS_REASONS = {
+    "empty": "Mission finished without qualifying claims.",
+    "error": "Mission execution failed.",
+    "cancelled": "Mission was cancelled.",
+}
+LEGACY_DONE_REASON = ("Marked done without a report or without claims beyond regex fallback "
+                      "(recorded before the 2026-11-13 status rules); it has no usable result.")
+
+
+def mission_reason(status, phase, *, report_present: bool | None = None,
+                   useful_claims: int | None = None) -> str | None:
+    """Why a mission has no (usable) report; None for in-progress and real done."""
+    if status in _STATUS_REASONS:
+        return MISSION_REASONS.get(phase) or _STATUS_REASONS[status]
+    if status == "done" and (report_present is False or useful_claims == 0):
+        return LEGACY_DONE_REASON
+    return None
+
 
 def is_empty_mission(sources: int, claims: int, *, sourced_claims: int | None = None) -> bool:
     """Require clean claims with provenance, including API-only content.

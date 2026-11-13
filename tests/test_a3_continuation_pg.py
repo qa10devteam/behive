@@ -167,8 +167,12 @@ def test_failed_initial_process_is_not_implicitly_retried(pipeline_edges, monkey
             raise RuntimeError('upstream_rate_limit')
         return 1.0
     monkeypatch.setattr(orchestrator, 'run_phase', phase)
-    run_pipeline()
-    assert phases == ['harvest', 'process', 'falsifier']
+    # Since 2026-11-13 (diag task 1) a failed process phase ends the mission as
+    # error/process_error: no continuation pass and no later phases either.
+    with pytest.raises(orchestrator.PhaseFailure) as failure:
+        run_pipeline()
+    assert failure.value.phase == 'process_error'
+    assert phases == ['harvest', 'process']
 
 
 @pytest.mark.parametrize('state', [None, {}, {'version': 1, 'attempted_urls': []},

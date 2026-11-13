@@ -1498,7 +1498,7 @@ def _run_synthesis(mission_id: str, query: str, timings: dict) -> None:
 
 def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = False, scale: int = 200) -> None:
     """Full pipeline with Queen-first planning: plan → scout → harvest → process → synth."""
-    from behive.hygiene import SQL_COMPLETION_CLAIM, is_empty_mission
+    from behive.hygiene import MISSION_REASONS
     _init_db(None)  # No-ops on PostgreSQL, creates tables on PostgreSQL legacy
     
     # Cleanup zombie missions from previous crashed runs
@@ -1592,51 +1592,16 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     for attempt in range(max_attempts):
         try:
             _run_pipeline_phases(mission_id, topic, plan, timings, total_t0, think, deep, scale, query, _specificity, plan_file)
-            _con_fin = None
-            try:
-                from behive.engine.claims_fallback import salvage_claims_from_content
-                try:
-                    salvage_claims_from_content(mission_id)
-                except Exception as _fb:
-                    log.debug(f"claims fallback skipped: {_fb}")
-                _con_fin = _connect_db(read_only=True)
-                _row_s = _con_fin.execute(
-                    "SELECT COUNT(*) FROM hive_sources WHERE mission_id=?", [mission_id]
-                ).fetchone()
-                _row_c = _con_fin.execute(
-                    f"SELECT COUNT(*) FROM hive_claims c WHERE c.mission_id=? AND {SQL_COMPLETION_CLAIM}", [mission_id]
-                ).fetchone()
-                _n_src = (_row_s[0] if _row_s else 0) or 0
-                _n_cl = (_row_c[0] if _row_c else 0) or 0
-            except Exception as evidence_error:
-                # Missing evidence is not evidence of an empty mission.
-                raise RuntimeError("completion evidence unavailable") from evidence_error
-            finally:
-                if _con_fin is not None:
-                    _con_fin.close()
-            if is_empty_mission(_n_src, _n_cl, sourced_claims=_n_cl):
-                _mark_mission_error(mission_id, f"empty_mission sources={_n_src} claims={_n_cl}")
-                sys.exit(1)
-            # Synth's legacy count guard can mark API-only missions error. The
-            # final authority is the sourced product, rechecked in the UPDATE.
-            _con_done = _connect_db()
-            try:
-                _con_done.execute(
-                    f"""UPDATE hive_missions SET status='done', phase='done'
-                        WHERE id=%s AND status NOT IN ('done', 'cancelled')
-                          AND EXISTS (SELECT 1 FROM hive_claims c
-                              WHERE c.mission_id = hive_missions.id
-                                AND {SQL_COMPLETION_CLAIM})
-                        RETURNING id""",
-                    [mission_id],
-                ).fetchone()
-                _con_done.commit()
-            except Exception:
-                _con_done.rollback()
-                raise
-            finally:
-                _con_done.close()
+            _finalize_completed_pipeline(mission_id)
             return
+        except PhaseFailure as phase_failure:
+            # Terminal for this mission: no whole-pipeline retry (see PhaseFailure).
+            log.warning(f'\n  ❌  MISSION FAILED: {mission_id} — {phase_failure.phase}')
+            if _mark_mission_error(mission_id, phase_failure.phase, phase=phase_failure.phase):
+                _emit(mission_id, 'error', 'error', data={
+                    'error': 'Mission execution failed', 'phase': phase_failure.phase,
+                    'reason': MISSION_REASONS[phase_failure.phase]})
+            sys.exit(1)
         except KeyboardInterrupt:
             log.info(f'\n  ⚠️  Mission interrupted by user: {mission_id}')
             _mark_mission_error(mission_id, "User interrupted (Ctrl+C)")
@@ -1656,27 +1621,103 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
                 sys.exit(1)
 
 
-def _mark_mission_error(mission_id: str, error_msg: str) -> bool:
-    """Commit an error transition; only proven-empty products may correct done."""
+def _finalize_completed_pipeline(mission_id: str) -> None:
+    """Terminal decision after a pipeline that ran to its end (no phase failure).
+
+    done only with a non-blank report AND at least one useful claim
+    (hygiene.SQL_USEFUL_CLAIM): regex_fallback salvage stays as material but never
+    decides done. No useful claim -> empty (empty_scout / empty_claims); useful
+    claims without a report -> error (synthesis_failed). Exits 1 for empty/error;
+    the API wrapper reads the worker's state. Unreadable evidence is an error, not
+    an empty mission.
+    """
+    from behive.hygiene import SQL_USEFUL_CLAIM, classify_completion, sql_done_product, sql_report_present
+    try:
+        from behive.engine.claims_fallback import salvage_claims_from_content
+        salvage_claims_from_content(mission_id)
+    except Exception as _fb:
+        log.debug(f"claims fallback skipped: {_fb}")
+    con = None
+    try:
+        con = _connect_db(read_only=True)
+        row = con.execute(
+            f"SELECT status, {sql_report_present('hive_missions')} FROM hive_missions WHERE id=?",
+            [mission_id],
+        ).fetchone()
+        n_src = con.execute("SELECT COUNT(*) FROM hive_sources WHERE mission_id=?", [mission_id]).fetchone()[0] or 0
+        n_content = con.execute("SELECT COUNT(*) FROM hive_content WHERE mission_id=?", [mission_id]).fetchone()[0] or 0
+        n_useful = con.execute(
+            f"SELECT COUNT(*) FROM hive_claims c WHERE c.mission_id=? AND {SQL_USEFUL_CLAIM}", [mission_id]
+        ).fetchone()[0] or 0
+    except Exception as evidence_error:
+        # Missing evidence is not evidence of an empty mission.
+        raise RuntimeError("completion evidence unavailable") from evidence_error
+    finally:
+        if con is not None:
+            con.close()
+    if row is None:
+        raise RuntimeError("completion evidence unavailable")
+    if row[0] == 'cancelled':
+        return
+    status, phase = classify_completion(useful_claims=n_useful, report_present=bool(row[1]),
+                                        sources=n_src, content=n_content)
+    if status != 'done':
+        _mark_mission_error(mission_id, phase, phase=phase)
+        sys.exit(1)
+    # A legacy synthesis writer may already have set done; the product is rechecked
+    # atomically here (concurrent evidence loss never yields done).
+    con_done = _connect_db()
+    try:
+        con_done.execute(
+            f"""UPDATE hive_missions SET status='done', phase='done'
+                WHERE id=%s AND status NOT IN ('done', 'cancelled')
+                  AND {sql_done_product('hive_missions')}
+                RETURNING id""",
+            [mission_id],
+        ).fetchone()
+        con_done.commit()
+    except Exception:
+        con_done.rollback()
+        raise
+    finally:
+        con_done.close()
+
+
+_EMPTY_PHASES = frozenset({'empty_scout', 'empty_claims'})
+
+
+def _mark_mission_error(mission_id: str, error_msg: str, *, phase: str | None = None) -> bool:
+    """Commit an error/empty transition; a real done product is never downgraded.
+
+    ``phase`` (e.g. process_timeout, synthesis_failed, empty_claims) selects the
+    public phase explicitly; otherwise the legacy message parsing applies. Empty
+    may correct a done only when no useful claim exists (regex salvage material
+    does not count); error may correct a done only when it is not a done product
+    (non-blank report AND useful claim).
+    """
     import re
-    from behive.hygiene import SQL_COMPLETION_CLAIM
+    from behive.hygiene import MISSION_REASONS, SQL_USEFUL_CLAIM, sql_done_product
     con = None
     try:
         con = _connect_db()
-        # Determine if it was a timeout
-        is_timeout = 'timed out' in error_msg.lower() or 'timeout' in error_msg.lower()
-        empty_match = re.fullmatch(r'empty_mission sources=(\d+) claims=(\d+)', error_msg)
-        is_empty = empty_match is not None
-        if is_empty:
-            status_val = 'empty'
-            phase_val = 'empty_scout' if int(empty_match.group(1)) == 0 else 'empty_claims'
-            safe_error = error_msg
-        elif is_timeout:
-            status_val, phase_val = 'error', 'timeout'
-            safe_error = "Mission execution timed out"
+        if phase is not None:
+            status_val = 'empty' if phase in _EMPTY_PHASES else 'error'
+            phase_val = phase
+            safe_error = MISSION_REASONS.get(phase, "Mission execution failed")
         else:
-            status_val, phase_val = 'error', 'error'
-            safe_error = "Mission execution failed"
+            is_timeout = 'timed out' in error_msg.lower() or 'timeout' in error_msg.lower()
+            empty_match = re.fullmatch(r'empty_mission sources=(\d+) claims=(\d+)', error_msg)
+            if empty_match is not None:
+                status_val = 'empty'
+                phase_val = 'empty_scout' if int(empty_match.group(1)) == 0 else 'empty_claims'
+                safe_error = error_msg
+            elif is_timeout:
+                status_val, phase_val = 'error', 'timeout'
+                safe_error = "Mission execution timed out"
+            else:
+                status_val, phase_val = 'error', 'error'
+                safe_error = "Mission execution failed"
+        is_empty = status_val == 'empty'
         changed = con.execute(
             f"""UPDATE hive_missions
                SET status=%s, phase=%s,
@@ -1684,10 +1725,8 @@ def _mark_mission_error(mission_id: str, error_msg: str) -> bool:
                WHERE id=%s AND status <> 'cancelled'
                  AND CASE WHEN %s THEN NOT EXISTS (
                      SELECT 1 FROM hive_claims c WHERE c.mission_id = hive_missions.id
-                       AND {SQL_COMPLETION_CLAIM})
-                     ELSE status <> 'done' OR NOT EXISTS (
-                         SELECT 1 FROM hive_claims c WHERE c.mission_id = hive_missions.id
-                           AND {SQL_COMPLETION_CLAIM}) END
+                       AND {SQL_USEFUL_CLAIM})
+                     ELSE status <> 'done' OR NOT {sql_done_product('hive_missions')} END
                RETURNING id""",
             [status_val, phase_val, safe_error, mission_id, is_empty]
         ).fetchone()
@@ -1701,6 +1740,98 @@ def _mark_mission_error(mission_id: str, error_msg: str) -> bool:
     finally:
         if con is not None:
             con.close()
+
+
+class PhaseFailure(RuntimeError):
+    """A pipeline phase failed in a way that ends the mission as ``error``.
+
+    ``phase`` is the public mission phase (e.g. ``process_timeout``). cmd_run marks
+    the mission and exits without the generic whole-pipeline retry: a retry would
+    repeat the same provider-bound work and burn quota for the same outcome.
+    """
+
+    def __init__(self, phase: str):
+        super().__init__(phase)
+        self.phase = phase
+
+
+def _run_process_phase(mission_id: str, deep: bool, timings: dict) -> None:
+    """PHASE 3: process + continuation passes. Raises PhaseFailure on timeout/error."""
+    log.debug('  ┌─ PHASE 3 · PROCESS ────────────────────────────────┐')
+    _emit(mission_id, 'process', 'started')
+    process_args = [mission_id]
+    if deep:
+        process_args.append("--deep")
+    try:
+        timings['process'] = run_phase('hive2_process.py', process_args, 'process')
+    except subprocess.TimeoutExpired as e:
+        # The phase did not finish its own deadline handling: the mission has no
+        # trustworthy product (regex salvage material does not change that).
+        log.warning('  ⚠️ Process phase timed out — mission ends as error (process_timeout).')
+        _emit(mission_id, 'process', 'error', data={'error': 'Phase timed out', 'error_type': type(e).__name__})
+        raise PhaseFailure('process_timeout') from e
+    except Exception as e:
+        log.warning('  ⚠️ Process phase failed (%s) — mission ends as error (process_error).', type(e).__name__)
+        _emit(mission_id, 'process', 'error', data={'error': 'Phase execution failed', 'error_type': type(e).__name__})
+        raise PhaseFailure('process_error') from e
+    else:
+        # Only successful/partial passes may continue. A failed process might
+        # represent an upstream quota denial: never implicitly retry that phase.
+        def pending_progress():
+            from behive.engine.process import _mission_config
+            con = _connect_db(read_only=True)
+            try:
+                row = con.execute("SELECT config FROM hive_missions WHERE id=?", [mission_id]).fetchone()
+            finally:
+                con.close()
+            state = _mission_config(row[0]).get("source_extraction") if row else None
+            if (not isinstance(state, dict) or type(state.get("version")) is not int
+                    or state["version"] != 1 or type(state.get("pending")) is not int
+                    or state["pending"] < 0 or not isinstance(state.get("attempted_urls"), list)
+                    or any(not isinstance(url, str) or not url.strip() for url in state["attempted_urls"])):
+                return None
+            return state["pending"], len(set(state["attempted_urls"]))
+
+        try:
+            try:
+                continuation_passes = max(0, int(os.environ.get("BEHIVE_A3_CONTINUATION_PASSES", "2")))
+            except ValueError:
+                continuation_passes = 1
+            before = pending_progress() if continuation_passes else None
+            for continuation in range(continuation_passes):
+                if before is None or before[0] == 0:
+                    break
+                _emit(mission_id, 'process-continue', 'started',
+                      data={'pass': continuation + 1, 'pending': before[0]})
+                try:
+                    timings['process'] += run_phase('hive2_process.py', process_args, 'process-continue')
+                except Exception as exc:
+                    log.warning("Process continuation failed (error_type=%s); keeping committed claims",
+                                type(exc).__name__)
+                    _emit(mission_id, 'process-continue', 'error',
+                          data={'error': 'Phase execution failed', 'error_type': type(exc).__name__})
+                    break
+                after = pending_progress()
+                _emit(mission_id, 'process-continue', 'completed',
+                      data={'pass': continuation + 1, 'pending': after[0] if after else None})
+                if after is None or after[0] == 0 or after[1] <= before[1] or after[0] >= before[0]:
+                    break  # No newly attempted pages: another pass cannot help.
+                before = after
+        except Exception as exc:
+            log.warning("Process continuation progress unavailable (error_type=%s); continuing mission",
+                        type(exc).__name__)
+    # Emit process completed event
+    try:
+        # import pg as _ddb  # removed — using _connect_db()
+        _con = _connect_db(read_only=True)
+        _n_docs = _con.execute(
+            "SELECT COUNT(*) FROM hive_entities WHERE mission_id=?", [mission_id]
+        ).fetchone()[0]
+        _con.close()
+    except Exception:
+        _n_docs = 0
+    _emit(mission_id, 'process', 'completed', data={'docs_processed': _n_docs})
+    log.info(f'  └─ done · {timings["process"]:.1f}s ──────────────────────────────┘\n')
 
 
 def _run_pipeline_phases(mission_id: str, topic: str, plan: list, timings: dict, 
@@ -1925,76 +2056,7 @@ print(json.dumps(output))
     log.info(f'  └─ done · {timings["harvest"]:.1f}s ──────────────────────────────┘\n')
 
     # ═══ PHASE 3: PROCESS ════════════════════════════════════════
-    log.debug('  ┌─ PHASE 3 · PROCESS ────────────────────────────────┐')
-    _emit(mission_id, 'process', 'started')
-    try:
-        process_args = [mission_id]
-        if deep:
-            process_args.append("--deep")
-        timings['process'] = run_phase('hive2_process.py', process_args, 'process')
-    except Exception as e:
-        log.warning(f'  ⚠️ Process failed: {e} — continuing with available claims.')
-        _emit(mission_id, 'process', 'error', data={'error': 'Phase execution failed', 'error_type': type(e).__name__})
-        timings['process'] = 0.0
-        # Don't raise — synth can work with whatever claims exist
-    else:
-        # Only successful/partial passes may continue. A failed process might
-        # represent an upstream quota denial: never implicitly retry that phase.
-        def pending_progress():
-            from behive.engine.process import _mission_config
-            con = _connect_db(read_only=True)
-            try:
-                row = con.execute("SELECT config FROM hive_missions WHERE id=?", [mission_id]).fetchone()
-            finally:
-                con.close()
-            state = _mission_config(row[0]).get("source_extraction") if row else None
-            if (not isinstance(state, dict) or type(state.get("version")) is not int
-                    or state["version"] != 1 or type(state.get("pending")) is not int
-                    or state["pending"] < 0 or not isinstance(state.get("attempted_urls"), list)
-                    or any(not isinstance(url, str) or not url.strip() for url in state["attempted_urls"])):
-                return None
-            return state["pending"], len(set(state["attempted_urls"]))
-
-        try:
-            try:
-                continuation_passes = max(0, int(os.environ.get("BEHIVE_A3_CONTINUATION_PASSES", "2")))
-            except ValueError:
-                continuation_passes = 1
-            before = pending_progress() if continuation_passes else None
-            for continuation in range(continuation_passes):
-                if before is None or before[0] == 0:
-                    break
-                _emit(mission_id, 'process-continue', 'started',
-                      data={'pass': continuation + 1, 'pending': before[0]})
-                try:
-                    timings['process'] += run_phase('hive2_process.py', process_args, 'process-continue')
-                except Exception as exc:
-                    log.warning("Process continuation failed (error_type=%s); keeping committed claims",
-                                type(exc).__name__)
-                    _emit(mission_id, 'process-continue', 'error',
-                          data={'error': 'Phase execution failed', 'error_type': type(exc).__name__})
-                    break
-                after = pending_progress()
-                _emit(mission_id, 'process-continue', 'completed',
-                      data={'pass': continuation + 1, 'pending': after[0] if after else None})
-                if after is None or after[0] == 0 or after[1] <= before[1] or after[0] >= before[0]:
-                    break  # No newly attempted pages: another pass cannot help.
-                before = after
-        except Exception as exc:
-            log.warning("Process continuation progress unavailable (error_type=%s); continuing mission",
-                        type(exc).__name__)
-    # Emit process completed event
-    try:
-        # import pg as _ddb  # removed — using _connect_db()
-        _con = _connect_db(read_only=True)
-        _n_docs = _con.execute(
-            "SELECT COUNT(*) FROM hive_entities WHERE mission_id=?", [mission_id]
-        ).fetchone()[0]
-        _con.close()
-    except Exception:
-        _n_docs = 0
-    _emit(mission_id, 'process', 'completed', data={'docs_processed': _n_docs})
-    log.info(f'  └─ done · {timings["process"]:.1f}s ──────────────────────────────┘\n')
+    _run_process_phase(mission_id, deep, timings)
 
     # ═══ PHASE 3.5: FALSIFIER (claim dedup + cross-validation) ══
     # Falsifier can explode combinatorially with many claims × depth-5.
@@ -2475,19 +2537,22 @@ def cleanup_stuck_missions(max_age_hours: int = 2) -> int:
     
     Returns number of missions marked as error.
     """
-    from behive.hygiene import SQL_COMPLETION_CLAIM
+    from behive.hygiene import MIN_CLAIMS_FOR_DONE, SQL_USEFUL_CLAIM, sql_done_product
     try:
         con = _connect_db()
+        # A stuck mission is recovered as done only with a real product: a report
+        # and enough useful (non-regex) claims, like a nonzero-exit salvage.
         con.execute(
             f"""
             UPDATE hive_missions m
             SET status = 'done', phase = 'done'
             WHERE m.status IN ('scout', 'harvest', 'process', 'synth', 'planning', 'running')
             AND m.created_at < NOW() - make_interval(hours := %s)
+            AND {sql_done_product('m')}
             AND (SELECT COUNT(*) FROM hive_claims c
-                 WHERE c.mission_id = m.id AND {SQL_COMPLETION_CLAIM}) >= 3
+                 WHERE c.mission_id = m.id AND {SQL_USEFUL_CLAIM}) >= %s
             """,
-            [max_age_hours],
+            [max_age_hours, MIN_CLAIMS_FOR_DONE],
         )
         cur = con.execute(
             """

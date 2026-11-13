@@ -16,7 +16,7 @@ class DB:
             INSERT INTO hive_missions VALUES ('m','running','scout','topic',NULL);
             CREATE TABLE hive_sources(mission_id TEXT,url TEXT);
             CREATE TABLE hive_content(mission_id TEXT,url TEXT);
-            CREATE TABLE hive_claims(mission_id TEXT,claim TEXT,source_url TEXT,is_garbage BOOLEAN,quality_score REAL);
+            CREATE TABLE hive_claims(mission_id TEXT,claim TEXT,source_url TEXT,is_garbage BOOLEAN,quality_score REAL,claim_type TEXT);
         ''')
         self.db.commit()
     def cursor(self): return self
@@ -34,7 +34,7 @@ class DB:
     def claim(self, url='api://doc', evidence=True):
         if evidence:
             self.db.execute("INSERT INTO hive_content VALUES('m',?)", (url,))
-        self.db.execute("INSERT INTO hive_claims VALUES('m','Documented factual claim.',?,false,0.8)", (url,))
+        self.db.execute("INSERT INTO hive_claims(mission_id,claim,source_url,is_garbage,quality_score) VALUES('m','Documented factual claim.',?,false,0.8)", (url,))
         self.db.commit()
 
 
@@ -112,6 +112,8 @@ def test_error_cannot_overwrite_cancelled(monkeypatch,rc,salvage_failure):
 def test_nonzero_sourced_salvage_remains_compatible(monkeypatch):
     db = DB()
     for _ in range(3): db.claim()
+    db.execute("UPDATE hive_missions SET synthesis='report'")  # done needs a report since 2026-11-13
+    db.commit()
     events, bridges = run(monkeypatch,db,rc=7)
     assert db.state == ('done','done') and bridges == [('done','done')]
     assert events[-1][1]['salvaged'] is True

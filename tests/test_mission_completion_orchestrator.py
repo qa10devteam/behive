@@ -13,25 +13,28 @@ from test_mission_completion_lifecycle import BoundaryDB
 
 class ErrorBoundaryDB(BoundaryDB):
     def execute(self, sql, params=()):
-        # PostgreSQL JSON metadata merge is outside these lifecycle assertions.
-        sql = sql.replace("quality_metrics = COALESCE(quality_metrics, '{}'::jsonb) || jsonb_build_object('error_message', %s)", "phase = phase")
+        # PostgreSQL JSON metadata merge is outside these lifecycle assertions. The
+        # no-op must not touch status/phase: SQLite keeps the rightmost duplicate
+        # assignment, so 'phase = phase' silently undid every phase write.
+        sql = sql.replace("quality_metrics = COALESCE(quality_metrics, '{}'::jsonb) || jsonb_build_object('error_message', %s)", "synthesis = synthesis")
         if len(params) == 5:
             params = [params[0], params[1], params[3], params[4]]
-        elif len(params) == 4 and 'phase = phase' in sql:
+        elif len(params) == 4 and 'synthesis = synthesis' in sql:
             params = [params[0], params[1], params[3]]
         return super().execute(sql, params)
 
 
-def run_cmd(monkeypatch, db, tmp_path):
+def run_cmd(monkeypatch, db, tmp_path, *, pipeline=None, retries='1'):
     import behive.engine.claims_fallback as fallback
     monkeypatch.setenv('BEHIVE_MISSION_ID', 'm')
-    monkeypatch.setenv('BEHIVE_MAX_RETRIES', '1')
+    monkeypatch.setenv('BEHIVE_MAX_RETRIES', retries)
     monkeypatch.setattr(orchestrator, '_init_db', lambda _: None)
     monkeypatch.setattr(orchestrator, 'cleanup_stuck_missions', lambda **kwargs: 0)
     monkeypatch.setattr(orchestrator, '_connect_db', lambda **kwargs: db)
     monkeypatch.setattr(orchestrator, '_create_mission', lambda *args, **kwargs: None)
     monkeypatch.setattr(orchestrator, '_emit', lambda *args, **kwargs: None)
-    monkeypatch.setattr(orchestrator, '_run_pipeline_phases', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orchestrator, '_run_pipeline_phases', pipeline or (lambda *args, **kwargs: None))
+    monkeypatch.setattr(orchestrator.time, 'sleep', lambda seconds: None)  # retry pause
     monkeypatch.setattr(fallback, 'salvage_claims_from_content', lambda mid: 0)
     monkeypatch.setitem(sys.modules, 'behive.engine.preprocessor', types.SimpleNamespace(
         preprocess_query=lambda *args, **kwargs: types.SimpleNamespace(ok=True, refined_topic='topic', specificity_score=0.8)))
@@ -49,6 +52,7 @@ def test_cmd_run_api_provenance_is_not_empty(monkeypatch, tmp_path):
     db = ErrorBoundaryDB()
     db.execute("INSERT INTO hive_content VALUES ('m', 'api://doc')")
     db.claim()
+    db.report()  # done needs a report since 2026-11-13 (diag task 1)
     run_cmd(monkeypatch, db, tmp_path)  # Must not exit 1 for an API-only mission.
     assert db.status == 'done'
     assert db.committed_status == 'done'
@@ -82,6 +86,7 @@ def test_error_writer_preserves_proven_done_or_cancellation(monkeypatch, status)
     db = ErrorBoundaryDB()
     db.execute("INSERT INTO hive_content VALUES ('m', 'api://doc')")
     db.claim()
+    db.report()  # a proven done = report + useful claim (contract since 2026-11-13)
     db.execute('UPDATE hive_missions SET status=?, phase=?', (status, status))
     db.commit()
     monkeypatch.setattr(orchestrator, '_connect_db', lambda **kwargs: db)

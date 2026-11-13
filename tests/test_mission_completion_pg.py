@@ -66,6 +66,8 @@ def test_real_pg_completion_provenance_and_publication(db, monkeypatch, case, ex
         for _ in range(3 if case == 'salvage' else 1):
             cur.execute('INSERT INTO hive_claims (mission_id,claim,source_url,is_garbage,quality_score) VALUES (%s,%s,%s,%s,%s)',
                         ('m', '{"claims": []}' if case == 'blob' else 'A documented 2025 research finding.', 'api://doc', case == 'garbage', .8))
+        # Since 2026-11-13 done also needs a non-blank report (diag task 1).
+        cur.execute("UPDATE hive_missions SET synthesis='# Report' WHERE id='m'")
     db.commit()
     boundary = RealBoundary(db)
     events, bridges = run_server(monkeypatch, boundary,
@@ -93,6 +95,8 @@ def test_cleanup_only_recovers_evidence_backed_product(db, monkeypatch, eligible
         for _ in range(3):
             cur.execute('INSERT INTO hive_claims (mission_id,claim,source_url,is_garbage) VALUES (%s,%s,%s,false)',
                         ('m', 'A documented 2025 finding.' if eligible else '{"claims":[]}', 'api://doc'))
+        # Recovery as done also needs a report since 2026-11-13 (diag task 1).
+        cur.execute("UPDATE hive_missions SET synthesis='# Report' WHERE id='m'")
     db.commit()
     boundary = RealBoundary(db)
     monkeypatch.setattr(orchestrator, '_connect_db', lambda: boundary)

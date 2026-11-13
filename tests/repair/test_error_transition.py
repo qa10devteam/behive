@@ -33,7 +33,9 @@ def test_mark_error_never_persists_provider_body(db):
 
 @pytest.mark.parametrize('state', ['cancelled','done'])
 def test_mark_error_preserves_terminal_product_or_cancellation(db,state):
-    if state == 'done': db.claim()
+    if state == 'done':  # a done product = report + useful claim (since 2026-11-13)
+        db.claim()
+        db.execute("UPDATE hive_missions SET synthesis='report'")
     db.execute('UPDATE hive_missions SET status=?,phase=?',(state,state))
     db.commit()
     assert not orch._mark_mission_error('m','synthesis failed')

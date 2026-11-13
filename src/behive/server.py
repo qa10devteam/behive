@@ -15,7 +15,11 @@ from typing import Optional, AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request, Depends, Query
 from behive import __version__ as BEHIVE_VERSION
-from behive.hygiene import MIN_CLAIMS_FOR_DONE, SQL_CLAIM_NOT_BLOB, SQL_COMPLETION_CLAIM, has_salvageable_claims, is_empty_mission, is_structured_blob
+from behive.hygiene import (
+    MIN_CLAIMS_FOR_DONE, MISSION_REASONS, PROCESS_FAILURE_PHASES, SQL_CLAIM_NOT_BLOB, SQL_USEFUL_CLAIM,
+    classify_completion, has_salvageable_claims, is_structured_blob, mission_reason, sql_done_product,
+    sql_report_present,
+)
 
 # ─── Concurrency control ──────────────────────────────────────────────────────
 _MAX_CONCURRENT_MISSIONS = int(os.environ.get("BEHIVE_MAX_CONCURRENT", "3"))
@@ -386,6 +390,19 @@ async def start_research(req: ResearchRequest):
     }
 
 
+def _claim_split(cur, mission_id: str) -> tuple[int, int]:
+    """(useful claims, regex_fallback claims) of a mission; see hygiene.SQL_USEFUL_CLAIM."""
+    cur.execute(f"SELECT COUNT(*) FROM hive_claims c WHERE c.mission_id = %s AND {SQL_USEFUL_CLAIM}", (mission_id,))
+    useful = int((cur.fetchone() or (0,))[0] or 0)
+    cur.execute(
+        "SELECT COUNT(*) FROM hive_claims WHERE mission_id = %s AND claim_type = 'regex_fallback' "
+        "AND (is_garbage = false OR is_garbage IS NULL)",
+        (mission_id,),
+    )
+    fallback = int((cur.fetchone() or (0,))[0] or 0)
+    return useful, fallback
+
+
 # ─── 3. Research Status ──────────────────────────────────────────────────────
 
 @app.get("/research/{mission_id}/status")
@@ -395,8 +412,8 @@ async def research_status(mission_id: str):
         conn = get_db()
         cur = conn.cursor()
         cur.execute(
-            """SELECT status, phase, topic, sources_found, sources_harvested, sources_processed,
-                      harvest_done_at, process_done_at
+            f"""SELECT status, phase, topic, sources_found, sources_harvested, sources_processed,
+                      harvest_done_at, process_done_at, {sql_report_present('hive_missions')}
                FROM hive_missions WHERE id = %s""",
             (mission_id,),
         )
@@ -404,12 +421,13 @@ async def research_status(mission_id: str):
         if not row:
             conn.close()
             raise HTTPException(404, f"Mission {mission_id} not found")
-        status, phase, topic, n_found, n_harv, n_proc, harvest_done, process_done = row
+        status, phase, topic, n_found, n_harv, n_proc, harvest_done, process_done, report_present = row
         cur.execute(
             "SELECT COUNT(*), COALESCE(AVG(quality_score), 0) FROM hive_claims WHERE mission_id = %s AND (is_garbage = false OR is_garbage IS NULL)",
             (mission_id,)
         )
         crow = cur.fetchone() or (0, 0)
+        useful, fallback = _claim_split(cur, mission_id)
         cur.execute("SELECT COUNT(*) FROM hive_content WHERE mission_id = %s", (mission_id,))
         n_content = int((cur.fetchone() or (0,))[0] or 0)
         cur.execute("SELECT COUNT(*) FROM hive_facts WHERE mission_id = %s", (mission_id,))
@@ -425,7 +443,11 @@ async def research_status(mission_id: str):
             "status": status,
             "phase": derived,
             "topic": topic,
+            "reason": mission_reason(status, phase, report_present=bool(report_present), useful_claims=useful),
+            "report_available": status == "done" and bool(report_present) and useful > 0,
             "claims_so_far": crow[0] or 0,
+            "useful_claims": useful,
+            "fallback_claims": fallback,
             "avg_quality": round(float(crow[1] or 0), 4),
             "sources_found": int(n_found or 0),
             "sources_harvested": int(n_harv or 0),
@@ -483,12 +505,16 @@ async def get_research(mission_id: str):
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT topic, status, phase, synthesis FROM hive_missions WHERE id = %s", (mission_id,))
+        cur.execute(
+            f"SELECT topic, status, phase, synthesis, {sql_report_present('hive_missions')} FROM hive_missions WHERE id = %s",
+            (mission_id,),
+        )
         row = cur.fetchone()
         if not row:
             conn.close()
             raise HTTPException(404, f"Mission {mission_id} not found")
-        topic, status, phase, report = row
+        topic, status, phase, report, report_present = row
+        useful, _fallback = _claim_split(cur, mission_id)
         cur.execute("""
             SELECT claim, confidence, quality_score, source_url, claim_type
             FROM hive_claims
@@ -506,6 +532,7 @@ async def get_research(mission_id: str):
             "topic": topic,
             "status": status,
             "phase": phase,
+            "reason": mission_reason(status, phase, report_present=bool(report_present), useful_claims=useful),
             "report": report or "",
             "claims": claims,
             "metrics": {"total_claims": len(claims), "avg_quality": round(avg_q, 4)},
@@ -524,48 +551,47 @@ async def get_report(mission_id: str):
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT topic, status, synthesis, phase FROM hive_missions WHERE id = %s", (mission_id,))
+        cur.execute(
+            f"SELECT topic, status, synthesis, phase, {sql_report_present('hive_missions')} FROM hive_missions WHERE id = %s",
+            (mission_id,),
+        )
         row = cur.fetchone()
         if not row:
             conn.close()
             raise HTTPException(404, f"Mission {mission_id} not found")
-        topic, status, synthesis, phase = row
+        topic, status, synthesis, phase, report_present = row
         cur.execute(
             "SELECT COUNT(*), COALESCE(AVG(quality_score), 0) FROM hive_claims WHERE mission_id = %s AND (is_garbage = false OR is_garbage IS NULL)",
             (mission_id,)
         )
         crow = cur.fetchone()
+        useful, fallback = _claim_split(cur, mission_id)
         conn.close()
         if status in {"empty", "error", "cancelled"}:
             # Never publish persisted exception strings or provider responses.
-            reasons = {
-                "empty_scout": "No sources or qualifying claims were produced.",
-                "empty_claims": "Sources were collected but no qualifying claims were produced.",
-                "pipeline_failed": "Pipeline execution failed without a qualifying product.",
-                "claims_fallback_failed": "Claims recovery failed without a qualifying product.",
-                "pipeline_exception": "Pipeline execution raised an exception.",
-                "timeout": "Pipeline execution timed out.",
-                "cancelled": "Mission was cancelled.",
-            }
-            safe_phase = phase if phase in reasons else status
-            reason = reasons.get(safe_phase, {
-                "empty": "Mission finished without qualifying claims.",
-                "error": "Mission execution failed.",
-                "cancelled": "Mission was cancelled.",
-            }[status])
+            safe_phase = phase if phase in MISSION_REASONS else status
+            reason = mission_reason(status, safe_phase)
             return JSONResponse(status_code=409, content={
                 "detail": reason, "mission_id": mission_id, "topic": topic,
                 "status": status, "phase": safe_phase, "reason": reason,
+                "report_available": False,
                 "synthesis": "", "claims_count": crow[0] or 0,
+                "useful_claims": useful, "fallback_claims": fallback,
                 "avg_quality": round(float(crow[1] or 0), 4),
             })
         if status != "done":
             raise HTTPException(202, f"Mission still in progress (status={status})")
+        # Missions finished before the 2026-11-13 rules can be 'done' without a
+        # report or with regex material only: say so instead of an empty success.
         return {
             "mission_id": mission_id,
             "topic": topic,
             "synthesis": synthesis or "",
+            "report_available": bool(report_present) and useful > 0,
+            "reason": mission_reason(status, phase, report_present=bool(report_present), useful_claims=useful),
             "claims_count": crow[0] or 0,
+            "useful_claims": useful,
+            "fallback_claims": fallback,
             "avg_quality": round(float(crow[1] or 0), 4),
         }
     except HTTPException:
@@ -1167,62 +1193,69 @@ async def _run_pipeline_inner(mission_id: str, topic: str, depth: int, scale: in
             log.warning("Mission %s pipeline failed (phase=%s, exit=%s)",
                         mission_id, current_phase, proc.returncode)
 
-        # Gather final results. Exit 0 is not done — empty scout/claims is error.
+        # Gather final results. Exit 0 is not done: done needs a non-blank report
+        # AND a useful claim (regex_fallback salvage never decides done), and a
+        # worker's process-phase failure stays error whatever material exists.
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT status, phase FROM hive_missions WHERE id = %s", (mission_id,))
-        worker_state = cur.fetchone() or (None, None)
-        cur.execute("SELECT COUNT(*) FROM hive_sources WHERE mission_id = %s", (mission_id,))
-        row_src = cur.fetchone() or (0,)
-        n_src = int(row_src[0] or 0)
         cur.execute(
-            f"SELECT COUNT(*), COALESCE(AVG(c.quality_score), 0) FROM hive_claims c WHERE c.mission_id = %s AND {SQL_COMPLETION_CLAIM}",
+            f"SELECT status, phase, {sql_report_present('hive_missions')} FROM hive_missions WHERE id = %s",
+            (mission_id,),
+        )
+        worker_status, worker_phase, report_present = cur.fetchone() or (None, None, False)
+        cur.execute("SELECT COUNT(*) FROM hive_sources WHERE mission_id = %s", (mission_id,))
+        n_src = int((cur.fetchone() or (0,))[0] or 0)
+        cur.execute("SELECT COUNT(*) FROM hive_content WHERE mission_id = %s", (mission_id,))
+        n_content = int((cur.fetchone() or (0,))[0] or 0)
+        cur.execute(
+            f"SELECT COUNT(*), COALESCE(AVG(c.quality_score), 0) FROM hive_claims c WHERE c.mission_id = %s AND {SQL_USEFUL_CLAIM}",
             (mission_id,),
         )
         row_cl = cur.fetchone() or (0, 0)
         n_cl = int(row_cl[0] or 0)
         avg_q = row_cl[1] or 0
-        empty = is_empty_mission(n_src, n_cl, sourced_claims=n_cl)
-        if not empty and (has_salvageable_claims(n_cl) or proc.returncode == 0):
+        outcome_status, outcome_phase = classify_completion(
+            useful_claims=n_cl, report_present=bool(report_present), sources=n_src, content=n_content)
+        if worker_status == "error" and worker_phase in PROCESS_FAILURE_PHASES:
+            new_status, new_phase = "error", worker_phase
+        elif outcome_status == "done" and (has_salvageable_claims(n_cl) or proc.returncode == 0):
             new_status, new_phase = "done", "done"
-            recovered = proc.returncode != 0 or salvage_error or worker_state[0] == "error"
+        elif outcome_status == "error":
+            new_status, new_phase = outcome_status, outcome_phase
+        # A worker's explicit clean-empty transition is terminal, not a crash
+        # (cmd_run exits 1 for empty). Other nonzero exits are errors.
+        elif salvage_error is not None or worker_status == "error" or (proc.returncode != 0 and worker_status != "empty"):
+            new_status = "error"
+            new_phase = "claims_fallback_failed" if salvage_error else "pipeline_failed"
+        else:
+            new_status, new_phase = outcome_status, outcome_phase
+        if new_status == "done":
+            recovered = proc.returncode != 0 or salvage_error or worker_status == "error"
             event_data = {
                 "total_claims": n_cl, "avg_quality": round(float(avg_q or 0), 4),
-                "salvaged": proc.returncode != 0, "completion_basis": "qualified_claims",
+                "salvaged": proc.returncode != 0, "completion_basis": "report_and_useful_claims",
                 "recovery": "source_product" if recovered else None,
             }
         else:
-            reason = (
-                f"empty_mission sources={n_src} claims={n_cl}"
-                if empty
-                else f"Pipeline exited with code {proc.returncode}"
-            )
-            # A worker's explicit clean-empty transition is terminal, not a
-            # crash (cmd_run returns 1 for empty). Other nonzero exits are errors.
-            failed = salvage_error is not None or worker_state[0] == "error" or (proc.returncode != 0 and worker_state[0] != "empty")
-            new_status = "error" if failed or not empty else "empty"
-            if failed:
-                new_phase = "claims_fallback_failed" if salvage_error else "pipeline_failed"
-                reason = "Claims recovery failed" if salvage_error else "Pipeline execution failed"
-            else:
-                new_phase = "empty_scout" if n_src == 0 else "empty_claims"
-            event_data = {"message": reason, "sources": n_src, "claims": n_cl,
-                          "exit_code": proc.returncode}
+            reason = MISSION_REASONS.get(new_phase) or mission_reason(new_status, new_phase)
+            event_data = {"message": reason, "reason": reason, "phase": new_phase,
+                          "sources": n_src, "claims": n_cl, "exit_code": proc.returncode}
             if salvage_error:
                 event_data["error_type"] = salvage_error
-        # This invocation claimed a nonterminal mission before spawning. Synth
-        # may write provisional done: confirm its sourced product here, or correct
-        # empty done. Never downgrade a real done product for a later worker error.
-        # Calls that start after completion are rejected by the initial claim.
+        # This invocation claimed a nonterminal mission before spawning. A legacy
+        # synthesis writer may set provisional done: confirm a real product here
+        # or correct a false done. A real done product (report + useful claim) is
+        # never downgraded by a later worker error. Calls that start after
+        # completion are rejected by the initial claim.
+        done_product = sql_done_product("hive_missions")
         cur.execute(
             f"""UPDATE hive_missions SET status = %s, phase = %s WHERE id = %s
-                AND status <> 'cancelled' AND (status <> 'done' OR %s IN ('done', 'empty')
-                    OR NOT EXISTS (SELECT 1 FROM hive_claims c
-                        WHERE c.mission_id = hive_missions.id AND {SQL_COMPLETION_CLAIM}))
-                AND (%s <> 'done' OR (SELECT COUNT(*) FROM hive_claims c
-                    WHERE c.mission_id = hive_missions.id AND {SQL_COMPLETION_CLAIM}) >= %s)
+                AND status <> 'cancelled'
+                AND (status <> 'done' OR %s = 'done' OR NOT {done_product})
+                AND (%s <> 'done' OR ({done_product} AND (SELECT COUNT(*) FROM hive_claims c
+                    WHERE c.mission_id = hive_missions.id AND {SQL_USEFUL_CLAIM}) >= %s))
                 AND (%s <> 'empty' OR NOT EXISTS (SELECT 1 FROM hive_claims c
-                    WHERE c.mission_id = hive_missions.id AND {SQL_COMPLETION_CLAIM}))
+                    WHERE c.mission_id = hive_missions.id AND {SQL_USEFUL_CLAIM}))
                 RETURNING id""",
             (new_status, new_phase, mission_id, new_status, new_status,
              1 if proc.returncode == 0 else MIN_CLAIMS_FOR_DONE, new_status),

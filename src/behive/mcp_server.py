@@ -2,7 +2,7 @@
 
 import os
 from behive import __version__ as BEHIVE_VERSION
-from behive.hygiene import SQL_CLAIM_NOT_BLOB, is_structured_blob
+from behive.hygiene import SQL_CLAIM_NOT_BLOB, SQL_USEFUL_CLAIM, is_structured_blob, mission_reason, sql_report_present
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -84,7 +84,7 @@ async def mcp_endpoint(request: MCPRequest):
                     },
                     {
                         "name": "get_report",
-                        "description": "Get the synthesized research report for a completed mission.",
+                        "description": "Get the synthesized research report for a completed mission. Missions without a report (error, empty, cancelled) return the status, phase and reason instead.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -95,7 +95,7 @@ async def mcp_endpoint(request: MCPRequest):
                     },
                     {
                         "name": "mission_status",
-                        "description": "Check the progress of a running research mission.",
+                        "description": "Check the progress of a research mission: status, phase, claim counts and, when there is no usable report, the reason.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -198,38 +198,65 @@ async def _tool_search(req_id, args):
         return _tool_result(req_id, f"Search error: {e}", True)
 
 
-async def _tool_get_report(req_id, args):
-    """Get mission report."""
-    mission_id = args.get("mission_id", "")
+def _mission_state(mission_id: str):
+    """(topic, status, phase, synthesis, report_present, useful, fallback) or None."""
+    conn = get_db()
     try:
-        conn = get_db()
         cur = conn.cursor()
         cur.execute(
-            "SELECT synthesis FROM hive_missions WHERE id = %s", (mission_id,)
+            f"SELECT topic, status, phase, synthesis, {sql_report_present('hive_missions')} "
+            "FROM hive_missions WHERE id = %s", (mission_id,)
         )
         row = cur.fetchone()
-        conn.close()
         if not row:
+            return None
+        cur.execute(f"SELECT COUNT(*) FROM hive_claims c WHERE c.mission_id = %s AND {SQL_USEFUL_CLAIM}", (mission_id,))
+        useful = int((cur.fetchone() or (0,))[0] or 0)
+        cur.execute(
+            "SELECT COUNT(*) FROM hive_claims WHERE mission_id = %s AND claim_type = 'regex_fallback' "
+            "AND (is_garbage = false OR is_garbage IS NULL)", (mission_id,)
+        )
+        fallback = int((cur.fetchone() or (0,))[0] or 0)
+        return (*row[:4], bool(row[4]), useful, fallback)
+    finally:
+        conn.close()
+
+
+async def _tool_get_report(req_id, args):
+    """Get mission report; missions without one say why (never an empty success)."""
+    mission_id = args.get("mission_id", "")
+    try:
+        state = _mission_state(mission_id)
+        if state is None:
             return _tool_result(req_id, f"Mission '{mission_id}' not found", True)
-        return _tool_result(req_id, row[0] or "Report not yet generated. Mission may still be running.")
+        topic, status, phase, synthesis, report_present, useful, _fallback = state
+        reason = mission_reason(status, phase, report_present=report_present, useful_claims=useful)
+        if status in ("empty", "error", "cancelled") or (status == "done" and reason):
+            return _tool_result(req_id, f"No report for mission '{mission_id}'.\n"
+                                        f"Status: {status}\nPhase: {phase or 'pending'}\nReason: {reason}")
+        if status != "done":
+            return _tool_result(req_id, "Report not yet generated. Mission is still running "
+                                        f"(status={status}, phase={phase or 'pending'}).")
+        return _tool_result(req_id, synthesis)
     except Exception as e:
         return _tool_result(req_id, f"Error: {e}", True)
 
 
 async def _tool_mission_status(req_id, args):
-    """Check mission status."""
+    """Check mission status, with the reason when there is no usable report."""
     job_id = args.get("job_id", "")
     try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT status, phase, topic FROM hive_missions WHERE id = %s", (job_id,)
-        )
-        row = cur.fetchone()
-        conn.close()
-        if not row:
+        state = _mission_state(job_id)
+        if state is None:
             return _tool_result(req_id, f"Mission '{job_id}' not found", True)
-        return _tool_result(req_id, f"Mission: {row[2]}\nStatus: {row[0]}\nPhase: {row[1] or 'pending'}")
+        topic, status, phase, _synthesis, report_present, useful, fallback = state
+        reason = mission_reason(status, phase, report_present=report_present, useful_claims=useful)
+        lines = [f"Mission: {topic}", f"Status: {status}", f"Phase: {phase or 'pending'}"]
+        if reason:
+            lines.append(f"Reason: {reason}")
+        lines.append(f"Claims: {useful} useful, {fallback} regex fallback")
+        lines.append("Report: " + ("available" if status == "done" and report_present and useful else "not available"))
+        return _tool_result(req_id, "\n".join(lines))
     except Exception as e:
         return _tool_result(req_id, f"Error: {e}", True)
 

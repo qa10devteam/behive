@@ -16,13 +16,15 @@ class BoundaryDB:
     def __init__(self):
         self.db = sqlite3.connect(':memory:')
         self.db.create_function('chr', 1, chr)
+        # Columns used by the completion predicates (diag 2026-11-12 contract:
+        # done needs a non-blank synthesis and a claim other than regex_fallback).
         self.db.executescript('''
-            CREATE TABLE hive_missions (id TEXT PRIMARY KEY, status TEXT, phase TEXT);
-            INSERT INTO hive_missions VALUES ('m', 'running', 'scout');
+            CREATE TABLE hive_missions (id TEXT PRIMARY KEY, status TEXT, phase TEXT, synthesis TEXT);
+            INSERT INTO hive_missions VALUES ('m', 'running', 'scout', NULL);
             CREATE TABLE hive_sources (mission_id TEXT, url TEXT);
             CREATE TABLE hive_content (mission_id TEXT, url TEXT);
             CREATE TABLE hive_claims (mission_id TEXT, claim TEXT, source_url TEXT,
-                is_garbage BOOLEAN, quality_score REAL);
+                is_garbage BOOLEAN, quality_score REAL, claim_type TEXT);
         ''')
         self.db.commit()
         self.committed_status = 'running'
@@ -58,8 +60,17 @@ class BoundaryDB:
     def status(self):
         return self.db.execute("SELECT status FROM hive_missions WHERE id='m'").fetchone()[0]
 
-    def claim(self, text='A documented claim about the 2025 research result.', url='api://doc', garbage=False):
-        self.db.execute('INSERT INTO hive_claims VALUES (?, ?, ?, ?, ?)', ('m', text, url, garbage, .8))
+    @property
+    def phase(self):
+        return self.db.execute("SELECT phase FROM hive_missions WHERE id='m'").fetchone()[0]
+
+    def claim(self, text='A documented claim about the 2025 research result.', url='api://doc', garbage=False,
+              claim_type='fact'):
+        self.db.execute('INSERT INTO hive_claims VALUES (?, ?, ?, ?, ?, ?)', ('m', text, url, garbage, .8, claim_type))
+        self.db.commit()
+
+    def report(self, text='# Report\n\nA documented 2025 research finding [1].'):
+        self.db.execute("UPDATE hive_missions SET synthesis=? WHERE id='m'", (text,))
         self.db.commit()
 
 
@@ -108,6 +119,7 @@ def test_api_content_claim_completes_without_scout_rows(monkeypatch):
     db = BoundaryDB()
     db.execute("INSERT INTO hive_content VALUES ('m', 'api://doc')")
     db.claim()
+    db.report()  # done needs a report since 2026-11-13 (diag task 1)
     events, bridges = run_server(monkeypatch, db)
     assert db.status == 'done'
     assert ('done', 'done') in events  # Commit precedes publication.
@@ -151,6 +163,7 @@ def test_salvaged_nonzero_pipeline_bridges_committed_product(monkeypatch):
     db.execute("INSERT INTO hive_content VALUES ('m', 'api://doc')")
     for _ in range(3):
         db.claim()
+    db.report()  # done needs a report since 2026-11-13 (diag task 1)
     events, bridges = run_server(monkeypatch, db, rc=1)
     assert db.status == 'done'
     assert ('done', 'done') in events
@@ -174,6 +187,7 @@ def test_worker_provisional_done_is_finalized_and_bridged(monkeypatch):
     db = BoundaryDB()
     db.execute("INSERT INTO hive_content VALUES ('m', 'api://doc')")
     db.claim()
+    db.report()  # done needs a report since 2026-11-13 (diag task 1)
     events, bridges = run_server(monkeypatch, db, worker_done=True)
     assert ('done', 'done') in events
     assert bridges == [('m', 'done')]
@@ -183,6 +197,7 @@ def test_failed_finalization_commit_never_publishes_done(monkeypatch):
     db = BoundaryDB()
     db.execute("INSERT INTO hive_content VALUES ('m', 'api://doc')")
     db.claim()
+    db.report()  # a complete product: only the commit failure may block done
     events, bridges = run_server(monkeypatch, db, commit_failure=True)
     assert not bridges
     assert not any(event == 'done' for event, status in events)
@@ -232,6 +247,7 @@ def test_completion_rechecks_evidence_in_terminal_update(monkeypatch):
     db = BoundaryDB()
     db.execute("INSERT INTO hive_content VALUES ('m', 'api://doc')")
     db.claim()
+    db.report()  # a complete product: only the concurrent deletion may block done
     real_execute = db.execute
 
     def execute(sql, params=()):

@@ -1004,10 +1004,11 @@ def main():
         except Exception as _pdf_err:
             print(f"⚠️  PDF generation failed: {_pdf_err}")
 
-        # Update DB with synthesis field
+        # Update DB with synthesis field. Report only: the guarded lifecycle
+        # finalizers (cmd_run / API) own the terminal status (diag 2026-11-12).
         try:
             con.execute(
-                "UPDATE hive_missions SET synthesis=?, phase='done', status='done' WHERE id=?",
+                "UPDATE hive_missions SET synthesis=? WHERE id=? AND status NOT IN ('cancelled', 'error')",
                 [report[:50000], args.mission_id]
             )
             con.commit()
