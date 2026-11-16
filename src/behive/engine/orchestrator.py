@@ -1766,6 +1766,34 @@ def _mark_mission_error(mission_id: str, error_msg: str, *, phase: str | None = 
             con.close()
 
 
+def _store_api_scout_docs(mission_id: str, docs: list) -> int:
+    """Insert API Scout documents into hive_content; returns the number stored.
+
+    Ids come from hive_content_seq, the allocator harvest uses. The former
+    MAX(id)+1 ran ahead of the sequence, so later harvest inserts hit taken ids
+    and lost their documents (diag follow-up 2026-11-16: 8 duplicate-key errors on
+    12.11 in two harvest runs).
+    """
+    stored = 0
+    con = _connect_db()
+    try:
+        for doc in docs:
+            try:
+                con.execute(
+                    """INSERT INTO hive_content (id, mission_id, url, title, raw_text, harvest_method, domain)
+                       VALUES (nextval('hive_content_seq'), %s, %s, %s, %s, 'api_scout', %s)""",
+                    [mission_id, (doc.get('url') or '')[:1000], (doc.get('title') or '')[:500],
+                     (doc.get('raw_text') or '')[:50000], (doc.get('source') or 'api')[:200]]
+                )
+                stored += 1
+            except Exception as insert_err:
+                log.debug('    API Scout insert error (%s)', type(insert_err).__name__)
+        con.commit()
+    finally:
+        con.close()
+    return stored
+
+
 class PhaseFailure(RuntimeError):
     """A pipeline phase failed in a way that ends the mission as ``error``.
 
@@ -2031,20 +2059,7 @@ print(json.dumps(output))
         if _api_proc.returncode == 0 and _api_proc.stdout.strip():
             api_results = json.loads(_api_proc.stdout.strip())
             if api_results:
-                _con = _connect_db()
-                for doc in api_results:
-                    try:
-                        _con.execute(
-                            """INSERT INTO hive_content (id, mission_id, url, title, raw_text, harvest_method, domain)
-                               VALUES ((SELECT COALESCE(MAX(id),0)+1 FROM hive_content), %s, %s, %s, %s, 'api_scout', %s)""",
-                            [mission_id, doc.get('url', '')[:1000], doc.get('title', '')[:500],
-                             doc.get('raw_text', '')[:50000], doc.get('source', 'api')[:200]]
-                        )
-                        _api_docs += 1
-                    except Exception as _insert_err:
-                        log.debug(f'    API Scout insert error: {_insert_err}')
-                _con.commit()
-                _con.close()
+                _api_docs = _store_api_scout_docs(mission_id, api_results)
                 log.info(f'    ✓ API Scout: {_api_docs} structured docs from {len(api_results)} API hits')
             else:
                 log.info(f'    ⚠  API Scout: no matching APIs for topic')
