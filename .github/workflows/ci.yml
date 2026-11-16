@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install ruff
-      - run: ruff check src/ --select F601 || true  # Lint advisory, non-blocking
+      - run: ruff check src/ --select F821,F811,F601  # blocking: clean since diag 2026-11-12 (2883efb)
 
   test:
     runs-on: self-hosted
