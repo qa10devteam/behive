@@ -67,6 +67,36 @@ def test_guard_lets_the_isolated_harness_run():
     assert "1 passed" in proc.stdout
 
 
+def _ci_test_step_env() -> dict:
+    """env of the 'Run tests with coverage' step in .github/workflows/ci.yml (no YAML dependency)."""
+    lines = (ROOT / ".github/workflows/ci.yml").read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if "name: Run tests with coverage" in line)
+    env, in_env = {}, False
+    for line in lines[start + 1:]:
+        stripped = line.strip()
+        if stripped == "env:":
+            in_env = True
+            continue
+        if in_env and (stripped.startswith("run:") or stripped.startswith("- name:")):
+            break
+        if in_env and stripped and not stripped.startswith("#") and ":" in stripped:
+            key, value = stripped.split(":", 1)
+            env[key.strip()] = value.strip().strip('"')
+    return env
+
+
+@pytest.mark.real_subprocess
+def test_guard_accepts_the_ci_workflow_database():
+    """ci.yml gives consent and a non-production DSN; the guard must not refuse CI."""
+    env = _ci_test_step_env()
+    assert env.get("BEHIVE_TEST_DB") == "1"
+    assert "dbname=behive_test" in env.get("BEHIVE_TEST_PG_DSN", "")
+    proc = _run_pytest({k: v for k, v in env.items() if k.startswith(("BEHIVE_", "HIVE_"))})
+    out = proc.stdout + proc.stderr
+    # Connecting is the suite's business (no behive_test database here): never a refusal.
+    assert proc.returncode != 4 and "Refusing to start" not in out, out[-1500:]
+
+
 def test_rate_limiter_still_returns_429_when_exceeded():
     from behive import server
     limiter = server.TokenBucket(rate=3, per=60)
