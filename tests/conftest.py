@@ -8,7 +8,7 @@ import pytest
 import psycopg2
 import os
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -173,8 +173,42 @@ def behive_server_url():
 
 
 @pytest.fixture
-def real_mission_id():
-    """Return a real mission_id that has claims+sources."""
+def seeded_mission():
+    """A self-contained mission in the test database (11 claims, 3 entities, 3 facts),
+    removed afterwards. For tests that must not depend on production data being present
+    (schema-only copies, CI). Ids: MAX(id)+1, as the tables have no id default."""
+    import uuid
+    mid = "hive_test_seed_" + uuid.uuid4().hex[:12]
+    cur = _get_shared_raw_conn().cursor()
+    try:
+        cur.execute("INSERT INTO hive_missions (id, topic, status, phase, created_at) "
+                    "VALUES (%s, %s, 'done', 'done', NOW())", (mid, "Installed solar capacity in Poland 2024"))
+        for i in range(11):
+            cur.execute("INSERT INTO hive_claims (id, mission_id, claim, source_url, claim_type, confidence, "
+                        "quality_score, is_garbage) VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM hive_claims), "
+                        "%s, %s, %s, 'fact', 0.8, 0.8, false)",
+                        (mid, f"Installed solar capacity in region {i} reached {100 + i} MW in 2024.",
+                         f"https://example.test/solar/{i}"))
+        for etype, value in (("ORG", "Polskie Sieci Elektroenergetyczne"), ("LOC", "Wielkopolska"),
+                             ("METRIC", "installed solar capacity")):
+            cur.execute("INSERT INTO hive_entities (id, mission_id, entity_type, value, context, confidence) "
+                        "VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM hive_entities), %s, %s, %s, %s, 0.9)",
+                        (mid, etype, value, f"{value} appears in the 2024 report on solar capacity in Poland."))
+        for i in range(3):
+            cur.execute("INSERT INTO hive_facts (id, mission_id, value, unit, context, confidence) "
+                        "VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM hive_facts), %s, %s, 'MW', %s, '0.8')",
+                        (mid, 100.0 + i, f"Region {i} reached {100 + i} MW of installed solar capacity in 2024."))
+        yield mid
+    finally:
+        for table in ("hive_facts", "hive_entities", "hive_claims"):
+            cur.execute(f"DELETE FROM {table} WHERE mission_id = %s", (mid,))
+        cur.execute("DELETE FROM hive_missions WHERE id = %s", (mid,))
+        cur.close()
+
+
+@pytest.fixture
+def real_mission_id(request):
+    """A real mission with claims; a seeded one when the database has none (schema-only copy)."""
     conn = _get_shared_raw_conn()
     cur = conn.cursor()
     cur.execute("""
@@ -187,7 +221,7 @@ def real_mission_id():
     """)
     row = cur.fetchone()
     cur.close()
-    return row[0] if row else "hive_test_1234"
+    return row[0] if row else request.getfixturevalue("seeded_mission")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

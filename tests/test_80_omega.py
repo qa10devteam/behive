@@ -209,10 +209,26 @@ class TestFalsifierDeep:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestMasterIntelligenceDeep:
-    def test_summarize_bee_results(self):
+    def test_summarize_bee_results(self, seeded_mission):
+        """Entity/fact fallback on a seeded mission: independent of production data."""
         from behive.engine.master_intelligence import summarize_bee_results
         conn = PgConnection(read_only=True)
         try:
+            result = summarize_bee_results(seeded_mission, conn)
+            assert isinstance(result, str)
+            assert len(result) > 100
+            assert "## Key Entities Extracted" in result and "## Key Facts Extracted" in result
+        finally:
+            conn.close()
+
+    def test_summarize_bee_results_historical_mission(self):
+        """Bee-results path on the historical mission; needs a full data copy."""
+        from behive.engine.master_intelligence import summarize_bee_results
+        conn = PgConnection(read_only=True)
+        try:
+            present = conn.execute("SELECT 1 FROM hive_missions WHERE id = ?", [MISSION]).fetchone()
+            if not present:
+                pytest.skip("historical mission not in this database (schema-only copy)")
             result = summarize_bee_results(MISSION, conn)
             assert isinstance(result, str)
             assert len(result) > 100
