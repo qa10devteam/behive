@@ -2,6 +2,28 @@
 
 All notable changes to BeHive are documented here.
 
+## [0.7.0] — 2026-11-17
+
+### Added
+- Mission status is honest: `done` requires a report and at least one useful (non-`regex_fallback`) claim; API and MCP show the reason for `empty` and `error`
+- Every model call in the process phase is capped by the phase deadline (`BEHIVE_PHASE_DEADLINE`); the process phase ends by itself before the deadline
+- Test-suite safety: `tests/conftest.py` refuses to start without `BEHIVE_TEST_DB=1` and a non-production target
+- Seeded mission fixtures (`seeded_mission`) so the main suite no longer depends on production data
+- Blocking ruff checks (F821, F811, F601) in CI
+
+### Fixed
+- Scout sequence `hive_sources_id_seq` is never dropped; it is created only when missing and never rewound
+- DDL guard: `information_schema` is checked before `ALTER TABLE ... ADD COLUMN`
+- Wikipedia requests carry the BeHive User-Agent on every request, including shared sessions
+- `queen_feedback._db_connect` recursion (hung the test run)
+- Dead `prescout` INSERT referencing removed modules
+- API Scout takes `hive_content` ids from `hive_content_seq`, as harvest does (no more `hive_content_pkey` collisions)
+- CI test step sets the consent env (`BEHIVE_TEST_DB=1`) required by the conftest guard
+
+### Changed
+- Process-phase model calls go through `llm.complete` only; SGLang is used only when a local server answers
+- Removed dead `run_full_coverage.sh` (referenced nonexistent paths)
+
 ## [0.6.0] — 2026-08-13
 
 ### Added
