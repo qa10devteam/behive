@@ -99,12 +99,94 @@ curl -X POST http://localhost:8091/research \
   -H "Content-Type: application/json" \
   -d '{"query": "React vs Vue 2025", "depth": 3}'
 
-# Check status
+# Check status (status, phase, reason, report_available, ...)
 curl http://localhost:8091/research/{job_id}/status
 
-# Get results
+# Get results (HTTP 409 with the reason if the mission is empty or failed)
 curl http://localhost:8091/research/{job_id}/report
 ```
+
+### Mission status
+
+A mission ends in one of three statuses:
+
+- `done`: the mission has a report and at least one useful claim.
+- `empty`: the pipeline finished but produced no qualifying claims, so there is no report.
+- `error`: the pipeline failed or timed out and produced no report.
+
+A mission that is cancelled reports `cancelled` with the reason "Mission was cancelled."
+While a mission runs its status is `queued` or `running`, and `phase` moves through
+`queued`, `scout`, `harvest`, `process` and `synth`. When a mission ends as `empty` or
+`error`, `phase` holds the stage or cause where it ended (one of the keys below) and
+`reason` explains it.
+
+`GET /research/{job_id}/status` returns these fields:
+
+- `status`: `queued`, `running`, `done`, `empty`, `error` or `cancelled`.
+- `phase`: the current phase, or the end-state key for `empty` and `error`.
+- `reason`: why there is no usable report; `null` for running missions and for a real `done`.
+- `report_available`: `true` only when the status is `done` and a report exists with at least one useful claim.
+- `useful_claims`: claims that count toward `done`.
+- `fallback_claims`: claims from the regex fallback. They are raw material, not a product, and never make a mission `done`.
+
+Example for an empty mission:
+
+```json
+{"status": "empty", "phase": "empty_claims", "report_available": false,
+ "reason": "Sources were collected but no qualifying claims were produced."}
+```
+
+`GET /research/{job_id}/report` returns the report with HTTP 200 only for a `done`
+mission. For `empty`, `error` and `cancelled` it returns HTTP 409. `detail` and `reason`
+carry the reason, and the body also holds `status`, `phase`, `report_available: false`,
+`useful_claims` and `fallback_claims`:
+
+```json
+{"detail": "Qualifying claims were found but no report was produced.",
+ "status": "error", "phase": "synthesis_failed", "report_available": false}
+```
+
+For a mission that is still running the endpoint does not return a report either.
+
+The MCP tool `mission_status` prints the same facts as text:
+
+```
+Mission: <topic>
+Status: error
+Phase: synthesis_failed
+Reason: Qualifying claims were found but no report was produced.
+Claims: 497 useful, 0 regex fallback
+Report: not available
+```
+
+The `Reason:` line appears only when there is one. The MCP tool `get_report` refuses the same
+way instead of returning an empty report:
+
+```
+No report for mission '<mission_id>'.
+Status: empty
+Phase: empty_claims
+Reason: Sources were collected but no qualifying claims were produced.
+```
+
+Reasons, by `phase` key:
+
+```
+  empty_scout             No sources or qualifying claims were produced.
+  empty_claims            Sources were collected but no qualifying claims were produced.
+  process_timeout         The processing phase exceeded its time limit; no report was produced.
+  process_error           The processing phase failed; no report was produced.
+  synthesis_failed        Qualifying claims were found but no report was produced.
+  pipeline_failed         Pipeline execution failed without a qualifying product.
+  claims_fallback_failed  Claims recovery failed without a qualifying product.
+  pipeline_exception      Pipeline execution raised an exception.
+  timeout                 Pipeline execution timed out.
+  cancelled               Mission was cancelled.
+```
+
+Missions recorded as `done` before the status rules (2026-11-13) that have no report, or no
+claims beyond the regex fallback, report this reason: "Marked done without a report or without
+claims beyond regex fallback (recorded before the 2026-11-13 status rules); it has no usable result."
 
 ### Python API
 
