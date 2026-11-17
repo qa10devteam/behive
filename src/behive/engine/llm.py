@@ -16,10 +16,12 @@ Usage:
     result = complete("Analyze this text", stage="process")
     result = await complete_async("Generate report", stage="synth", max_tokens=4096)
 """
+import contextvars
 import os
 import json
 import logging
 import math
+import re
 import time
 from typing import Optional
 
@@ -329,6 +331,77 @@ class _BridgeBusyWait:
         return True
 
 
+# Mission tag. Two headers only, and only when both values match. Never topic
+# text, never any other request data. Children of run_phase receive the pair
+# in the environment. In-process callers (queen plan, claim synthesis, gap-fill)
+# bind mission_scope; that binding wins over the environment so a stale child
+# phase cannot label the call, and an invalid binding does not fall through.
+_MISSION_ID_RE = re.compile(r"hive_[0-9]+_[0-9a-f]{6}\Z")
+_PHASE_RE = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
+_mission_phase: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar(
+    "behive_mission_phase", default=None,
+)
+
+
+class mission_scope:
+    """Bind mission id and phase for llm.complete* in this context only."""
+
+    def __init__(self, mission_id: str, phase: str):
+        self._pair = (mission_id or "", phase or "")
+        self._token = None
+
+    def __enter__(self):
+        self._token = _mission_phase.set(self._pair)
+        return self
+
+    def __exit__(self, *exc):
+        if self._token is not None:
+            _mission_phase.reset(self._token)
+        return False
+
+
+def mission_tag() -> tuple[str, str]:
+    """(mission id, phase) from the in-process binding, else the environment."""
+    bound = _mission_phase.get()
+    if bound is not None:
+        return bound
+    return (
+        os.environ.get("BEHIVE_MISSION_ID") or "",
+        os.environ.get("BEHIVE_PHASE") or "",
+    )
+
+
+def mission_headers() -> dict[str, str]:
+    """Exactly X-BeHive-Mission and X-BeHive-Phase, or nothing."""
+    mission, phase = mission_tag()
+    if _MISSION_ID_RE.fullmatch(mission) and _PHASE_RE.fullmatch(phase):
+        return {"X-BeHive-Mission": mission, "X-BeHive-Phase": phase}
+    return {}
+
+
+def phase_child_mission(args) -> str:
+    """Mission id a phase child should carry.
+
+    A mission id in argv is the mission that child works on (a gap harvest
+    must not be billed to the parent). Otherwise the in-process binding,
+    otherwise BEHIVE_MISSION_ID. A non-matching parent value is still
+    forwarded: the header filter, not the environment, drops it.
+    """
+    for arg in args or ():
+        if isinstance(arg, str) and _MISSION_ID_RE.fullmatch(arg):
+            return arg
+    bound = _mission_phase.get()
+    if bound and bound[0]:
+        return bound[0]
+    return os.environ.get("BEHIVE_MISSION_ID") or ""
+
+
+def _attach_mission_headers(kwargs: dict) -> None:
+    headers = mission_headers()
+    if headers:
+        kwargs["extra_headers"] = headers
+
+
 def complete(
     prompt: str,
     stage: str = "process",
@@ -410,7 +483,8 @@ def complete(
         
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        
+        _attach_mission_headers(kwargs)
+
         if strict:
             _strict_completion_options(litellm, kwargs)
             busy = _BridgeBusyWait()
@@ -530,7 +604,8 @@ async def complete_async(
         
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        
+        _attach_mission_headers(kwargs)
+
         if strict:
             _strict_completion_options(litellm, kwargs)
             import asyncio as _busy_asyncio
