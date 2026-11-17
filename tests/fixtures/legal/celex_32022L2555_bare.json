@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "url": "https://publications.europa.eu/resource/celex/32022L2555",
+  "accept": "application/xhtml+xml, application/xml;q=0.9, text/html;q=0.8",
+  "status": 400,
+  "content_type": null,
+  "content_length": null,
+  "byte_size": 205,
+  "note": "CELLAR error for a work URI without a language. Not an act."
+}
