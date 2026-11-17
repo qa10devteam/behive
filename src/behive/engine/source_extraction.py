@@ -64,10 +64,16 @@ def _phase_deadline() -> float | None:
 
 
 def _concurrency() -> int:
+    """Parallel extraction pages from BEHIVE_A3_CONCURRENCY, clamped to 1..4.
+
+    Invalid values fall back to the default. Gate batches do not run at the
+    same time: the process phase awaits the gate before extraction, so the two
+    caps of 4 do not stack.
+    """
     try:
-        return max(1, min(2, int(os.environ.get("BEHIVE_A3_CONCURRENCY", "2"))))
+        return max(1, min(4, int(os.environ.get("BEHIVE_A3_CONCURRENCY", "4"))))
     except ValueError:
-        return 2
+        return 4
 
 
 async def extract_source_claims(
@@ -76,7 +82,7 @@ async def extract_source_claims(
     clock: Callable[[], float] | None = None,
     progress: ExtractionProgress | None = None,
 ) -> list[SourceClaim]:
-    """Keep at most two model calls in flight; serialize response commits.
+    """Keep at most four model calls in flight; serialize response commits.
 
     The synchronous callback commits both claims and the attempted URL, including
     empty/rejected/invalid responses. Fatal results stop admission immediately;
@@ -232,7 +238,7 @@ async def extract_source_claims(
                     counts["accepted"] += 1
             finally:
                 # No await: this callback, including its transaction, stays
-                # serialized on the event-loop thread even with two providers.
+                # serialized on the event-loop thread even with concurrent providers.
                 if on_document is not None:
                     on_document(url, claims)
             outcomes[index] = None

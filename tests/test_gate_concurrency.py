@@ -1,4 +1,4 @@
-"""Content gate runs up to BEHIVE_GATE_CONCURRENCY (default 2, clamp 1..2) batches at once."""
+"""Content gate runs up to BEHIVE_GATE_CONCURRENCY (default 4, clamp 1..4) batches at once."""
 import asyncio
 import json
 import threading
@@ -52,11 +52,11 @@ def run(docs):
     return kept
 
 
-def test_default_allows_two_calls_in_flight(monkeypatch):
+def test_default_allows_four_calls_in_flight(monkeypatch):
     state = install(monkeypatch)
     run(many_docs())
     assert state['calls'] == N_BATCHES
-    assert state['peak'] == 2
+    assert state['peak'] == 4
 
 
 def test_concurrency_one_serialises(monkeypatch):
@@ -68,10 +68,10 @@ def test_concurrency_one_serialises(monkeypatch):
 
 
 @pytest.mark.parametrize('value,expected', [
-    ('1', 1), ('2', 2), ('3', 2), ('99', 2), ('0', 1), ('-4', 1),
-    ('abc', 2), ('', 2), ('1.5', 2), (' 1 ', 1),
+    ('1', 1), ('2', 2), ('3', 3), ('99', 4), ('0', 1), ('-4', 1),
+    ('abc', 4), ('', 4), ('1.5', 4), (' 1 ', 1),
 ])
-def test_value_is_clamped_and_invalid_defaults_to_two(monkeypatch, value, expected):
+def test_value_is_clamped_and_invalid_defaults_to_four(monkeypatch, value, expected):
     monkeypatch.setenv('BEHIVE_GATE_CONCURRENCY', value)
     state = install(monkeypatch)
     run(many_docs())
@@ -103,7 +103,7 @@ def test_one_failed_parallel_batch_falls_back_for_that_batch_only(monkeypatch):
 
     state = install(monkeypatch, fail_when=fail_second)
     kept = run(docs)
-    assert state['calls'] == N_BATCHES and state['peak'] == 2
+    assert state['calls'] == N_BATCHES and state['peak'] == 4
     methods = [d['_relevance_method'] for d in docs]
     assert set(methods[15:30]) == {'keyword_fallback'}
     assert all(m == 'model' for m in methods[:15] + methods[30:])
