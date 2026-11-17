@@ -6,8 +6,10 @@ Hook that runs after a BeHive mission completes.
 Extracts claims from hive_claims and POSTs them to the SR /ingest endpoint.
 
 Features:
-- Filters garbage claims (is_garbage = false), JSON blobs and rows below the
-  quality / confidence thresholds
+- Sends only hygiene-useful claims (not regex_fallback), longer than 20
+  characters, from missions that have a product (non-blank report and a
+  useful claim). A batch with no explicit product flag is not a product.
+  JSON blobs and rows below the quality / confidence thresholds are still skipped
 - Maps confidence + quality_score → SR confidence
 - Tags source as "behive:{mission_id}" for traceability
 - Idempotent: sr_bridge_log records bridged missions
@@ -38,6 +40,8 @@ from typing import List, Dict, Optional
 
 import psycopg2
 import requests
+
+from behive.hygiene import SQL_USEFUL_CLAIM, sql_done_product
 
 log = logging.getLogger("behive-sr-bridge")
 log.setLevel(logging.INFO)
@@ -141,24 +145,59 @@ def _verify_encoder() -> Dict:
 
 # ─── Core Logic ────────────────────────────────────────────────────────────
 
+class _FetchedClaims(list):
+    """Claim batch plus an explicit product flag.
+
+    from_product is True only when hygiene.sql_done_product holds. A plain
+    list has no flag. bridge_mission treats a missing flag as no product:
+    send nothing and record nothing.
+    """
+
+    def __init__(self, from_product: bool):
+        super().__init__()
+        self.from_product = from_product
+
+
 def _fetch_mission_claims(mission_id: str) -> List[Dict]:
-    """Fetch non-garbage claims for a mission from hive_claims."""
+    """Useful claims of a mission that has a product (hygiene.sql_done_product).
+
+    Eligibility is hygiene.SQL_USEFUL_CLAIM (sourced, not a blob, not
+    regex_fallback) and LENGTH(c.claim) > 20. Quality and confidence
+    thresholds still apply afterwards. from_product is the sql_done_product
+    result, not whether a row survived the length filter.
+    """
     conn = _get_db()
     cur = conn.cursor()
-    cur.execute("""
-        SELECT claim, confidence, quality_score, source_url, claim_type
-        FROM hive_claims
-        WHERE mission_id = %s
-          AND (is_garbage = false OR is_garbage IS NULL)
-          AND claim IS NOT NULL
-          AND LENGTH(claim) > 20
-        ORDER BY quality_score DESC NULLS LAST
-    """, (mission_id,))
-    
+    cur.execute(
+        f"""
+        SELECT 1
+        FROM hive_missions m
+        WHERE m.id = %s
+          AND {sql_done_product('m')}
+        """,
+        (mission_id,),
+    )
+    from_product = bool(cur.fetchall())
+    cur.execute(
+        f"""
+        SELECT c.claim, c.confidence, c.quality_score, c.source_url, c.claim_type
+        FROM hive_claims c
+        JOIN hive_missions m ON m.id = c.mission_id
+        WHERE c.mission_id = %s
+          AND {SQL_USEFUL_CLAIM}
+          AND LENGTH(c.claim) > 20
+          AND {sql_done_product('m')}
+        ORDER BY c.quality_score DESC NULLS LAST
+        """,
+        (mission_id,),
+    )
+
     rows = cur.fetchall()
     conn.close()
-    
-    claims = []
+
+    # Python thresholds may still drop every row of a real product; the
+    # no-claims log path applies then. from_product False means no product.
+    claims = _FetchedClaims(from_product)
     for claim_text, confidence, quality, source_url, claim_type in rows:
         # Combined confidence: average of BeHive confidence and quality_score
         conf = confidence or 0.7
@@ -233,7 +272,7 @@ def bridge_mission(mission_id: str) -> Optional[Dict]:
     
     Returns:
         dict with {mission_id, claims_fetched, claims_sent, sr_response, encoder} on success
-        None if already bridged or no claims found
+        None if already bridged, the mission has no product, or no claims found
     """
     _ensure_bridge_table()
     
@@ -242,8 +281,12 @@ def bridge_mission(mission_id: str) -> Optional[Dict]:
         log.info(f"[BRIDGE] Mission {mission_id} already bridged — skipping")
         return None
     
-    # Fetch claims
+    # Fetch claims. No explicit product flag (plain list, or this query saying
+    # there is no product): send nothing and record nothing. Fail closed.
     claims = _fetch_mission_claims(mission_id)
+    if getattr(claims, "from_product", None) is not True:
+        log.info(f"[BRIDGE] Mission {mission_id} has no product — skipping")
+        return None
     if not claims:
         log.info(f"[BRIDGE] Mission {mission_id} has no eligible claims — skipping")
         _mark_bridged(mission_id, 0, {"skipped": "no_claims"})
@@ -272,20 +315,23 @@ def bridge_mission(mission_id: str) -> Optional[Dict]:
 
 
 def bridge_all_pending() -> List[Dict]:
-    """Bridge all completed missions that haven't been bridged yet."""
+    """Bridge done missions that have a product and have not been bridged yet."""
     _ensure_bridge_table()
     
     conn = _get_db()
     cur = conn.cursor()
-    cur.execute("""
-        SELECT m.id 
+    cur.execute(
+        f"""
+        SELECT m.id
         FROM hive_missions m
         LEFT JOIN sr_bridge_log b ON m.id = b.mission_id
         WHERE m.status = 'done'
           AND b.mission_id IS NULL
+          AND {sql_done_product('m')}
         ORDER BY m.created_at DESC
         LIMIT 50
-    """)
+        """
+    )
     pending = [row[0] for row in cur.fetchall()]
     conn.close()
     
