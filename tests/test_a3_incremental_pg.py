@@ -80,7 +80,7 @@ def summary(caplog):
 @pytest.fixture(autouse=True)
 def controlled_edges(monkeypatch):
     # These incremental/ordering tests exercise the supported one-slot setting;
-    # default-two persistence and clean draining live in test_a3_parallel_pg.py.
+    # default-four persistence and clean draining live in test_a3_parallel_pg.py.
     monkeypatch.setenv('BEHIVE_A3_CONCURRENCY', '1')
     monkeypatch.delenv('BEHIVE_PHASE_DEADLINE', raising=False)
     monkeypatch.setattr(source_extraction, 'TRANSIENT_RETRY_DELAY_S', 0)

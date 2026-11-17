@@ -490,13 +490,15 @@ class RelevanceFilter:
     # this many of them (in loader order) reach the model instead of dropping them.
     LOW_KEYWORD_MODEL_BUDGET = 45
     CONTENT_BATCH_SIZE = 15
-    # The Codex bridge allows two concurrent completions in TOTAL. Two gate
-    # batches in flight are safe: strict llm.complete waits out the local busy
-    # signal, so a contended slot delays a call instead of failing it. A single
-    # slot made a 228-page gate take 6.5 of the 10 minute process pass.
-    # BEHIVE_GATE_CONCURRENCY overrides: clamped to 1..2, invalid -> default.
-    CONTENT_CONCURRENCY_DEFAULT = 2
-    CONTENT_CONCURRENCY_MAX = 2
+    # The model bridge serves 4 completions at once. A fifth gets HTTP 429
+    # bridge_busy; strict llm.complete waits that out inside the phase deadline,
+    # so a contended slot delays a call instead of failing it. Gate batches and
+    # extraction pages do not run together: ProcessingDrones awaits Phase A1
+    # fully before Phase A3, so this cap and the extraction cap do not stack
+    # and the process phase stays within 4 in-flight model calls.
+    # BEHIVE_GATE_CONCURRENCY overrides: clamped to 1..4, invalid -> default.
+    CONTENT_CONCURRENCY_DEFAULT = 4
+    CONTENT_CONCURRENCY_MAX = 4
     # A busy bridge answers RateLimitError "retry later": one legacy retry.
     # Strict mode delegates all busy waiting to llm.complete instead.
     RATE_LIMIT_RETRY_DELAY_S = 20
@@ -709,7 +711,7 @@ class RelevanceFilter:
 
     @classmethod
     def gate_concurrency(cls) -> int:
-        """Parallel gate batches from BEHIVE_GATE_CONCURRENCY, clamped to 1..2."""
+        """Parallel gate batches from BEHIVE_GATE_CONCURRENCY, clamped to 1..4."""
         try:
             value = int(os.environ.get('BEHIVE_GATE_CONCURRENCY', ''))
         except ValueError:

@@ -243,9 +243,9 @@ def test_valid_all_zero_grades_never_trigger_keyword_override(monkeypatch, caplo
 
 
 def test_batch_size_and_concurrency_are_bounded_at_complete(monkeypatch):
-    """At most two completions at once (BEHIVE_GATE_CONCURRENCY default 2): the
-    Codex bridge allows 2 concurrent calls in total and strict complete waits out
-    the busy signal. Migrated from the former 'exactly one at a time' (peak == 1)."""
+    """At most four completions at once (BEHIVE_GATE_CONCURRENCY default 4): the
+    model bridge allows 4 concurrent calls in total and strict complete waits out
+    the busy signal. Migrated from the former cap of 2 (and before that, peak == 1)."""
     docs = [dict(PAGES['documents'][i % 8], _copy=i) for i in range(31)]
     lock = threading.Lock()
     state = {'active': 0, 'peak': 0, 'sizes': [], 'calls': 0}
@@ -266,7 +266,7 @@ def test_batch_size_and_concurrency_are_bounded_at_complete(monkeypatch):
     monkeypatch.setattr(llm, 'complete', replay)
     kept = asyncio.run(RelevanceFilter(TOPIC).filter(docs))
     assert state['calls'] == 3 and sorted(state['sizes']) == [1, 15, 15]
-    assert 1 <= state['peak'] <= 2
+    assert 1 <= state['peak'] <= 4
     assert [doc['_copy'] for doc in kept] == [2, 10, 18, 26]
 
 

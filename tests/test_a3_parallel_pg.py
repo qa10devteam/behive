@@ -1,4 +1,4 @@
-"""Two in-flight A3 pages, serialized SQL, clean draining and exact progress.
+"""Four in-flight A3 pages, serialized SQL, clean draining and exact progress.
 
 All providers are fakes; persistence uses the private-PG runner only.
 """
@@ -28,8 +28,8 @@ def controlled_edges(monkeypatch):
     monkeypatch.setattr(llm, 'complete', lambda **kw: pytest.fail('Unconfigured model boundary'))
 
 
-@pytest.mark.parametrize('value,expected', [(None, 2), ('1', 1), ('2', 2), ('99', 2), ('0', 1), ('-5', 1), ('bad', 2)])
-def test_parallelism_is_default_two_and_clamped(monkeypatch, value, expected):
+@pytest.mark.parametrize('value,expected', [(None, 4), ('1', 1), ('2', 2), ('99', 4), ('0', 1), ('-5', 1), ('bad', 4)])
+def test_parallelism_is_default_four_and_clamped(monkeypatch, value, expected):
     if value is not None:
         monkeypatch.setenv('BEHIVE_A3_CONCURRENCY', value)
     docs = documents(6)
@@ -75,9 +75,10 @@ def test_parallel_pages_commit_once_on_event_loop_with_pending_cap(live_db, monk
         return original()
     monkeypatch.setattr(db, 'get_pg_connection', connect)
     calls = []
+    refill = docs[source_extraction._concurrency()]
     def complete(prompt, **kw):
         doc = next(d for d in docs if d['raw_text'] in prompt)
-        if doc is docs[2]:
+        if doc is refill:
             assert readback(live_db)[0], 'A free slot must be refilled only after a per-page commit'
         calls.append(doc['url'])
         time.sleep(.002)
@@ -100,6 +101,9 @@ def test_parallel_pages_commit_once_on_event_loop_with_pending_cap(live_db, monk
 
 @pytest.mark.parametrize('failure', ['provider', 'json', 'shape'])
 def test_fatal_page_drains_inflight_sibling_and_keeps_committed_pages(live_db, monkeypatch, caplog, failure):
+    # Choreography is the supported two-slot setting (one replacement sibling),
+    # not the default of 4.
+    monkeypatch.setenv('BEHIVE_A3_CONCURRENCY', '2')
     docs = documents(5)
     seed(live_db, docs)
     second_started = threading.Event()
@@ -143,6 +147,9 @@ def test_fatal_page_drains_inflight_sibling_and_keeps_committed_pages(live_db, m
 
 
 def test_deadline_accounts_for_slow_inflight_sibling(live_db, monkeypatch, caplog):
+    # Admission estimate is checked at the supported two-slot setting; the
+    # default of 4 would admit the later pages before the slow sibling is visible.
+    monkeypatch.setenv('BEHIVE_A3_CONCURRENCY', '2')
     docs = documents(5)
     seed(live_db, docs)
     clock = Clock()
@@ -177,6 +184,8 @@ def test_deadline_accounts_for_slow_inflight_sibling(live_db, monkeypatch, caplo
 
 
 def test_three_adjacent_failed_pages_stop_admission_and_drain(monkeypatch):
+    # Failed-page slack (at most one extra sibling) encodes the old default of 2.
+    monkeypatch.setenv('BEHIVE_A3_CONCURRENCY', '2')
     docs = documents(8)
     class BadGatewayError(Exception):
         pass
@@ -236,6 +245,8 @@ def test_pending_counts_distinct_provenance_pages_not_attempted_or_rejected(live
 
 
 def test_parallel_persistence_failure_keeps_sibling_commit_and_failure_stage(live_db, monkeypatch, caplog):
+    # Sibling drain is scripted for the supported two-slot setting, not the default of 4.
+    monkeypatch.setenv('BEHIVE_A3_CONCURRENCY', '2')
     docs = documents(5)
     seed(live_db, docs)
     with live_db.conn, live_db.conn.cursor() as cur:
