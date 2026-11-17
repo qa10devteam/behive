@@ -115,14 +115,18 @@ A mission ends in one of three statuses:
 - `error`: the pipeline failed or timed out and produced no report.
 
 A mission that is cancelled reports `cancelled` with the reason "Mission was cancelled."
-While a mission runs its status is `queued` or `running`, and `phase` moves through
+The terminal statuses are therefore `done`, `empty`, `error` and `cancelled`.
+While a mission runs its status is one of `queued`, `running`, `planning`, `scout`,
+`harvest`, `process` and `synth`: it starts as `queued`, becomes `running`, and while the
+pipeline runs `status` carries the current phase name. Clients should treat any status
+other than the four terminal ones as still running. `phase` moves through
 `queued`, `scout`, `harvest`, `process` and `synth`. When a mission ends as `empty` or
 `error`, `phase` holds the stage or cause where it ended (one of the keys below) and
 `reason` explains it.
 
 `GET /research/{job_id}/status` returns these fields:
 
-- `status`: `queued`, `running`, `done`, `empty`, `error` or `cancelled`.
+- `status`: terminal `done`, `empty`, `error` or `cancelled`; while running `queued`, `running`, `planning`, `scout`, `harvest`, `process` or `synth`.
 - `phase`: the current phase, or the end-state key for `empty` and `error`.
 - `reason`: why there is no usable report; `null` for running missions and for a real `done`.
 - `report_available`: `true` only when the status is `done` and a report exists with at least one useful claim.
