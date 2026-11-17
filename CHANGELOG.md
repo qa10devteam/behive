@@ -10,6 +10,8 @@ All notable changes to BeHive are documented here.
 - Test-suite safety: `tests/conftest.py` refuses to start without `BEHIVE_TEST_DB=1` and a non-production target
 - Seeded mission fixtures (`seeded_mission`) so the main suite no longer depends on production data
 - Blocking ruff checks (F821, F811, F601) in CI
+- Model calls carry the headers `X-BeHive-Mission` and `X-BeHive-Phase` (a validated mission id and phase name, nothing else), so the model bridge can attribute every call and its tokens to a mission
+- Mission status documentation (README, quickstart): statuses, phases, `/status` fields, HTTP 409 from `/report`, MCP output and every reason text
 
 ### Fixed
 - Scout sequence `hive_sources_id_seq` is never dropped; it is created only when missing and never rewound
@@ -23,6 +25,8 @@ All notable changes to BeHive are documented here.
 ### Changed
 - Process-phase model calls go through `llm.complete` only; SGLang is used only when a local server answers
 - Removed dead `run_full_coverage.sh` (referenced nonexistent paths)
+- The relevance gate and claim extraction run up to 4 model calls at once (`BEHIVE_GATE_CONCURRENCY`, `BEHIVE_A3_CONCURRENCY`: default 4, clamped to 1..4, previously 2), matching the model bridge's four slots
+- The Singularity Room bridge sends only useful claims (not `regex_fallback`, longer than 20 characters) and only from missions with a product; a mission without a product sends nothing
 
 ## [0.6.0] — 2026-08-13
 
