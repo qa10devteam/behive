@@ -49,7 +49,11 @@ def env(monkeypatch):
 
     monkeypatch.setattr(sr_bridge, "_ensure_bridge_table", lambda: None)
     monkeypatch.setattr(sr_bridge, "_was_already_bridged", lambda mid: rec.already)
-    monkeypatch.setattr(sr_bridge, "_fetch_mission_claims", lambda mid: list(rec.claims))
+
+    class _ProductClaims(list):
+        from_product = True
+
+    monkeypatch.setattr(sr_bridge, "_fetch_mission_claims", lambda mid: _ProductClaims(rec.claims))
     monkeypatch.setattr(sr_bridge, "_mark_bridged",
                         lambda mid, n, resp: rec.marked.append((mid, n, resp)))
     monkeypatch.setattr(sr_bridge.time, "sleep", lambda s: None)

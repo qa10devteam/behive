@@ -6,9 +6,10 @@ Hook that runs after a BeHive mission completes.
 Extracts claims from hive_claims and POSTs them to the SR /ingest endpoint.
 
 Features:
-- Sends only hygiene-useful claims (not regex_fallback) from missions that have
-  a product (non-blank report and a useful claim). JSON blobs and rows below
-  the quality / confidence thresholds are still skipped
+- Sends only hygiene-useful claims (not regex_fallback), longer than 20
+  characters, from missions that have a product (non-blank report and a
+  useful claim). A batch with no explicit product flag is not a product.
+  JSON blobs and rows below the quality / confidence thresholds are still skipped
 - Maps confidence + quality_score → SR confidence
 - Tags source as "behive:{mission_id}" for traceability
 - Idempotent: sr_bridge_log records bridged missions
@@ -145,11 +146,11 @@ def _verify_encoder() -> Dict:
 # ─── Core Logic ────────────────────────────────────────────────────────────
 
 class _FetchedClaims(list):
-    """Claim batch plus whether the mission has a done product.
+    """Claim batch plus an explicit product flag.
 
-    A plain list (a test double of _fetch_mission_claims) has no from_product
-    and is treated as an eligible batch, so the historical no-claims log path
-    stays intact. Only this query can say there is no product.
+    from_product is True only when hygiene.sql_done_product holds. A plain
+    list has no flag. bridge_mission treats a missing flag as no product:
+    send nothing and record nothing.
     """
 
     def __init__(self, from_product: bool):
@@ -161,11 +162,22 @@ def _fetch_mission_claims(mission_id: str) -> List[Dict]:
     """Useful claims of a mission that has a product (hygiene.sql_done_product).
 
     Eligibility is hygiene.SQL_USEFUL_CLAIM (sourced, not a blob, not
-    regex_fallback). Quality and confidence thresholds still apply afterwards.
-    An empty result with from_product False means there is no product.
+    regex_fallback) and LENGTH(c.claim) > 20. Quality and confidence
+    thresholds still apply afterwards. from_product is the sql_done_product
+    result, not whether a row survived the length filter.
     """
     conn = _get_db()
     cur = conn.cursor()
+    cur.execute(
+        f"""
+        SELECT 1
+        FROM hive_missions m
+        WHERE m.id = %s
+          AND {sql_done_product('m')}
+        """,
+        (mission_id,),
+    )
+    from_product = bool(cur.fetchall())
     cur.execute(
         f"""
         SELECT c.claim, c.confidence, c.quality_score, c.source_url, c.claim_type
@@ -173,6 +185,7 @@ def _fetch_mission_claims(mission_id: str) -> List[Dict]:
         JOIN hive_missions m ON m.id = c.mission_id
         WHERE c.mission_id = %s
           AND {SQL_USEFUL_CLAIM}
+          AND LENGTH(c.claim) > 20
           AND {sql_done_product('m')}
         ORDER BY c.quality_score DESC NULLS LAST
         """,
@@ -182,10 +195,9 @@ def _fetch_mission_claims(mission_id: str) -> List[Dict]:
     rows = cur.fetchall()
     conn.close()
 
-    # A product always has at least one useful claim, so an empty row set means
-    # there is no product. Python thresholds may still drop every row of a real
-    # product; from_product stays True then, and the no-claims log path applies.
-    claims = _FetchedClaims(bool(rows))
+    # Python thresholds may still drop every row of a real product; the
+    # no-claims log path applies then. from_product False means no product.
+    claims = _FetchedClaims(from_product)
     for claim_text, confidence, quality, source_url, claim_type in rows:
         # Combined confidence: average of BeHive confidence and quality_score
         conf = confidence or 0.7
@@ -269,9 +281,10 @@ def bridge_mission(mission_id: str) -> Optional[Dict]:
         log.info(f"[BRIDGE] Mission {mission_id} already bridged — skipping")
         return None
     
-    # Fetch claims. No product: send nothing and record nothing.
+    # Fetch claims. No explicit product flag (plain list, or this query saying
+    # there is no product): send nothing and record nothing. Fail closed.
     claims = _fetch_mission_claims(mission_id)
-    if not getattr(claims, "from_product", True):
+    if getattr(claims, "from_product", None) is not True:
         log.info(f"[BRIDGE] Mission {mission_id} has no product — skipping")
         return None
     if not claims:
