@@ -1164,9 +1164,7 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
     def _persist_to_db(self, synthesis: dict, honey: dict, report_text: str = ""):
         """
         Persist Queen outputs to PostgreSQL:
-          1. hive_queen_assessments  — FUIR + confidence + brief
-          2. hive3_mission_memory    — key_findings from synthesis
-          3. hive3_calibration_log   — PRED entries as verifiable predictions
+          hive_queen_assessments  — FUIR + confidence + brief
         """
         import time as _t
         con = None
@@ -1231,76 +1229,6 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
                 conf_raw, conf_cal,
                 bee_ops_count, rag_count,
             ])
-
-            # ── 2. hive3_mission_memory ──────────────────────────────────────
-            # Extract key_findings: CONFIRMED lines from brief
-            key_findings_list = []
-            for line in brief.splitlines():
-                stripped = line.strip()
-                if ("[CONFIRMED]" in stripped or "[PROBABLE]" in stripped) \
-                        and len(stripped) > 30:
-                    key_findings_list.append({
-                        "fact":       stripped[:300],
-                        "confidence": conf_raw,
-                        "domain":     "synthesis",
-                    })
-                if len(key_findings_list) >= 5:
-                    break
-
-            key_findings_json = json.dumps(
-                key_findings_list, ensure_ascii=False
-            )
-
-            # Upsert: if mission exists update, else insert
-            existing = con.execute(
-                "SELECT id FROM hive3_mission_memory WHERE mission_id = ?", [mid]
-            ).fetchone()
-
-            if existing:
-                con.execute("""
-                    UPDATE hive3_mission_memory
-                    SET key_findings = ?,
-                        confidence   = ?,
-                        completed_at = NOW()
-                    WHERE mission_id = ?
-                """, [key_findings_json, conf_raw, mid])
-                log.info("[QUEEN] hive3_mission_memory updated.")
-            else:
-                # Need next id
-                max_id = con.execute(
-                    "SELECT COALESCE(MAX(id), 0) FROM hive3_mission_memory"
-                ).fetchone()[0]
-                con.execute("""
-                    INSERT INTO hive3_mission_memory
-                        (id, mission_id, mission_topic, completed_at,
-                         key_findings, confidence)
-                    VALUES (?, ?, ?, NOW(), ?, ?)
-                """, [max_id + 1, mid, topic, key_findings_json, conf_raw])
-                log.info("[QUEEN] hive3_mission_memory inserted.")
-
-            # ── 3. hive3_calibration_log — PRED entries ──────────────────────
-            pred_entries = [
-                e for e in fuir_entries
-                if e.get("type", "").upper() in ("PREDICTION", "PRED")
-            ]
-            if pred_entries:
-                for pred in pred_entries:
-                    pred_text = pred.get("text", "")
-                    pred_conf = pred.get("pred_conf") or conf_raw
-                    try:
-                        pred_conf = float(pred_conf)
-                    except Exception as e:
-                        log.debug(f"Suppressed in synth.py: {e}")
-                        pred_conf = 0.5
-
-                    con.execute("""
-                        INSERT INTO hive3_calibration_log
-                            (mission_id, prediction, confidence_stated)
-                        VALUES (?, ?, ?)
-                    """, [mid, pred_text[:500], pred_conf])
-
-                log.info(f"[QUEEN] {len(pred_entries)} predictions saved to "
-                      f"hive3_calibration_log.")
 
             con.commit()
             log.info(f"[QUEEN] Data persisted to DB "
@@ -1472,24 +1400,6 @@ Słowa: {m['total_words']} | Encje: {m['total_entities']} | Fakty: {m['total_fac
             log.debug("🕸️  Graphify vault graph rebuild triggered")
         except Exception as _ge:
             log.warning(f"⚠️  Graphify hook pominięty: {_ge}")
-
-        # ── Intelligence Closure — closing the epistemic loop ────────────
-        try:
-            import importlib.util as _ilu2
-            _fc_spec = _ilu2.spec_from_file_location(
-                "hive2_queen_feedback", "hive2_queen_feedback.py")
-            _fc_mod = _ilu2.module_from_spec(_fc_spec)
-            _fc_spec.loader.exec_module(_fc_mod)
-            closure = _fc_mod.IntelligenceClosure()
-            brief_text = synthesis.get("brief", "")
-            cr = closure.close_mission(self.mission_id, brief_text)
-            log.debug(f"🧠 Intelligence Closure: "
-                f"{cr.get('predictions_extracted', 0)} predykcji, "
-                f"{cr.get('priors_updated', 0)} priors, "
-                f"{cr.get('lessons_extracted', 0)} lekcji, "
-                f"{cr.get('pending_validated', 0)} predykcji zweryfikowanych")
-        except Exception as _fe:
-            log.warning(f"⚠️  Intelligence Closure pominięty: {_fe}")
 
         # ── QueenMemory persist — key_findings to cross-mission memory ──────
         try:
