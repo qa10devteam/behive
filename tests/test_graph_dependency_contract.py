@@ -1,6 +1,10 @@
 """Dependency contract: graph feature must not rely on harvest transitives."""
 from pathlib import Path
-import tomllib
+
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 (supported by requires-python): the tomli backport from the dev extra
+    import tomli as tomllib
 
 
 def test_graph_dependency_has_declared_install_extra():

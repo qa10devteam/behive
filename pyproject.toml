@@ -72,7 +72,7 @@ mcp = ["fastmcp>=3.0"]
 api = []  # fastapi+uvicorn moved to core deps
 qdrant = ["qdrant-client>=1.7", "sentence-transformers>=2.2"]
 all = ["behive[stealth,harvest,process,science,graph,mcp,api]"]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "ruff>=0.3"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "ruff>=0.3", "tomli>=2.0; python_version < '3.11'"]
 
 [project.scripts]
 behive = "behive.cli:main"
