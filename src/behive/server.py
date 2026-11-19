@@ -11,7 +11,7 @@ import logging
 log = logging.getLogger(__name__)
 from collections import defaultdict, Counter
 from contextlib import asynccontextmanager
-from typing import Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Depends, Query
 from behive import __version__ as BEHIVE_VERSION
@@ -234,7 +234,11 @@ class ResearchRequest(BaseModel):
     depth: int = Field(default=3, ge=1, le=5, description="1=quick, 3=standard, 5=deep")
     scale: int = Field(default=30, ge=10, le=500, description="Max sources to scout")
     force: bool = Field(True, description="Skip dedup check")
-    
+    reasoning_effort: Optional[Literal["low", "medium", "high"]] = Field(
+        default=None, description="Optional reasoning effort for the whole mission (default: the bridge's, low)")
+    synthesis_effort: Optional[Literal["low", "medium", "high"]] = Field(
+        default=None, description="Optional reasoning effort for the report synthesis only")
+
     @property
     def effective_query(self) -> str:
         return self.query or self.topic
@@ -366,6 +370,13 @@ async def start_research(req: ResearchRequest):
     h = hashlib.md5(f"{req.effective_query}{ts}".encode()).hexdigest()[:6]
     mission_id = f"hive_{ts}_{h}"
 
+    # Only what the caller chose is stored; without the fields the config is depth and scale, as before.
+    config: dict = {"depth": req.depth, "scale": req.scale}
+    if req.reasoning_effort:
+        config["reasoning_effort"] = req.reasoning_effort
+    if req.synthesis_effort:
+        config["synthesis_effort"] = req.synthesis_effort
+
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -373,7 +384,7 @@ async def start_research(req: ResearchRequest):
             INSERT INTO hive_missions (id, topic, status, phase, config, created_at)
             VALUES (%s, %s, 'queued', 'queued', %s::jsonb, NOW())
             ON CONFLICT (id) DO NOTHING
-        """, (mission_id, req.effective_query, json.dumps({"depth": req.depth, "scale": req.scale})))
+        """, (mission_id, req.effective_query, json.dumps(config)))
         conn.commit()
         conn.close()
     except Exception as e:
