@@ -267,3 +267,80 @@ def test_rescore_lower_score_keeps_old_scores_but_may_replace_a_url_like_title(m
     assert sink[0][1][:6] == [PL_TITLE[:512], 34, 12, 7, 9, 3]     # new title, old scores
     line = _info_line(caplog, "legal_rescore mission=")[-1]
     assert "rescored=0" in line and "unchanged=1" in line
+
+
+# ── 3b. R-34: no-lowering rule is the harvest filter itself (relevance >= 5 AND total >= 15) ──
+
+def _scorer(monkeypatch, total, rel, fresh=7, auth=9, depth=3):
+    monkeypatch.setattr(ls, "rescore_legal_source", lambda *a, **k: {
+        "score_total": total, "score_relevance": rel, "score_freshness": fresh,
+        "score_authority": auth, "score_depth": depth})
+
+
+def _run_rescore(monkeypatch, caplog, old_rel, old_total, new_rel, new_total, title="Dyrektywa NIS2 podmioty"):
+    import logging
+
+    sink = []
+    bee = _bee([_row(1, URL_PDF, title, old_total, old_rel, 7, 9, 3)], sink, monkeypatch)
+    _scorer(monkeypatch, new_total, new_rel, 4, 4, 4)
+    caplog.set_level(logging.INFO)
+    bee._rescore_legal_sources()
+    return sink, _info_line(caplog, "legal_rescore mission=")[-1]
+
+
+def _assert_kept(sink, line):
+    assert sink == [], sink
+    assert "rescored=0" in line and "unchanged=1" in line, line
+
+
+def _assert_taken(sink, line, rel, total):
+    assert len(sink) == 1, sink
+    p = sink[0][1]
+    assert (p[2], p[1]) == (rel, total), p
+    assert "rescored=1" in line and "unchanged=0" in line, line
+
+
+def test_thresholds_are_module_constants_of_the_harvest_filter():
+    from behive.engine import harvest
+
+    assert (harvest.HARVEST_MIN_RELEVANCE, harvest.HARVEST_MIN_TOTAL) == (5, 15)
+
+
+def test_rel_5_to_4_with_a_higher_total_is_kept(monkeypatch, caplog):
+    sink, line = _run_rescore(monkeypatch, caplog, 5, 20, 4, 30)       # old passes, new does not
+    _assert_kept(sink, line)
+
+
+def test_rel_6_to_5_with_a_higher_total_is_kept(monkeypatch, caplog):
+    sink, line = _run_rescore(monkeypatch, caplog, 6, 34, 5, 36)       # print 2608: both pass, rel lower
+    _assert_kept(sink, line)
+
+
+def test_12_34_to_5_27_is_kept(monkeypatch, caplog):
+    sink, line = _run_rescore(monkeypatch, caplog, 12, 34, 5, 27)
+    _assert_kept(sink, line)
+
+
+def test_failing_row_that_now_passes_is_lifted_7_14_to_6_16(monkeypatch, caplog):
+    sink, line = _run_rescore(monkeypatch, caplog, 7, 14, 6, 16)
+    _assert_taken(sink, line, 6, 16)
+
+
+def test_both_pass_and_both_scores_not_lower_is_taken(monkeypatch, caplog):
+    sink, line = _run_rescore(monkeypatch, caplog, 6, 20, 8, 30)
+    _assert_taken(sink, line, 8, 30)
+
+
+def test_both_fail_and_lower_is_kept(monkeypatch, caplog):
+    sink, line = _run_rescore(monkeypatch, caplog, 3, 10, 2, 12)
+    _assert_kept(sink, line)
+
+
+def test_both_fail_and_higher_is_taken(monkeypatch, caplog):
+    sink, line = _run_rescore(monkeypatch, caplog, 3, 10, 4, 12)
+    _assert_taken(sink, line, 4, 12)
+
+
+def test_old_passes_new_fails_on_total_is_kept(monkeypatch, caplog):
+    sink, line = _run_rescore(monkeypatch, caplog, 5, 16, 9, 14)
+    _assert_kept(sink, line)

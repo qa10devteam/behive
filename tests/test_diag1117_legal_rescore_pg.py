@@ -180,12 +180,10 @@ def test_celex_row_enters_queue_after_rescore_and_processes_row_does_not(live_db
     for sid, url, meta in ((5, ELI_901, KPK_TITLE), (6, PRINT_2608, PRINT_TITLE)):
         row = _row(live_db.conn, sid)
         want = rescore_legal_source(TOPIC, url, before[sid][2], before[sid][3], meta, source_type=before[sid][4])
-        if sid == 5:
-            # a rescore never lowers: the scorer's answer for the title is below 28/6, the row keeps 28/6
-            assert (want["score_total"], want["score_relevance"]) < (before[sid][5], before[sid][6]), want
-            assert (row[5], row[6]) == (28, 6), row
-        else:
-            assert (row[5], row[6]) == (want["score_total"], want["score_relevance"])
+        # R-34: both rows pass 5/15; the scorer's answer has a lower relevance (ELI 901: lower
+        # total too; print 2608: 6 -> 5 with total 34 -> 36), so both keep their stored scores
+        assert want["score_relevance"] < before[sid][6], want
+        assert (row[5], row[6]) == (before[sid][5], before[sid][6]) == ((28, 6) if sid == 5 else (34, 6)), row
         assert row[6] <= before[sid][6], row
         if row[6] < 5:
             assert row[5] <= 14, row

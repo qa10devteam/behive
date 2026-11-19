@@ -351,8 +351,11 @@ def test_nis2_mission_balance_on_the_real_harvest_child(live_db, tmp_path):
             assert (after[url]["rel"], after[url]["total"], after[url]["title"]) == \
                 (before[url]["rel"], before[url]["total"], before[url]["title"]), url   # nothing else rescored
             continue
-        if want["score_total"] < r["total"]:
-            # a rescore never lowers: 12/34 does not become 5/24, the row keeps its stored scores
+        old_ok, new_ok = _passes(r["rel"], r["total"]), _passes(want["score_relevance"], want["score_total"])
+        if (old_ok and not new_ok) or (old_ok == new_ok and (
+                want["score_relevance"] < r["rel"] or want["score_total"] < r["total"])):
+            # R-34: a rescore never lowers rel or total within the same 5/15 verdict and never
+            # drops a passing row: 12/34 does not become 5/24, the row keeps its stored scores
             assert (after[url]["rel"], after[url]["total"]) == (r["rel"], r["total"]), url
             want = dict(score_relevance=r["rel"], score_total=r["total"])
         else:
