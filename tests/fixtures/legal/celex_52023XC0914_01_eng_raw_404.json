@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "url": "https://publications.europa.eu/resource/celex/52023XC0914(01).ENG",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "status": 404,
+  "content_type": null,
+  "content_length": null,
+  "byte_size": 63,
+  "location": null,
+  "note": "Same for ENG. The id is read correctly; with the suffix stripped CELLAR reported id '52023XC0914.ENG'."
+}

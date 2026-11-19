@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "url": "https://publications.europa.eu/resource/celex/52023XC0914(01).POL",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "status": 404,
+  "content_type": null,
+  "content_length": null,
+  "byte_size": 63,
+  "location": null,
+  "note": "Unencoded parentheses reach CELLAR as the id 52023XC0914(01). The celex resource has no POL manifestation; the work exists (see sparql_52023XC0914.json)."
+}
