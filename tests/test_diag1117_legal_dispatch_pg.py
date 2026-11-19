@@ -159,7 +159,7 @@ def test_blacklisted_eurlex_celex_row_is_harvested_via_cellar_plain_row_is_groom
     after = _rep(live_db, "eur-lex.europa.eu")
     assert after[0] is True and after[1] == before[1]
     assert [r[1] for r in rows] == [CELEX_URL]
-    assert seen == [OTHER_URL]      # the unrelated domain takes its old path (spy returns nothing)
+    assert set(seen) == {OTHER_URL}   # the unrelated domain takes its old path (web, then fallbacks)
 
 
 def test_empty_legal_fetch_leaves_consecutive_bad_unchanged(live_db, monkeypatch, caplog):

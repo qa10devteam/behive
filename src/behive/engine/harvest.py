@@ -48,6 +48,13 @@ REQUEST_TIMEOUT = 30
 # One legal-metadata fetch (CELEX / ELI / print) before the relevance filter; also capped by
 # the phase deadline (llm.deadline_call_timeout).
 LEGAL_RESCORE_FETCH_TIMEOUT_S = 30.0
+# One legal-act fetch in _harvest_one (CELLAR / ELI / print; a 700 KB act body is one call);
+# also capped by the phase deadline.
+LEGAL_FETCH_TIMEOUT_S = 60.0
+# Routes of route_legal() that fetch an act through the L1 fetchers.
+_LEGAL_ROUTES = ("cellar", "eli", "sejm_print")
+# LEX (Wolters Kluwer SIP) is login-only: BeHive never fetches it and never logs in.
+_LEX_HOST = "sip.lex.pl"
 # Fine-grained timeout for new aiohttp/httpx calls: connect=3s, read=8s
 _CONNECT_TIMEOUT = 3
 _READ_TIMEOUT = 8
@@ -149,8 +156,8 @@ def clear_url_cache() -> None:
 # ---------------------------------------------------------------------------
 # Skip log — one INFO line per skipped source, one summary per mission
 # ---------------------------------------------------------------------------
-# Fixed reason codes; never free text. byok_gap / legal_fetch_empty belong to the
-# legal-source work and are only allowed here, nothing emits them yet.
+# Fixed reason codes; never free text. byok_gap (LEX, no login) and legal_fetch_empty
+# (CELLAR / ELI / print returned nothing) are emitted by the legal dispatch.
 SKIP_REASONS = (
     "score_filter",
     "domain_blacklist",
@@ -416,6 +423,36 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
 
 
+def route_legal(url: str, routing_hint: str | None = None) -> str | None:
+    """Which L1 fetcher takes this URL: 'cellar' (CELEX), 'eli' (ELI act), 'sejm_print'.
+
+    Only URLs on a CELLAR / ELI / Sejm host qualify (legal_fetch_host), so a CELEX-looking
+    query on a foreign domain gets no route. 'api_json' only with the PreScout hint 'api_bee'
+    and only when the URL is not an act. None otherwise. Pure: never touches the network.
+    """
+    if not url:
+        return None
+    from behive.engine import legal_sources as ls
+
+    if ls.legal_fetch_host(url):
+        if ls.celex_from_url(url):
+            return "cellar"
+        if ls.eli_from_url(url):
+            return "eli"
+        if ls.sejm_print_from_url(url):
+            return "sejm_print"
+    if routing_hint == "api_bee":
+        return "api_json"
+    return None
+
+
+def _is_lex_url(url: str) -> bool:
+    try:
+        return (urlparse(url or "").hostname or "").lower() == _LEX_HOST
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Drone strategy helper — reads drone map from DB
@@ -537,10 +574,24 @@ class HarvesterBee:
             before = len(sources)
             kept, groomed_out = [], []
             for s in sources:
-                (groomed_out if _rep.should_skip(s.get("url", "")) else kept).append(s)
+                _u = s.get("url", "")
+                if not _rep.should_skip(_u):
+                    kept.append(s)
+                elif route_legal(_u) in _LEGAL_ROUTES:
+                    # Narrow exception, not an amnesty: an act reachable via CELLAR / ELI /
+                    # print is fetched without touching the blacklisted host's page. The
+                    # domain stays blacklisted; every other URL of it is still groomed.
+                    kept.append(s)
+                else:
+                    groomed_out.append(s)
             sources = kept
             for s in groomed_out:
-                self._note_skip(s.get("url", ""), "domain_blacklist", self._blacklist_reason(_rep, s.get("url", "")))
+                _u = s.get("url", "")
+                if _is_lex_url(_u):
+                    # LEX is login-only: a BYOK gap, not a "bad domain".
+                    self._note_skip(_u, "byok_gap", "lex_login_required")
+                else:
+                    self._note_skip(_u, "domain_blacklist", self._blacklist_reason(_rep, _u))
             if len(sources) < before:
                 log.info(f"🐝 Grooming: {before - len(sources)} sources removed by domain reputation")
         except Exception as _re:
@@ -665,12 +716,24 @@ class HarvesterBee:
             return base
 
         # ── PreScout routing hint — skip if BeeMaster rejected ────────────
-        if url in self._prescout_skip and source.get("source_type") != "operator_seed":
+        # (a 'cellar' hint is a decision to fetch via CELLAR, never a skip)
+        if (url in self._prescout_skip and source.get("source_type") != "operator_seed"
+                and getattr(self, "_routing_hints", {}).get(url) != "cellar"):
             log.debug(f"  PreScout: SKIP {url} (approved=False by BeeMaster)")
             self._note_skip(url, "prescout_skip", "routing_final=skip")
             base["method"] = "prescout_skip"
             base["error"]  = "skipped_by_prescout"
             return base
+
+        # ── LEX (sip.lex.pl): login-only. No fetch, no login, no fallback chain ──
+        if _is_lex_url(url):
+            self._note_skip(url, "byok_gap", "lex_login_required")
+            base["method"] = "byok_gap"
+            base["error"]  = "byok_gap: lex_login_required"
+            return base
+
+        # ── Legal sources: act via CELLAR / ELI / Sejm print, before the extension branch ──
+        legal_route = route_legal(url, getattr(self, "_routing_hints", {}).get(url))
 
         # Required delays (rate-limiting — drones measured threshold)
         if delay_ms > 0:
@@ -678,7 +741,19 @@ class HarvesterBee:
 
 
         try:
-            if ext == ".pdf":
+            legal_result = None
+            if legal_route in _LEGAL_ROUTES:
+                legal_result = await self._harvest_legal(url, legal_route)
+            elif legal_route == "api_json":
+                legal_result = await asyncio.get_event_loop().run_in_executor(
+                    None, self._harvest_json, url
+                )
+                if not legal_result.get("success"):
+                    legal_result = None  # not JSON after all: the old path decides
+
+            if legal_result is not None:
+                base.update(legal_result)
+            elif ext == ".pdf":
                 result = await asyncio.get_event_loop().run_in_executor(
                     None, self._harvest_pdf, url
                 )
@@ -695,14 +770,14 @@ class HarvesterBee:
                 result = await self._harvest_web(url)
                 base.update(result)
 
-            # Fallback chain
-            if base["word_count"] < 150:
+            # Fallback chain (never for a legal result: a third-party proxy must not refetch an act)
+            if legal_result is None and base["word_count"] < 150:
                 log.debug(f"  word_count={base['word_count']} < 150 → trying Jina")
                 jina_result = await self._harvest_jina(url)
                 if jina_result["word_count"] > base["word_count"]:
                     base.update(jina_result)
 
-            if base["word_count"] < 100:
+            if legal_result is None and base["word_count"] < 100:
                 log.debug(f"  word_count={base['word_count']} < 100 → trying crawl4ai")
                 c4a_result = await self._harvest_crawl4ai(url)
                 if c4a_result["word_count"] > base["word_count"]:
@@ -712,6 +787,22 @@ class HarvesterBee:
             log.warning(f"  harvest_one failed for {url}: {exc}")
             base["error"] = str(exc)
             base["success"] = False
+
+        # Phase deadline: the act was not started. Work is deferred — not a failed harvest,
+        # no reputation entry, not cached.
+        if base.get("deferred"):
+            return base
+
+        # Empty legal fetch (WAF page, 0 words, CELLAR refusal): logged, and never a bad
+        # result for the domain, so a WAF reply cannot push consecutive_bad to a blacklist.
+        if legal_route in _LEGAL_ROUTES and not base["text"]:
+            self._note_skip(url, "legal_fetch_empty", base.get("error") or "empty")
+            base["success"] = False
+            base["word_count"] = 0
+            _cache_url(url)
+            m = base["method"]
+            self._method_counts[m] = self._method_counts.get(m, 0) + 1
+            return base
 
         # Post-process
         if base["text"]:
@@ -780,6 +871,92 @@ class HarvesterBee:
             result["text"] = text
             result["word_count"] = len(text.split())
             result["success"] = True
+        except Exception as exc:
+            log.debug(f"Exception in harvest.py: {exc}")
+            result["error"] = str(exc)
+        return result
+
+    def _legal_fetch_sync(self, url: str, route: str):
+        """Blocking: the L1 fetcher for this route, then HTML → plain text. Returns (LegalFetch, text)."""
+        from behive.engine import legal_sources as ls
+
+        if route == "cellar":
+            got = ls.fetch_celex_text(ls.celex_from_url(url))
+        elif route == "eli":
+            publisher, year, pos = ls.eli_from_url(url)  # type: ignore[misc]
+            got = ls.fetch_eli_act(publisher, year, pos)
+        else:
+            term, number = ls.sejm_print_from_url(url)  # type: ignore[misc]
+            got = ls.fetch_sejm_print(term, number)
+        text = got.text or ""
+        if got.ok and text:
+            ctype = (got.content_type or "").lower()
+            if "html" in ctype or "xml" in ctype or text.lstrip().startswith("<"):
+                text = _html_to_text(text)
+            else:
+                text = text.strip()
+        return got, text
+
+    async def _harvest_legal(self, url: str, route: str) -> dict:
+        """Fetch an act through CELLAR / ELI / a Sejm print (never eur-lex.europa.eu).
+
+        Runs the blocking L1 fetcher in an executor, capped by LEGAL_FETCH_TIMEOUT_S and the
+        phase deadline. A phase deadline defers the work (deferred=True); any other failure
+        or an empty text is a result with text == "" and the reason in error.
+        """
+        from behive.engine.llm import PhaseDeadlineExceeded, deadline_call_timeout
+
+        result = {"method": route, "text": "", "word_count": 0, "success": False, "title": ""}
+        try:
+            timeout = deadline_call_timeout(LEGAL_FETCH_TIMEOUT_S, "legal_harvest")
+        except PhaseDeadlineExceeded:
+            result["error"] = "phase_deadline"
+            result["deferred"] = True
+            return result
+        loop = asyncio.get_running_loop()
+        try:
+            got, text = await asyncio.wait_for(
+                loop.run_in_executor(None, self._legal_fetch_sync, url, route), timeout
+            )
+        except asyncio.TimeoutError:
+            result["error"] = "legal_fetch: timeout"
+            return result
+        except Exception as exc:
+            result["error"] = f"legal_fetch: {type(exc).__name__}"
+            return result
+        result["title"] = got.title or ""
+        if got.ok:
+            err = _web_text_error(text) if text else "empty_text"
+            if err is None:
+                result["text"] = text
+                result["word_count"] = len(text.split())
+                result["success"] = True
+            else:
+                result["error"] = f"legal_fetch: {err}"
+        else:
+            result["error"] = f"legal_fetch: {got.reason or 'empty'}"
+        return result
+
+    def _harvest_json(self, url: str) -> dict:
+        """api_bee endpoint: GET with Accept: application/json, body kept as text (no HTML extractor)."""
+        result = {"method": "api_json", "text": "", "word_count": 0, "success": False}
+        requests = _get_requests()  # lazy import
+        if requests is None:
+            result["error"] = "requests not installed"
+            return result
+        try:
+            resp = requests.get(
+                url, timeout=REQUEST_TIMEOUT,
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            )
+            resp.raise_for_status()
+            if "json" not in (resp.headers.get("Content-Type") or "").lower():
+                result["error"] = "not_json"
+                return result
+            text = (resp.text or "").strip()
+            result["text"] = text
+            result["word_count"] = len(text.split())
+            result["success"] = bool(text)
         except Exception as exc:
             log.debug(f"Exception in harvest.py: {exc}")
             result["error"] = str(exc)
@@ -1369,6 +1546,8 @@ class HarvesterBee:
                             log.error(f"DB save error for {r.get('url','?')}: {exc}")
                             failed += 1
                     else:
+                        if r.get("deferred"):
+                            continue  # phase deadline: the row stays as it was, to be harvested later
                         try:
                             wcon.execute("""
                                 UPDATE hive_sources

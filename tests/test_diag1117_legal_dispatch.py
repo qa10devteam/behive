@@ -340,9 +340,16 @@ def test_slow_legal_fetch_is_cut(world, monkeypatch):
 
     monkeypatch.setattr(world.harvest, "LEGAL_FETCH_TIMEOUT_S", 0.2)
     monkeypatch.setattr(ls, "fetch_celex_text", lambda celex, langs=("POL", "ENG"): time.sleep(2.0))
-    started = time.monotonic()
-    result, bee = world.one(CELEX_URL)
-    assert time.monotonic() - started < 1.5
+    bee = world.bee()
+
+    async def timed():
+        started = time.monotonic()
+        res = await bee._harvest_one({"source_id": 1, "url": CELEX_URL, "source_type": "web"})
+        return res, time.monotonic() - started
+
+    # (asyncio.run itself joins the abandoned worker thread on exit, so time the coroutine)
+    result, elapsed = asyncio.run(timed())
+    assert elapsed < 1.5
     assert result["success"] is False
     assert bee._skip_counts == {"legal_fetch_empty": 1}
     assert world.rep_updates == []
