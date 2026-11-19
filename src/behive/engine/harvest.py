@@ -144,6 +144,45 @@ def clear_url_cache() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Skip log — one INFO line per skipped source, one summary per mission
+# ---------------------------------------------------------------------------
+# Fixed reason codes; never free text. byok_gap / legal_fetch_empty belong to the
+# legal-source work and are only allowed here, nothing emits them yet.
+SKIP_REASONS = (
+    "score_filter",
+    "domain_blacklist",
+    "prescout_skip",
+    "drone_skip",
+    "cache_skip",
+    "byok_gap",
+    "legal_fetch_empty",
+)
+# Codes always shown in skip_summary (stable line shape); the rest only when counted.
+_SUMMARY_REASONS = SKIP_REASONS[:5]
+
+
+def note_skip(mission_id: str, url: str, reason: str, detail: str = "",
+              counts: "dict[str, int] | None" = None) -> None:
+    """Log one INFO line for a skipped source and bump counts[reason]."""
+    if reason not in SKIP_REASONS:
+        raise ValueError(f"unknown skip reason: {reason!r}")
+    detail = " ".join(str(detail).split())
+    log.info("skip mission=%s reason=%s url=%s detail=%s", mission_id, reason, url, detail)
+    if counts is not None:
+        counts[reason] = counts.get(reason, 0) + 1
+
+
+def skip_summary(mission_id: str, counts: "dict[str, int]", loaded: int, groomed: int) -> None:
+    """Log one INFO summary line per mission; skipped is the sum of the per-reason counts."""
+    reasons = list(_SUMMARY_REASONS) + [r for r in SKIP_REASONS[5:] if counts.get(r)]
+    parts = " ".join(f"{r}={counts.get(r, 0)}" for r in reasons)
+    log.info(
+        "skip_summary mission=%s loaded=%s groomed=%s skipped=%s %s",
+        mission_id, loaded, groomed, sum(counts.values()), parts,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Lazy import helpers — cached after first successful import
 # ---------------------------------------------------------------------------
 
@@ -410,6 +449,8 @@ class HarvesterBee:
         self.con = _get_db_connection(read_only=True)
         self.results: list[dict] = []
         self._method_counts: dict[str, int] = {}
+        self._skip_counts: dict[str, int] = {}
+        self._loaded_count = 0
         # ── PreScout routing hints (optional) ────────────────────────────────
         # Loaded from /tmp/hive_routing_<mission_id>.json if PreScout ran.
         # Maps url → routing_final (e.g. "skip", "api_bee", "pdf_drone", ...)
@@ -460,7 +501,10 @@ class HarvesterBee:
         if not sources:
             log.warning("No pending sources found for this mission.")
             self._finalize(0)
+            skip_summary(self.mission_id, self.__dict__.setdefault("_skip_counts", {}), 0, 0)
             return
+        self._loaded_count = len(sources)
+        self._log_score_filter_skips(sources)
 
         # Show how many were filtered
         total_pending = self.con.execute(
@@ -488,7 +532,12 @@ class HarvesterBee:
             from behive.engine.domain_reputation import get_reputation
             _rep = get_reputation()
             before = len(sources)
-            sources = [s for s in sources if not _rep.should_skip(s.get("url", ""))]
+            kept, groomed_out = [], []
+            for s in sources:
+                (groomed_out if _rep.should_skip(s.get("url", "")) else kept).append(s)
+            sources = kept
+            for s in groomed_out:
+                self._note_skip(s.get("url", ""), "domain_blacklist", self._blacklist_reason(_rep, s.get("url", "")))
             if len(sources) < before:
                 log.info(f"🐝 Grooming: {before - len(sources)} sources removed by domain reputation")
         except Exception as _re:
@@ -587,6 +636,7 @@ class HarvesterBee:
         # Fix #4: skip re-fetching already-seen URLs within this run
         if _is_url_cached(url):
             log.debug(f"  URL cache hit — skipping re-fetch: {url}")
+            self._note_skip(url, "cache_skip", "duplicate_url")
             base["method"] = "cache_skip"
             base["error"] = "duplicate url in mission run"
             return base
@@ -606,6 +656,7 @@ class HarvesterBee:
         # Blokada zidentyfikowana przez trutnie — skip od razu, nie marnuj czasu
         if strategy == "SKIP":
             log.debug(f"  Drone: SKIP {dom} (wall not bypassed)")
+            self._note_skip(url, "drone_skip", drone_strategy.get("block_type", "unknown"))
             base["method"] = "drone_skip"
             base["error"]  = f"drone_blocked: {drone_strategy.get('block_type', 'unknown')}"
             return base
@@ -613,6 +664,7 @@ class HarvesterBee:
         # ── PreScout routing hint — skip if BeeMaster rejected ────────────
         if url in self._prescout_skip and source.get("source_type") != "operator_seed":
             log.debug(f"  PreScout: SKIP {url} (approved=False by BeeMaster)")
+            self._note_skip(url, "prescout_skip", "routing_final=skip")
             base["method"] = "prescout_skip"
             base["error"]  = "skipped_by_prescout"
             return base
@@ -1028,6 +1080,42 @@ class HarvesterBee:
     # DB persistence
     # ------------------------------------------------------------------
 
+    def _note_skip(self, url: str, reason: str, detail: str = "") -> None:
+        # setdefault: tests build HarvesterBee via __new__ without __init__
+        counts = self.__dict__.setdefault("_skip_counts", {})
+        note_skip(self.mission_id, url, reason, detail, counts)
+
+    @staticmethod
+    def _blacklist_reason(rep, url: str) -> str:
+        """Blacklist reason of the URL's domain (read from the reputation cache); '' if unknown."""
+        try:
+            from behive.engine.domain_reputation import _extract_domain
+            rec = rep._load(_extract_domain(url))
+            return (rec or {}).get("blacklist_reason", "") or ""
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
+            return ""
+
+    def _log_score_filter_skips(self, sources: list[dict]) -> None:
+        """INFO skip line for every pending/scouted row of this mission that
+        _load_pending_sources did not load. Read-only; never changes what is harvested.
+        Operator seeds are always loaded, so they never appear here."""
+        try:
+            loaded_ids = {s.get("source_id") for s in sources}
+            rows = self.con.execute("""
+                SELECT id, url, score_relevance, score_total
+                FROM hive_sources
+                WHERE mission_id = ?
+                  AND status IN ('pending', 'scouted')
+                  AND source_type IS DISTINCT FROM 'operator_seed'
+                ORDER BY id
+            """, [self.mission_id]).fetchall()
+            for sid, url, rel, total in rows:
+                if sid not in loaded_ids:
+                    self._note_skip(url or "", "score_filter", f"relevance={rel} total={total}")
+        except Exception as exc:
+            log.debug(f"score_filter skip log failed (non-critical): {exc}")
+
     def _load_pending_sources(self) -> list[dict]:
         try:
             # MAX_HARVEST = 300 top-scoring sources per mission
@@ -1225,6 +1313,11 @@ class HarvesterBee:
         for method, count in sorted(self._method_counts.items()):
             log.debug(f"    {method:<30} {count}")
         log.debug("=" * 60 + "\n")
+        counts = self.__dict__.setdefault("_skip_counts", {})
+        skip_summary(
+            self.mission_id, counts, getattr(self, "_loaded_count", total_sources),
+            counts.get("domain_blacklist", 0),
+        )
 
 
 # ---------------------------------------------------------------------------
