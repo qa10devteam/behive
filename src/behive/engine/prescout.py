@@ -82,7 +82,11 @@ _TIER_LOW: set[str] = {
 _PAYWALL_DOMAINS: set[str] = {
     "jstor.org", "springer.com", "wiley.com", "tandfonline.com",
     "elsevier.com", "ieee.org", "acm.org",
+    "sip.lex.pl",  # LEX Wolters Kluwer: Borg login only, BYOK gap (see byok.py)
 }
+
+_LEX_HOST = "sip.lex.pl"
+_EURLEX_HOST = "eur-lex.europa.eu"
 
 _PROCUREMENT_PORTALS: dict[str, str] = {
     "ted.europa.eu":                     "dedicated_connector",
@@ -312,10 +316,12 @@ async def head_sweep(urls: list[str]) -> dict[str, dict]:
 ResourceType     = Literal[
     "api_endpoint", "pdf", "static_html", "rss_feed",
     "spa", "paywall", "thin_content", "database_portal", "unknown",
+    "legal_act",
 ]
 RoutingDecision  = Literal[
     "api_bee", "pdf_drone", "standard_drone", "heavy_drone",
     "rss_bee", "dedicated_connector", "bee_master_needed", "skip",
+    "cellar",
 ]
 
 
@@ -341,6 +347,23 @@ def route_resource(
         if portal_domain in domain:
             flags.append("procurement_portal")
             return "database_portal", routing, flags  # type: ignore[return-value]
+
+    # ── LEX (sip.lex.pl): login-only, BYOK gap — never a normal page ─────────
+    # Hostname match only; no login is ever attempted (see byok.py).
+    _host = (urlparse(url).hostname or "").lower()
+    if _host == _LEX_HOST:
+        flags.extend(["paywall_known", "byok_gap"])
+        return "paywall", "bee_master_needed", flags
+
+    # ── EUR-Lex WAF bot page (HTTP 202, empty) for a CELEX act ───────────────
+    # The text is fetched via CELLAR, never from eur-lex.europa.eu. Only this
+    # host + a real CELEX id + 202 qualify; any other 202 stays thin_content.
+    if status == 202 and _host == _EURLEX_HOST:
+        from behive.engine.legal_sources import celex_from_url
+        _celex = celex_from_url(url)
+        if _celex:
+            flags.append(f"celex:{_celex}")
+            return "legal_act", "cellar", flags
 
     # ── HEAD failed / error ───────────────────────────────────────────────────
     if head_meta.get("head_error") or status is None:
