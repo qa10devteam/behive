@@ -1,0 +1,54 @@
+{
+  "note": "Recorded transport of the L1 legal fetchers for test_diag1117_legal_boundary_pg.py. Status, content type, size and title come from the live readings of 2026-11-17 (see tests/fixtures/legal/README.txt); the text is synthetic (a few sentences repeated), never the text of an act. Keys: celex -> CELEX, eli -> publisher/year/pos, print -> term/number.",
+  "celex": {
+    "32022L2555": {
+      "ok": true,
+      "source": "cellar",
+      "title": "Dyrektywa Parlamentu Europejskiego i Rady (UE) 2022/2555 z dnia 14 grudnia 2022 r. w sprawie środków na rzecz wysokiego wspólnego poziomu cyberbezpieczeństwa na terytorium Unii, zmieniająca rozporządzenie (UE) nr 910/2014 i dyrektywę (UE) 2018/1972 oraz uchylająca dyrektywę (UE) 2016/1148 (dyrektywa NIS 2)",
+      "fetch_url": "https://publications.europa.eu/resource/cellar/9b84d482-85bd-11ed-9887-01aa75ed71a1.0018.03/DOC_1",
+      "content_type": "application/xhtml+xml;charset=UTF-8",
+      "http_status": 200,
+      "byte_size": 732726,
+      "reason": "",
+      "text": {
+        "kind": "html",
+        "count": 24,
+        "template": "Artykuł {i}. Podmioty kluczowe i ważne wdrażają środki zarządzania ryzykiem w cyberbezpieczeństwie, zgodnie z dyrektywą 2022/2555, w terminie {j} dni od dnia zgłoszenia incydentu."
+      }
+    }
+  },
+  "eli": {
+    "DU/2026/901": {
+      "ok": true,
+      "source": "eli",
+      "title": "Ustawa z dnia 11 czerwca 2026 r. o zmianie ustawy - Kodeks postępowania karnego oraz ustawy - Kodeks karny skarbowy",
+      "fetch_url": "https://api.sejm.gov.pl/eli/acts/DU/2026/901/text.pdf",
+      "content_type": "application/pdf",
+      "http_status": 200,
+      "byte_size": null,
+      "reason": "",
+      "text": {
+        "kind": "plain",
+        "count": 24,
+        "template": "Artykuł {i}. Sąd może zastosować środek zapobiegawczy wobec oskarżonego w postępowaniu karnym, zgodnie z przepisami Kodeksu postępowania karnego, w terminie {j} dni."
+      }
+    }
+  },
+  "print": {
+    "10/2608": {
+      "ok": true,
+      "source": "sejm_print",
+      "title": "Sprawozdanie Komisji Nadzwyczajnej do spraw zmian w kodyfikacjach o poselskich projektach ustaw o zmianie ustawy - Kodeks karny.",
+      "fetch_url": "https://api.sejm.gov.pl/sejm/term10/prints/2608/2608.pdf",
+      "content_type": "application/pdf",
+      "http_status": 200,
+      "byte_size": null,
+      "reason": "",
+      "text": {
+        "kind": "plain",
+        "count": 24,
+        "template": "Punkt {i}. Komisja rozpatrzyła poselski projekt ustawy o zmianie Kodeksu karnego i zaproponowała zmianę przepisów o karze pozbawienia wolności, w terminie {j} dni."
+      }
+    }
+  }
+}
