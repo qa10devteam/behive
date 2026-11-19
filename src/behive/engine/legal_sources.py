@@ -23,9 +23,11 @@ _LEGAL_HOSTS = frozenset({
     "api.sejm.gov.pl",
     "eli.gov.pl",
 })
-_CELEX_ID = re.compile(r"([1-7]\d{4}[A-Z]{1,2}\d{3,5})", re.I)
+# Optional parenthesised suffix: 52023XC0914(01), 32016R0679R(02), 52023XC0914(01)R(01).
+_CELEX_SUFFIX = r"(?:R?\(\d{1,3}\))*"
+_CELEX_ID = re.compile(r"([1-7]\d{4}[A-Z]{1,2}\d{3,5}" + _CELEX_SUFFIX + ")", re.I)
 _ELI_DIR = re.compile(r"/eli/dir/(\d{4})/(\d{1,5})(?:/|$)", re.I)
-_CELEX_PATH = re.compile(r"/resource/celex/([1-7]\d{4}[A-Z]{1,2}\d{3,5})", re.I)
+_CELEX_PATH = re.compile(r"/resource/celex/([1-7]\d{4}[A-Z]{1,2}\d{3,5}" + _CELEX_SUFFIX + ")", re.I)
 _ELI_ACT = re.compile(r"/(?:eli/acts|api/acts)/([A-Za-z0-9]+)/(\d{4})/(\d+)(?:/|$)", re.I)
 _PRINT = re.compile(r"/sejm/term(\d+)/prints/([^/?#]+)", re.I)
 _ELI_HOSTS = frozenset({"api.sejm.gov.pl", "eli.gov.pl"})
@@ -70,7 +72,7 @@ def _is_eurlex(url: str) -> bool:
 def _celex_token(value: str) -> str:
     if not value:
         return ""
-    marked = re.search(r"CELEX:([0-9A-Za-z]+)", value, re.I)
+    marked = re.search(r"CELEX:([0-9A-Za-z]+(?:\(\d{1,3}\)[0-9A-Za-z]*)*)", value, re.I)
     token = marked.group(1) if marked else value
     hit = _CELEX_ID.search(token)
     return hit.group(1).upper() if hit else ""

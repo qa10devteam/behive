@@ -113,7 +113,7 @@ def test_cellar_gets_the_suffixed_id_with_unencoded_parentheses(monkeypatch):
             return _Resp(404, enc_body, url)
         if url.endswith(".ENG") and "(01)" in url:
             return _Resp(404, pol_body.replace(b".POL", b".ENG"), url)
-        if url == work:
+        if url == work.replace("http://", "https://", 1):   # CELLAR Location is http://, fetched over https
             return _Resp(200, _shell("Komunikat Komisji"), url, "application/xhtml+xml;charset=UTF-8")
         raise AssertionError(f"unexpected publication URL: {url}")
 

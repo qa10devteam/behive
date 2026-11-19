@@ -338,10 +338,13 @@ def fetch_celex_html(
     celex = (celex or "").upper()
     if not celex:
         return "", ""
+    # Parentheses of a suffixed id (52023XC0914(01)) go out unencoded: CELLAR reads the path
+    # literally and takes %28 / %29 as part of the id (live reading 2026-11-19, tests/fixtures/legal).
+    celex_path = urllib.parse.quote(celex, safe="()")
     for lang in langs:
         try:
             url, html = _http_html(
-                f"https://publications.europa.eu/resource/celex/{celex}.{lang}",
+                f"https://publications.europa.eu/resource/celex/{celex_path}.{lang}",
                 max_bytes=max_bytes,
             )
         except Exception:
