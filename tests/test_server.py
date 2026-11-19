@@ -11,8 +11,8 @@ os.environ.setdefault("HIVE_PG_HOST", "127.0.0.1")
 
 
 @pytest.fixture
-def client():
-    """FastAPI test client with mocked DB."""
+def client(no_real_pipeline):
+    """FastAPI test client with mocked DB; POST /research starts no real pipeline process."""
     with patch("behive.server.get_db_url", return_value="postgresql://test:test@localhost/test"):
         from fastapi.testclient import TestClient
         from behive.server import app

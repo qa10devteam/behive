@@ -73,7 +73,7 @@ class TestServerEndpoints:
             assert r.status_code in [200, 404, 422, 500]
 
     @patch("behive.engine.llm.complete")
-    def test_research_post(self, mock_llm):
+    def test_research_post(self, mock_llm, no_real_pipeline):
         mock_llm.return_value = "Research started"
         from behive.server import app
         from starlette.testclient import TestClient

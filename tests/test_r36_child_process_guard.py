@@ -126,3 +126,12 @@ def test_the_terminal_summary_lists_the_tests_that_leaked(leaked):
 
 def test_the_sweep_is_an_autouse_fixture_of_every_test(request):
     assert "reap_pipeline_children" in request.fixturenames
+
+
+def test_no_real_pipeline_replaces_the_servers_pipeline_starter(no_real_pipeline):
+    import asyncio
+
+    import behive.server
+
+    assert asyncio.run(behive.server._run_pipeline("m", "topic", 1, 30)) is None
+    assert behive.server._run_pipeline.__module__ == "conftest"

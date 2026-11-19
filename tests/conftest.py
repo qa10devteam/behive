@@ -187,6 +187,105 @@ def pytest_configure(config):
     _db_mod.DSN = PG_DSN
     _db_mod._pool = None
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pipeline children left behind by a test (R-36)
+#
+# The API's _run_pipeline starts `python -m behive.engine run ...` as a real subprocess and
+# cmd_run begins with cleanup_stuck_missions(max_age_hours=1). A child that outlives its test
+# marks the old missions of a LATER test 'error' while that test runs. After every test, a
+# still-running direct child of the pytest process that runs behive.engine (any module), the
+# orchestrator or a hive2_ script is terminated (killed after a short wait) and recorded;
+# pytest_terminal_summary prints the record (expected: empty).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import re
+import signal
+import time
+
+_PIPELINE_CHILD = re.compile(r"behive[./]engine(?![\w])|orchestrator|hive2_")
+_LEAKED_CHILDREN: list[tuple[str, str]] = []  # (test node id, command line)
+
+
+def _running_children(parent: int) -> list[tuple[int, str]]:
+    """(pid, command line) of the live (not zombie) direct children of ``parent`` (Linux /proc)."""
+    found = []
+    try:
+        pids = [int(name) for name in os.listdir("/proc") if name.isdigit()]
+    except OSError:
+        return found
+    for pid in pids:
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as handle:
+                state, ppid = handle.read().rsplit(")", 1)[1].split()[:2]
+            if int(ppid) != parent or state in ("Z", "X"):
+                continue
+            with open(f"/proc/{pid}/cmdline", "rb") as handle:
+                cmdline = handle.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+        except (OSError, ValueError, IndexError):
+            continue  # ended meanwhile
+        found.append((pid, cmdline))
+    return found
+
+
+def _is_gone(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as handle:
+            return handle.read().rsplit(")", 1)[1].split()[0] in ("Z", "X")
+    except (OSError, IndexError):
+        return True
+
+
+def _reap_leaked_children(test_id: str, grace: float = 3.0) -> None:
+    """SIGTERM, then after ``grace`` seconds SIGKILL, every pipeline child still running."""
+    victims = [(pid, cmd) for pid, cmd in _running_children(os.getpid()) if _PIPELINE_CHILD.search(cmd)]
+    if not victims:
+        return
+    for pid, cmd in victims:
+        _LEAKED_CHILDREN.append((test_id, cmd))
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.monotonic() + grace
+    pending = [pid for pid, _cmd in victims]
+    while pending and time.monotonic() < deadline:
+        pending = [pid for pid in pending if not _is_gone(pid)]
+        if pending:
+            time.sleep(0.05)
+    for pid in pending:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+@pytest.fixture
+def no_real_pipeline(monkeypatch):
+    """POST /research starts `python -m behive.engine run ...` through server._run_pipeline.
+    Tests of the endpoint that do not follow the pipeline replace it with a no-op coroutine:
+    a child outliving its test would run cleanup_stuck_missions on the shared database."""
+    import behive.server
+
+    async def _no_pipeline(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(behive.server, "_run_pipeline", _no_pipeline)
+
+
+@pytest.fixture(autouse=True)
+def reap_pipeline_children(request):
+    yield
+    _reap_leaked_children(request.node.nodeid)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if not _LEAKED_CHILDREN:
+        return
+    terminalreporter.section("behive pipeline children left running by tests (terminated)")
+    for test_id, cmd in _LEAKED_CHILDREN:
+        terminalreporter.write_line(f"{test_id}: {cmd}")
+
+
 # Module-level singleton — created once, reused everywhere
 _SHARED_PGCONN = None
 _SHARED_RAW_CONN = None
