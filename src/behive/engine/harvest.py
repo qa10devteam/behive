@@ -48,6 +48,10 @@ REQUEST_TIMEOUT = 30
 # One legal-metadata fetch (CELEX / ELI / print) before the relevance filter; also capped by
 # the phase deadline (llm.deadline_call_timeout).
 LEGAL_RESCORE_FETCH_TIMEOUT_S = 30.0
+# The harvest filter (see _load_pending_sources): a row is harvested only with
+# score_relevance >= HARVEST_MIN_RELEVANCE AND score_total >= HARVEST_MIN_TOTAL.
+HARVEST_MIN_RELEVANCE = 5
+HARVEST_MIN_TOTAL = 15
 # One legal-act fetch in _harvest_one (CELLAR / ELI / print; a 700 KB act body is one call);
 # also capped by the phase deadline.
 LEGAL_FETCH_TIMEOUT_S = 60.0
@@ -1363,6 +1367,22 @@ class HarvesterBee:
             return title, ""
         return "", str(getattr(got, "reason", "") or "no_title")
 
+    @staticmethod
+    def _rescore_keeps_old(old_rel, old_total, new_rel, new_total) -> bool:
+        """True when a rescore must keep the stored scores: the old row passes the harvest
+        filter and the new one does not, or both have the same verdict and the new relevance
+        or total is lower. A failing row that now passes is lifted."""
+        if old_rel is None or old_total is None:
+            return False
+
+        def passes(rel, total):
+            return rel >= HARVEST_MIN_RELEVANCE and total >= HARVEST_MIN_TOTAL
+
+        old_ok, new_ok = passes(old_rel, old_total), passes(new_rel, new_total)
+        if old_ok and not new_ok:
+            return True
+        return old_ok == new_ok and (new_rel < old_rel or new_total < old_total)
+
     def _rescore_legal_sources(self) -> None:
         """Score pending/scouted rows with a URL-like title or a CELEX/ELI/print id by their
         metadata title, before the 5/15 filter. Only the score columns (and the title, when
@@ -1439,13 +1459,12 @@ class HarvesterBee:
                                           source_type=stype or "web")
             new_title = meta_title[:512] if ls.url_like_title(title or "", url) else (title or "")
             old = (title or "", total, rel, fresh, auth, depth)
-            if total is not None and new["score_total"] < total:
-                # Never lower a row: appending the official title can dilute relevance
-                # (12/34 -> 5/27). The old scores stay; a URL-like title may still be replaced.
-                kept = True
+            kept = self._rescore_keeps_old(rel, total, new["score_relevance"], new["score_total"])
+            if kept:
+                # Never lower a row (12/34 -> 5/27) and never drop a passing row under the
+                # harvest filter. The old scores stay; a URL-like title may still be replaced.
                 want = (new_title, total, rel, fresh, auth, depth)
             else:
-                kept = False
                 want = (new_title, new["score_total"], new["score_relevance"],
                         new["score_freshness"], new["score_authority"], new["score_depth"])
             if kept:
@@ -1500,11 +1519,11 @@ class HarvesterBee:
                 WHERE mission_id = ?
                   AND status IN ('pending', 'scouted')
                   AND source_type IS DISTINCT FROM 'operator_seed'
-                  AND score_relevance >= 5
-                  AND score_total >= 15
+                  AND score_relevance >= ?
+                  AND score_total >= ?
                 ORDER BY score_total DESC NULLS LAST
                 LIMIT 300
-            """, [self.mission_id]).fetchall()
+            """, [self.mission_id, HARVEST_MIN_RELEVANCE, HARVEST_MIN_TOTAL]).fetchall()
             if not rows:
                 # Fallback — relaxed thresholds if nothing passes
                 log.warning("No sources passed relevance filter — falling back to top-100 by score_total")
