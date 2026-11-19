@@ -106,6 +106,13 @@ curl http://localhost:8091/research/{job_id}/status
 curl http://localhost:8091/research/{job_id}/report
 ```
 
+Reasoning effort is optional: add `"reasoning_effort"` (whole mission) and/or
+`"synthesis_effort"` (report synthesis only) to the `POST /research` body, each `low`,
+`medium` or `high` (anything else returns HTTP 422). Without them nothing changes and the
+model bridge keeps its default, `low`; with only `reasoning_effort` set, the synthesis uses
+it too. Example: `-d '{"query": "React vs Vue 2025", "reasoning_effort": "medium", "synthesis_effort": "high"}'`.
+The MCP tool `research_topic` takes the same two fields.
+
 ### Mission status
 
 A mission ends in one of three statuses:

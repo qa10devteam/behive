@@ -396,10 +396,74 @@ def phase_child_mission(args) -> str:
     return os.environ.get("BEHIVE_MISSION_ID") or ""
 
 
+# Reasoning effort (opt-in per mission, optionally another one for the synthesis).
+# Exactly low|medium|high ever becomes the X-BeHive-Effort header; anything else
+# means "no header" and the bridge keeps its own default. In-process callers bind
+# effort_scope(mission_effort, synthesis_effort); phase children get the same pair in
+# BEHIVE_REASONING_EFFORT / BEHIVE_SYNTH_EFFORT. A binding wins over the environment
+# and an invalid binding does not fall through to it. The synthesis effort applies
+# only while the phase is a synthesis phase; it falls back to the mission effort.
+EFFORT_VALUES = ("low", "medium", "high")
+_SYNTH_PHASES = frozenset({"synth", "queen-synthesis", "synth-fallback", "synth-final"})
+_effort_pair: contextvars.ContextVar[tuple[str | None, str | None] | None] = contextvars.ContextVar(
+    "behive_effort_pair", default=None,
+)
+
+
+def _valid_effort(value) -> str | None:
+    return value if isinstance(value, str) and value in EFFORT_VALUES else None
+
+
+class effort_scope:
+    """Bind (mission effort, synthesis effort) for llm.complete* in this context only.
+
+    effort_scope(None) with no synthesis effort binds nothing.
+    """
+
+    def __init__(self, effort: str | None, synthesis_effort: str | None = None):
+        self._pair = None if effort is None and synthesis_effort is None else (effort, synthesis_effort)
+        self._token = None
+
+    def __enter__(self):
+        if self._pair is not None:
+            self._token = _effort_pair.set(self._pair)
+        return self
+
+    def __exit__(self, *exc):
+        if self._token is not None:
+            _effort_pair.reset(self._token)
+            self._token = None
+        return False
+
+
+def effort_pair() -> tuple[str, str] | None:
+    """The valid (mission effort, synthesis effort) bound in this context, '' for unset; None if unbound."""
+    bound = _effort_pair.get()
+    if bound is None:
+        return None
+    return (_valid_effort(bound[0]) or "", _valid_effort(bound[1]) or "")
+
+
+def effort_value() -> str | None:
+    """The effort for a call made now: low|medium|high, or None (send no header)."""
+    bound = _effort_pair.get()
+    if bound is not None:
+        mission_effort, synth_effort = bound
+    else:
+        mission_effort = os.environ.get("BEHIVE_REASONING_EFFORT")
+        synth_effort = os.environ.get("BEHIVE_SYNTH_EFFORT")
+    if mission_tag()[1] in _SYNTH_PHASES and _valid_effort(synth_effort):
+        return synth_effort
+    return _valid_effort(mission_effort)
+
+
 def _attach_mission_headers(kwargs: dict) -> None:
     headers = mission_headers()
+    effort = effort_value()
+    if effort:
+        headers["X-BeHive-Effort"] = effort
     if headers:
-        kwargs["extra_headers"] = headers
+        kwargs["extra_headers"] = {**(kwargs.get("extra_headers") or {}), **headers}
 
 
 def complete(

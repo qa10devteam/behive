@@ -1313,6 +1313,52 @@ def _mission_scope(mission_id: str, phase: str):
     return mission_scope(mission_id, phase)
 
 
+def _mission_efforts(mission_id: str) -> tuple[str | None, str | None]:
+    """(reasoning effort, synthesis effort) stored in hive_missions.config.
+
+    Only low|medium|high count. Unset, invalid, no such mission or no database
+    all mean (None, None): the run behaves as it did before the fields existed.
+    """
+    from behive.engine.llm import EFFORT_VALUES
+    try:
+        from behive.engine.process import _mission_config
+        con = _connect_db(read_only=True)
+        try:
+            row = con.execute("SELECT config FROM hive_missions WHERE id=?", [mission_id]).fetchone()
+        finally:
+            con.close()
+        config = _mission_config(row[0]) if row else {}
+    except Exception as exc:
+        log.debug("Mission %s effort config unavailable (%s)", mission_id, type(exc).__name__)
+        return None, None
+
+    def effort(name):
+        value = config.get(name)
+        return value if isinstance(value, str) and value in EFFORT_VALUES else None
+
+    return effort("reasoning_effort"), effort("synthesis_effort")
+
+
+def _effort_scope(efforts: tuple[str | None, str | None]):
+    """In-process effort binding for a mission run; binds nothing when neither is set."""
+    from behive.engine.llm import effort_scope
+    return effort_scope(*efforts)
+
+
+def _phase_effort_env() -> dict[str, str]:
+    """Efforts a phase child inherits. Empty unless this run has a valid effort bound."""
+    from behive.engine.llm import effort_pair
+    pair = effort_pair()
+    if pair is None:
+        return {}
+    env = {}
+    if pair[0]:
+        env["BEHIVE_REASONING_EFFORT"] = pair[0]
+    if pair[1]:
+        env["BEHIVE_SYNTH_EFFORT"] = pair[1]
+    return env
+
+
 def run_phase(script: str, args: list[str], phase_name: str,
               timeout: int = 600) -> float:
     """Run and reap our own bee; argv never passes through a shell.
@@ -1356,7 +1402,7 @@ def run_phase(script: str, args: list[str], phase_name: str,
                 env={**os.environ, "HIVE_PARENT_PID": str(os.getpid()),
                      "BEHIVE_PHASE_DEADLINE": str(time.time() + timeout - grace),
                      "BEHIVE_PHASE": phase_name,
-                     **_phase_mission_env(args)},
+                     **_phase_mission_env(args), **_phase_effort_env()},
                 start_new_session=True,
             )
             try:
@@ -1573,6 +1619,8 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
 
     mission_id = os.environ.get("BEHIVE_MISSION_ID") or new_mission_id(topic)
     query = topic
+    # Opt-in efforts from the mission config (POST /research); (None, None) = as before.
+    efforts = _mission_efforts(mission_id)
 
     # Track active mission for SIGINT handler
     cmd_run._active_mission_id = mission_id
@@ -1607,7 +1655,7 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
 
     planner = QueenPlanner(topic, think_mode=think, scale=scale,
                            recommended_queries=_primer_queries)
-    with _mission_scope(mission_id, "plan"):
+    with _effort_scope(efforts), _mission_scope(mission_id, "plan"):
         plan = planner.plan()
     plan_file = f'/tmp/hive_plan_{mission_id}.json'
     with open(plan_file, 'w') as f:
@@ -1641,8 +1689,9 @@ def cmd_run(topic: str, think: bool = False, deep: bool = False, force: bool = F
     
     for attempt in range(max_attempts):
         try:
-            _run_pipeline_phases(mission_id, topic, plan, timings, total_t0, think, deep, scale, query, _specificity, plan_file)
-            _finalize_completed_pipeline(mission_id)
+            with _effort_scope(efforts):
+                _run_pipeline_phases(mission_id, topic, plan, timings, total_t0, think, deep, scale, query, _specificity, plan_file)
+                _finalize_completed_pipeline(mission_id)
             return
         except PhaseFailure as phase_failure:
             # Terminal for this mission: no whole-pipeline retry (see PhaseFailure).

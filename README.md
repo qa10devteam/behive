@@ -285,6 +285,15 @@ curl http://localhost:8091/research/{mission_id}/report
 curl "http://localhost:8091/search?q=quantum+supremacy&limit=20"
 ```
 
+Reasoning effort is optional. `POST /research` and the MCP tool `research_topic` accept
+`reasoning_effort` (the whole mission) and `synthesis_effort` (the report synthesis only),
+each `low`, `medium` or `high`; any other value is rejected with HTTP 422. Without them
+nothing changes: the model bridge keeps its own default, `low`. `synthesis_effort` falls back
+to `reasoning_effort` when only that one is set. Both are stored in `hive_missions.config`
+and sent to the bridge as the `X-BeHive-Effort` header (only those three values), which the
+xAI bridge applies if the value is in its `BEHIVE_XAI_BRIDGE_ALLOWED_EFFORT` list.
+Example: `{"topic": "quantum computing 2026", "reasoning_effort": "medium", "synthesis_effort": "high"}`.
+
 ### MCP Tools
 
 | Tool | Description |

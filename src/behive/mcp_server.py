@@ -66,6 +66,8 @@ async def mcp_endpoint(request: MCPRequest):
                             "properties": {
                                 "query": {"type": "string", "description": "Research question or topic"},
                                 "depth": {"type": "integer", "description": "1-5 (1=quick, 3=standard, 5=deep)", "default": 3},
+                                "reasoning_effort": {"type": "string", "enum": ["low", "medium", "high"], "description": "Optional reasoning effort for the whole mission (default low)"},
+                                "synthesis_effort": {"type": "string", "enum": ["low", "medium", "high"], "description": "Optional reasoning effort for the report synthesis only (default: the mission effort)"},
                             },
                             "required": ["query"],
                         }
@@ -149,13 +151,19 @@ async def _tool_research(req_id, args):
     if not query:
         return _tool_result(req_id, "Error: query is required", True)
 
+    # Optional efforts are passed on only when given; the API validates them (422).
+    body = {"query": query, "depth": depth, "force": True}
+    for name in ("reasoning_effort", "synthesis_effort"):
+        if args.get(name) is not None:
+            body[name] = args[name]
+
     import httpx
     api_port = os.environ.get("BEHIVE_API_PORT", "8091")
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"http://127.0.0.1:{api_port}/research",
-                json={"query": query, "depth": depth, "force": True},
+                json=body,
                 timeout=30,
             )
             data = resp.json()
