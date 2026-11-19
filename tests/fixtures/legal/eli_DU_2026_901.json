@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "url": "https://api.sejm.gov.pl/eli/acts/DU/2026/901",
+  "accept": "application/json",
+  "status": 200,
+  "content_type": "application/json",
+  "byte_size": 1153,
+  "text_pdf_url": "https://api.sejm.gov.pl/eli/acts/DU/2026/901/text.pdf",
+  "note": "Act metadata only. textHTML=false, textPDF=true. PDF bytes are not stored."
+}

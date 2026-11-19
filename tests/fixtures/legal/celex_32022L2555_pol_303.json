@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "url": "https://publications.europa.eu/resource/celex/32022L2555.POL",
+  "accept": "application/xhtml+xml, application/xml;q=0.9, text/html;q=0.8",
+  "status": 303,
+  "content_type": "application/xhtml+xml;charset=UTF-8",
+  "content_length": null,
+  "byte_size": 0,
+  "location": "http://publications.europa.eu/resource/cellar/9b84d482-85bd-11ed-9887-01aa75ed71a1.0018.03/DOC_1",
+  "note": "Location is http://. Follow the same path over https. Do not request eur-lex.europa.eu."
+}

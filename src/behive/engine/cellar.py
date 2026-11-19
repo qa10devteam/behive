@@ -168,6 +168,62 @@ SELECT ?work ?celex WHERE {{
 _LANG_AL = {"POL": "pl", "ENG": "en", "ENU": "en"}
 
 
+_REDIRECTS = frozenset({301, 302, 303, 307, 308})
+# Last publication read: byte_size is len(body), never Content-Length.
+_last_http: dict = {"status": 0, "content_type": "", "byte_size": 0, "url": "", "error": ""}
+
+
+def _https_location(url: str) -> str:
+    """CELLAR 303 Location is http://. Follow the same path over https."""
+    parts = urllib.parse.urlsplit(url or "")
+    if parts.scheme.lower() == "http":
+        return urllib.parse.urlunsplit(("https", parts.netloc, parts.path, parts.query, parts.fragment))
+    return url
+
+
+def _is_eurlex(url: str) -> bool:
+    host = (urllib.parse.urlparse(url or "").hostname or "").lower()
+    return host == "eur-lex.europa.eu" or host.endswith(".eur-lex.europa.eu")
+
+
+def _header(headers, name: str) -> str:
+    getter = getattr(headers, "get", None)
+    if getter is None:
+        return ""
+    value = getter(name) or getter(name.lower())
+    return str(value) if value else ""
+
+
+def _status_of(resp) -> int:
+    return int(getattr(resp, "status", None) or getattr(resp, "code", None) or 0)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Leave 3xx to the caller so an http:// Location can be rewritten to https."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_once(req: urllib.request.Request, timeout: float):
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        return opener.open(req, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        return exc
+
+
+def _remember(status: int, content_type: str, byte_size: int, url: str, error: str) -> None:
+    global _last_http
+    _last_http = {
+        "status": status,
+        "content_type": content_type,
+        "byte_size": byte_size,
+        "url": url,
+        "error": error,
+    }
+
+
 def _http_html(url: str, extra_headers: Optional[dict] = None, max_bytes: int = 250_000) -> tuple[str, str]:
     headers = {
         "User-Agent": UA,
@@ -175,18 +231,55 @@ def _http_html(url: str, extra_headers: Optional[dict] = None, max_bytes: int = 
     }
     if extra_headers:
         headers.update(extra_headers)
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=20) as r:
-        if r.status != 200:
+    _remember(0, "", 0, "", "")
+    current = _https_location(url)
+    for _hop in range(6):
+        if _is_eurlex(current):
+            _remember(0, "", 0, current, "refused eur-lex.europa.eu")
             return "", ""
-        raw = r.read(max_bytes)
-        html = raw.decode("utf-8", "replace")
-        ctype = (r.headers.get("Content-Type") or "").lower()
-        if "rdf+xml" in ctype or html.lstrip().startswith("<rdf:RDF"):
-            return "", ""
-        if len(html) < 400:
-            return "", ""
-        return r.geturl(), html
+        req = urllib.request.Request(current, headers=headers)
+        try:
+            resp = _open_once(req, timeout=20)
+        except Exception as exc:
+            _remember(0, "", 0, current, f"{type(exc).__name__}: {exc}")
+            raise
+        try:
+            status = _status_of(resp)
+            if status in _REDIRECTS:
+                loc = _header(resp.headers, "Location")
+                if not loc:
+                    _remember(status, "", 0, current, "no_location")
+                    return "", ""
+                nxt = _https_location(urllib.parse.urljoin(current, loc))
+                if _is_eurlex(nxt):
+                    _remember(status, "", 0, nxt, "refused eur-lex.europa.eu")
+                    return "", ""
+                try:
+                    resp.read()
+                except Exception:
+                    pass
+                current = nxt
+                continue
+            raw = resp.read(max_bytes)
+            ctype = _header(resp.headers, "Content-Type")
+            final = resp.geturl() if hasattr(resp, "geturl") else current
+            error = raw.decode("utf-8", "replace") if status >= 400 else ""
+            # Measured from the bytes read. DOC_1 sends no Content-Length.
+            _remember(status, ctype, len(raw), final, error)
+            if status != 200:
+                return "", ""
+            html = raw.decode("utf-8", "replace")
+            if "rdf+xml" in ctype.lower() or html.lstrip().startswith("<rdf:RDF"):
+                return "", ""
+            if len(html) < 400:
+                return "", ""
+            return final, html
+        finally:
+            close = getattr(resp, "close", None)
+            if close:
+                close()
+    _remember(0, "", 0, current, "too_many_redirects")
+    return "", ""
 
 
 def celex_work_uri(celex: str) -> str:

@@ -45,6 +45,16 @@ NEWS_DOMAINS = {
 DEFAULT_WORKERS = 5
 JINA_BASE = "https://r.jina.ai/"
 REQUEST_TIMEOUT = 30
+# One legal-metadata fetch (CELEX / ELI / print) before the relevance filter; also capped by
+# the phase deadline (llm.deadline_call_timeout).
+LEGAL_RESCORE_FETCH_TIMEOUT_S = 30.0
+# One legal-act fetch in _harvest_one (CELLAR / ELI / print; a 700 KB act body is one call);
+# also capped by the phase deadline.
+LEGAL_FETCH_TIMEOUT_S = 60.0
+# Routes of route_legal() that fetch an act through the L1 fetchers.
+_LEGAL_ROUTES = ("cellar", "eli", "sejm_print")
+# LEX (Wolters Kluwer SIP) is login-only: BeHive never fetches it and never logs in.
+_LEX_HOST = "sip.lex.pl"
 # Fine-grained timeout for new aiohttp/httpx calls: connect=3s, read=8s
 _CONNECT_TIMEOUT = 3
 _READ_TIMEOUT = 8
@@ -141,6 +151,45 @@ def _cache_url(url: str) -> None:
 def clear_url_cache() -> None:
     """Clear the in-memory URL cache (e.g. between missions)."""
     _url_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# Skip log — one INFO line per skipped source, one summary per mission
+# ---------------------------------------------------------------------------
+# Fixed reason codes; never free text. byok_gap (LEX, no login) and legal_fetch_empty
+# (CELLAR / ELI / print returned nothing) are emitted by the legal dispatch.
+SKIP_REASONS = (
+    "score_filter",
+    "domain_blacklist",
+    "prescout_skip",
+    "drone_skip",
+    "cache_skip",
+    "byok_gap",
+    "legal_fetch_empty",
+)
+# Codes always shown in skip_summary (stable line shape); the rest only when counted.
+_SUMMARY_REASONS = SKIP_REASONS[:5]
+
+
+def note_skip(mission_id: str, url: str, reason: str, detail: str = "",
+              counts: "dict[str, int] | None" = None) -> None:
+    """Log one INFO line for a skipped source and bump counts[reason]."""
+    if reason not in SKIP_REASONS:
+        raise ValueError(f"unknown skip reason: {reason!r}")
+    detail = " ".join(str(detail).split())
+    log.info("skip mission=%s reason=%s url=%s detail=%s", mission_id, reason, url, detail)
+    if counts is not None:
+        counts[reason] = counts.get(reason, 0) + 1
+
+
+def skip_summary(mission_id: str, counts: "dict[str, int]", loaded: int, groomed: int) -> None:
+    """Log one INFO summary line per mission; skipped is the sum of the per-reason counts."""
+    reasons = list(_SUMMARY_REASONS) + [r for r in SKIP_REASONS[5:] if counts.get(r)]
+    parts = " ".join(f"{r}={counts.get(r, 0)}" for r in reasons)
+    log.info(
+        "skip_summary mission=%s loaded=%s groomed=%s skipped=%s %s",
+        mission_id, loaded, groomed, sum(counts.values()), parts,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +423,36 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
 
 
+def route_legal(url: str, routing_hint: str | None = None) -> str | None:
+    """Which L1 fetcher takes this URL: 'cellar' (CELEX), 'eli' (ELI act), 'sejm_print'.
+
+    Only URLs on a CELLAR / ELI / Sejm host qualify (legal_fetch_host), so a CELEX-looking
+    query on a foreign domain gets no route. 'api_json' only with the PreScout hint 'api_bee'
+    and only when the URL is not an act. None otherwise. Pure: never touches the network.
+    """
+    if not url:
+        return None
+    from behive.engine import legal_sources as ls
+
+    if ls.legal_fetch_host(url):
+        if ls.celex_from_url(url):
+            return "cellar"
+        if ls.eli_from_url(url):
+            return "eli"
+        if ls.sejm_print_from_url(url):
+            return "sejm_print"
+    if routing_hint == "api_bee":
+        return "api_json"
+    return None
+
+
+def _is_lex_url(url: str) -> bool:
+    try:
+        return (urlparse(url or "").hostname or "").lower() == _LEX_HOST
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Drone strategy helper — reads drone map from DB
@@ -410,6 +489,8 @@ class HarvesterBee:
         self.con = _get_db_connection(read_only=True)
         self.results: list[dict] = []
         self._method_counts: dict[str, int] = {}
+        self._skip_counts: dict[str, int] = {}
+        self._loaded_count = 0
         # ── PreScout routing hints (optional) ────────────────────────────────
         # Loaded from /tmp/hive_routing_<mission_id>.json if PreScout ran.
         # Maps url → routing_final (e.g. "skip", "api_bee", "pdf_drone", ...)
@@ -460,7 +541,10 @@ class HarvesterBee:
         if not sources:
             log.warning("No pending sources found for this mission.")
             self._finalize(0)
+            skip_summary(self.mission_id, self.__dict__.setdefault("_skip_counts", {}), 0, 0)
             return
+        self._loaded_count = len(sources)
+        self._log_score_filter_skips(sources)
 
         # Show how many were filtered
         total_pending = self.con.execute(
@@ -488,7 +572,26 @@ class HarvesterBee:
             from behive.engine.domain_reputation import get_reputation
             _rep = get_reputation()
             before = len(sources)
-            sources = [s for s in sources if not _rep.should_skip(s.get("url", ""))]
+            kept, groomed_out = [], []
+            for s in sources:
+                _u = s.get("url", "")
+                if not _rep.should_skip(_u):
+                    kept.append(s)
+                elif route_legal(_u) in _LEGAL_ROUTES:
+                    # Narrow exception, not an amnesty: an act reachable via CELLAR / ELI /
+                    # print is fetched without touching the blacklisted host's page. The
+                    # domain stays blacklisted; every other URL of it is still groomed.
+                    kept.append(s)
+                else:
+                    groomed_out.append(s)
+            sources = kept
+            for s in groomed_out:
+                _u = s.get("url", "")
+                if _is_lex_url(_u):
+                    # LEX is login-only: a BYOK gap, not a "bad domain".
+                    self._note_skip(_u, "byok_gap", "lex_login_required")
+                else:
+                    self._note_skip(_u, "domain_blacklist", self._blacklist_reason(_rep, _u))
             if len(sources) < before:
                 log.info(f"🐝 Grooming: {before - len(sources)} sources removed by domain reputation")
         except Exception as _re:
@@ -587,6 +690,7 @@ class HarvesterBee:
         # Fix #4: skip re-fetching already-seen URLs within this run
         if _is_url_cached(url):
             log.debug(f"  URL cache hit — skipping re-fetch: {url}")
+            self._note_skip(url, "cache_skip", "duplicate_url")
             base["method"] = "cache_skip"
             base["error"] = "duplicate url in mission run"
             return base
@@ -606,16 +710,30 @@ class HarvesterBee:
         # Blokada zidentyfikowana przez trutnie — skip od razu, nie marnuj czasu
         if strategy == "SKIP":
             log.debug(f"  Drone: SKIP {dom} (wall not bypassed)")
+            self._note_skip(url, "drone_skip", drone_strategy.get("block_type", "unknown"))
             base["method"] = "drone_skip"
             base["error"]  = f"drone_blocked: {drone_strategy.get('block_type', 'unknown')}"
             return base
 
         # ── PreScout routing hint — skip if BeeMaster rejected ────────────
-        if url in self._prescout_skip and source.get("source_type") != "operator_seed":
+        # (a 'cellar' hint is a decision to fetch via CELLAR, never a skip)
+        if (url in self._prescout_skip and source.get("source_type") != "operator_seed"
+                and getattr(self, "_routing_hints", {}).get(url) != "cellar"):
             log.debug(f"  PreScout: SKIP {url} (approved=False by BeeMaster)")
+            self._note_skip(url, "prescout_skip", "routing_final=skip")
             base["method"] = "prescout_skip"
             base["error"]  = "skipped_by_prescout"
             return base
+
+        # ── LEX (sip.lex.pl): login-only. No fetch, no login, no fallback chain ──
+        if _is_lex_url(url):
+            self._note_skip(url, "byok_gap", "lex_login_required")
+            base["method"] = "byok_gap"
+            base["error"]  = "byok_gap: lex_login_required"
+            return base
+
+        # ── Legal sources: act via CELLAR / ELI / Sejm print, before the extension branch ──
+        legal_route = route_legal(url, getattr(self, "_routing_hints", {}).get(url))
 
         # Required delays (rate-limiting — drones measured threshold)
         if delay_ms > 0:
@@ -623,7 +741,19 @@ class HarvesterBee:
 
 
         try:
-            if ext == ".pdf":
+            legal_result = None
+            if legal_route in _LEGAL_ROUTES:
+                legal_result = await self._harvest_legal(url, legal_route)
+            elif legal_route == "api_json":
+                legal_result = await asyncio.get_event_loop().run_in_executor(
+                    None, self._harvest_json, url
+                )
+                if not legal_result.get("success"):
+                    legal_result = None  # not JSON after all: the old path decides
+
+            if legal_result is not None:
+                base.update(legal_result)
+            elif ext == ".pdf":
                 result = await asyncio.get_event_loop().run_in_executor(
                     None, self._harvest_pdf, url
                 )
@@ -640,14 +770,14 @@ class HarvesterBee:
                 result = await self._harvest_web(url)
                 base.update(result)
 
-            # Fallback chain
-            if base["word_count"] < 150:
+            # Fallback chain (never for a legal result: a third-party proxy must not refetch an act)
+            if legal_result is None and base["word_count"] < 150:
                 log.debug(f"  word_count={base['word_count']} < 150 → trying Jina")
                 jina_result = await self._harvest_jina(url)
                 if jina_result["word_count"] > base["word_count"]:
                     base.update(jina_result)
 
-            if base["word_count"] < 100:
+            if legal_result is None and base["word_count"] < 100:
                 log.debug(f"  word_count={base['word_count']} < 100 → trying crawl4ai")
                 c4a_result = await self._harvest_crawl4ai(url)
                 if c4a_result["word_count"] > base["word_count"]:
@@ -657,6 +787,22 @@ class HarvesterBee:
             log.warning(f"  harvest_one failed for {url}: {exc}")
             base["error"] = str(exc)
             base["success"] = False
+
+        # Phase deadline: the act was not started. Work is deferred — not a failed harvest,
+        # no reputation entry, not cached.
+        if base.get("deferred"):
+            return base
+
+        # Empty legal fetch (WAF page, 0 words, CELLAR refusal): logged, and never a bad
+        # result for the domain, so a WAF reply cannot push consecutive_bad to a blacklist.
+        if legal_route in _LEGAL_ROUTES and not base["text"]:
+            self._note_skip(url, "legal_fetch_empty", base.get("error") or "empty")
+            base["success"] = False
+            base["word_count"] = 0
+            _cache_url(url)
+            m = base["method"]
+            self._method_counts[m] = self._method_counts.get(m, 0) + 1
+            return base
 
         # Post-process
         if base["text"]:
@@ -725,6 +871,92 @@ class HarvesterBee:
             result["text"] = text
             result["word_count"] = len(text.split())
             result["success"] = True
+        except Exception as exc:
+            log.debug(f"Exception in harvest.py: {exc}")
+            result["error"] = str(exc)
+        return result
+
+    def _legal_fetch_sync(self, url: str, route: str):
+        """Blocking: the L1 fetcher for this route, then HTML → plain text. Returns (LegalFetch, text)."""
+        from behive.engine import legal_sources as ls
+
+        if route == "cellar":
+            got = ls.fetch_celex_text(ls.celex_from_url(url))
+        elif route == "eli":
+            publisher, year, pos = ls.eli_from_url(url)  # type: ignore[misc]
+            got = ls.fetch_eli_act(publisher, year, pos)
+        else:
+            term, number = ls.sejm_print_from_url(url)  # type: ignore[misc]
+            got = ls.fetch_sejm_print(term, number)
+        text = got.text or ""
+        if got.ok and text:
+            ctype = (got.content_type or "").lower()
+            if "html" in ctype or "xml" in ctype or text.lstrip().startswith("<"):
+                text = _html_to_text(text)
+            else:
+                text = text.strip()
+        return got, text
+
+    async def _harvest_legal(self, url: str, route: str) -> dict:
+        """Fetch an act through CELLAR / ELI / a Sejm print (never eur-lex.europa.eu).
+
+        Runs the blocking L1 fetcher in an executor, capped by LEGAL_FETCH_TIMEOUT_S and the
+        phase deadline. A phase deadline defers the work (deferred=True); any other failure
+        or an empty text is a result with text == "" and the reason in error.
+        """
+        from behive.engine.llm import PhaseDeadlineExceeded, deadline_call_timeout
+
+        result = {"method": route, "text": "", "word_count": 0, "success": False, "title": ""}
+        try:
+            timeout = deadline_call_timeout(LEGAL_FETCH_TIMEOUT_S, "legal_harvest")
+        except PhaseDeadlineExceeded:
+            result["error"] = "phase_deadline"
+            result["deferred"] = True
+            return result
+        loop = asyncio.get_running_loop()
+        try:
+            got, text = await asyncio.wait_for(
+                loop.run_in_executor(None, self._legal_fetch_sync, url, route), timeout
+            )
+        except asyncio.TimeoutError:
+            result["error"] = "legal_fetch: timeout"
+            return result
+        except Exception as exc:
+            result["error"] = f"legal_fetch: {type(exc).__name__}"
+            return result
+        result["title"] = got.title or ""
+        if got.ok:
+            err = _web_text_error(text) if text else "empty_text"
+            if err is None:
+                result["text"] = text
+                result["word_count"] = len(text.split())
+                result["success"] = True
+            else:
+                result["error"] = f"legal_fetch: {err}"
+        else:
+            result["error"] = f"legal_fetch: {got.reason or 'empty'}"
+        return result
+
+    def _harvest_json(self, url: str) -> dict:
+        """api_bee endpoint: GET with Accept: application/json, body kept as text (no HTML extractor)."""
+        result = {"method": "api_json", "text": "", "word_count": 0, "success": False}
+        requests = _get_requests()  # lazy import
+        if requests is None:
+            result["error"] = "requests not installed"
+            return result
+        try:
+            resp = requests.get(
+                url, timeout=REQUEST_TIMEOUT,
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            )
+            resp.raise_for_status()
+            if "json" not in (resp.headers.get("Content-Type") or "").lower():
+                result["error"] = "not_json"
+                return result
+            text = (resp.text or "").strip()
+            result["text"] = text
+            result["word_count"] = len(text.split())
+            result["success"] = bool(text)
         except Exception as exc:
             log.debug(f"Exception in harvest.py: {exc}")
             result["error"] = str(exc)
@@ -1028,8 +1260,178 @@ class HarvesterBee:
     # DB persistence
     # ------------------------------------------------------------------
 
+    def _note_skip(self, url: str, reason: str, detail: str = "") -> None:
+        # setdefault: tests build HarvesterBee via __new__ without __init__
+        counts = self.__dict__.setdefault("_skip_counts", {})
+        note_skip(self.mission_id, url, reason, detail, counts)
+
+    @staticmethod
+    def _blacklist_reason(rep, url: str) -> str:
+        """Blacklist reason of the URL's domain (read from the reputation cache); '' if unknown."""
+        try:
+            from behive.engine.domain_reputation import _extract_domain
+            rec = rep._load(_extract_domain(url))
+            return (rec or {}).get("blacklist_reason", "") or ""
+        except Exception as e:
+            log.debug(f"Suppressed: {e}")
+            return ""
+
+    def _log_score_filter_skips(self, sources: list[dict]) -> None:
+        """INFO skip line for every pending/scouted row of this mission that
+        _load_pending_sources did not load. Read-only; never changes what is harvested.
+        Operator seeds are always loaded, so they never appear here."""
+        try:
+            loaded_ids = {s.get("source_id") for s in sources}
+            rows = self.con.execute("""
+                SELECT id, url, score_relevance, score_total
+                FROM hive_sources
+                WHERE mission_id = ?
+                  AND status IN ('pending', 'scouted')
+                  AND source_type IS DISTINCT FROM 'operator_seed'
+                ORDER BY id
+            """, [self.mission_id]).fetchall()
+            for sid, url, rel, total in rows:
+                if sid not in loaded_ids:
+                    self._note_skip(url or "", "score_filter", f"relevance={rel} total={total}")
+        except Exception as exc:
+            log.debug(f"score_filter skip log failed (non-critical): {exc}")
+
+    def _legal_meta_fetch(self, kind: str, ident) -> tuple[str, str]:
+        """(metadata title, reason) for one CELEX / ELI act / print, from the L1 fetchers.
+
+        One call is bounded by LEGAL_RESCORE_FETCH_TIMEOUT_S and by the phase deadline;
+        PhaseDeadlineExceeded propagates (nothing was started). A failure is (\"\", reason).
+        """
+        import concurrent.futures as _cf
+        from behive.engine import legal_sources as _ls
+        from behive.engine.llm import deadline_call_timeout
+
+        timeout = deadline_call_timeout(LEGAL_RESCORE_FETCH_TIMEOUT_S, "legal_rescore")
+        if kind == "celex":
+            fn, args = _ls.fetch_celex_text, (ident,)
+        elif kind == "eli":
+            fn, args = _ls.fetch_eli_act, tuple(ident)
+        else:
+            fn, args = _ls.fetch_sejm_print, tuple(ident)
+        pool = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="legal-rescore")
+        try:
+            got = pool.submit(fn, *args).result(timeout=timeout)
+        except _cf.TimeoutError:
+            return "", "timeout"
+        except Exception as exc:
+            return "", f"fetch_error: {type(exc).__name__}"
+        finally:
+            pool.shutdown(wait=False)
+        title = " ".join(str(getattr(got, "title", "") or "").split())
+        if title:
+            return title, ""
+        return "", str(getattr(got, "reason", "") or "no_title")
+
+    def _rescore_legal_sources(self) -> None:
+        """Score pending/scouted rows with a URL-like title or a CELEX/ELI/print id by their
+        metadata title, before the 5/15 filter. Only the score columns (and the title, when
+        the old one is URL-like) of the existing row id change; the threshold, the cap and
+        operator_seed rows are not touched. A failed, slow or too-late fetch leaves the row
+        and is logged at INFO with a reason. One CELEX is fetched once per run."""
+        from behive.engine import legal_sources as ls
+        from behive.engine.llm import PhaseDeadlineExceeded
+
+        mission = self.mission_id
+        row = self.con.execute("SELECT topic FROM hive_missions WHERE id = ?", [mission]).fetchone()
+        topic = (row[0] if row else "") or ""
+        rows = self.con.execute("""
+            SELECT id, url, title, snippet, source_type, score_total, score_relevance,
+                   score_freshness, score_authority, score_depth
+            FROM hive_sources
+            WHERE mission_id = ?
+              AND status IN ('pending', 'scouted')
+              AND source_type IS DISTINCT FROM 'operator_seed'
+            ORDER BY id
+        """, [mission]).fetchall()
+        candidates = []
+        for r in rows:
+            url = r[1] or ""
+            if ls.celex_from_url(url):
+                key = ("celex", ls.celex_from_url(url))
+            elif ls.eli_from_url(url):
+                key = ("eli", ls.eli_from_url(url))
+            elif ls.sejm_print_from_url(url):
+                key = ("print", ls.sejm_print_from_url(url))
+            else:
+                key = None
+            if key is not None or ls.url_like_title(r[2] or "", url):
+                candidates.append((r, key))
+        if not candidates:
+            return
+
+        def _skip(url: str, reason: str) -> None:
+            code, _, detail = reason.partition(":")
+            log.info("legal_rescore skip mission=%s url=%s reason=%s detail=%s",
+                     mission, url, code.strip(), detail.strip())
+
+        cache: dict = {}
+        deadline_hit = False
+        rescored = unchanged = skipped = 0
+        updates = []
+        for (sid, url, title, snippet, stype, total, rel, fresh, auth, depth), key in candidates:
+            if key is None:
+                skipped += 1
+                _skip(url, "no_identifier")
+                continue
+            if not topic:
+                skipped += 1
+                _skip(url, "no_topic")
+                continue
+            if key not in cache:
+                if deadline_hit:
+                    skipped += 1
+                    _skip(url, "phase_deadline")
+                    continue
+                try:
+                    cache[key] = self._legal_meta_fetch(*key)
+                except PhaseDeadlineExceeded:
+                    deadline_hit = True
+                    skipped += 1
+                    _skip(url, "phase_deadline")
+                    continue
+            meta_title, reason = cache[key]
+            if not meta_title:
+                skipped += 1
+                _skip(url, reason or "no_title")
+                continue
+            new = ls.rescore_legal_source(topic, url, title or "", snippet or "", meta_title,
+                                          source_type=stype or "web")
+            new_title = meta_title[:512] if ls.url_like_title(title or "", url) else (title or "")
+            old = (title or "", total, rel, fresh, auth, depth)
+            want = (new_title, new["score_total"], new["score_relevance"],
+                    new["score_freshness"], new["score_authority"], new["score_depth"])
+            if want == old:
+                unchanged += 1
+                continue
+            updates.append((sid, want))
+        if updates:
+            with self._write_con() as wcon:
+                for sid, w in updates:
+                    wcon.execute(
+                        "UPDATE hive_sources SET title = ?, score_total = ?, score_relevance = ?, "
+                        "score_freshness = ?, score_authority = ?, score_depth = ? "
+                        "WHERE id = ? AND mission_id = ? AND status IN ('pending', 'scouted')",
+                        [*w, sid, mission])
+                    rescored += 1
+        log.info("legal_rescore mission=%s candidates=%d rescored=%d unchanged=%d skipped=%d fetches=%d",
+                 mission, len(candidates), rescored, unchanged, skipped, len(cache))
+
+    def _rescore_before_filter(self) -> None:
+        """Never lets the rescore step stop the load: on any error the rows stay as scouted."""
+        try:
+            self._rescore_legal_sources()
+        except Exception as exc:
+            log.info("legal_rescore mission=%s failed reason=%s", self.mission_id, type(exc).__name__)
+            log.debug(f"legal_rescore failed (non-critical): {exc}")
+
     def _load_pending_sources(self) -> list[dict]:
         try:
+            self._rescore_before_filter()
             # MAX_HARVEST = 300 top-scoring sources per mission
             # Filtr: score_relevance >= 5 (entity anchoring: sources without entity name penalized by -5)
             #        score_total >= 15 (eliminuje losowy szum)
@@ -1144,6 +1546,8 @@ class HarvesterBee:
                             log.error(f"DB save error for {r.get('url','?')}: {exc}")
                             failed += 1
                     else:
+                        if r.get("deferred"):
+                            continue  # phase deadline: the row stays as it was, to be harvested later
                         try:
                             wcon.execute("""
                                 UPDATE hive_sources
@@ -1225,6 +1629,11 @@ class HarvesterBee:
         for method, count in sorted(self._method_counts.items()):
             log.debug(f"    {method:<30} {count}")
         log.debug("=" * 60 + "\n")
+        counts = self.__dict__.setdefault("_skip_counts", {})
+        skip_summary(
+            self.mission_id, counts, getattr(self, "_loaded_count", total_sources),
+            counts.get("domain_blacklist", 0),
+        )
 
 
 # ---------------------------------------------------------------------------

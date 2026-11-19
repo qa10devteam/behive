@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "url": "https://api.sejm.gov.pl/sejm/term10/prints/2608",
+  "accept": "application/json",
+  "status": 200,
+  "content_type": "application/json",
+  "byte_size": 329,
+  "pdf_url": "https://api.sejm.gov.pl/sejm/term10/prints/2608/2608.pdf",
+  "note": "Print metadata only (329 B). Attachment PDF is not stored. Title comes from this JSON, not from 2608.pdf."
+}
