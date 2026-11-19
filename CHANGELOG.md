@@ -2,6 +2,23 @@
 
 All notable changes to BeHive are documented here.
 
+## [0.8.0] — 2026-11-19
+
+### Added
+- Primary legal sources: CELEX, ELI and Sejm-print identifiers are read from source URLs; acts are fetched through the EU Publications Office (CELLAR), the ELI API and the Sejm API instead of the EUR-Lex website (which answers bots with an empty HTTP 202 page). CELEX ids with a parenthesised suffix such as `52023XC0914(01)` are kept intact
+- Pre-scout routes an EUR-Lex act with a CELEX id to CELLAR (`legal_act` / `cellar`) when EUR-Lex answers its HEAD request with the empty 202 page, and treats LEX (`sip.lex.pl`, login only) as a BYOK gap; no login is attempted
+- Harvest fetches legal acts through those APIs even when the EUR-Lex or Sejm domain is on the reputation blacklist (only acts; every other URL of a blacklisted domain is still removed and the domain stays blacklisted); an empty legal fetch never counts against the domain
+- Within one harvest run each act is stored once; further URLs of the same act are skipped as `duplicate_act`
+- Sources whose stored title is a URL are rescored by the act's official title before the 5/15 relevance filter; a rescore never lowers a source's scores and never drops a source below the filter
+- One INFO log line per skipped source with a fixed reason (`score_filter`, `domain_blacklist`, `prescout_skip`, `drone_skip`, `cache_skip`, `byok_gap`, `legal_fetch_empty`) and one `skip_summary` line per mission
+- Optional reasoning effort per mission (`reasoning_effort`: `low`, `medium` or `high`) and optionally a different one for the report synthesis (`synthesis_effort`), in `POST /research` and the MCP `research_topic` tool; sent to the model bridge as `X-BeHive-Effort`; without the fields nothing changes
+
+### Changed
+- CI runs on GitHub-hosted runners with a PostgreSQL service container; the test suite routes every direct database connection through its safety guard (a connection to the production database name outside an isolated test network is refused) and terminates pipeline processes a test leaves running
+
+### Removed
+- Dead writes to the `hive3_mission_memory` and `hive3_calibration_log` tables (absent in deployed databases) and the broken "intelligence closure" call in the synthesis
+
 ## [0.7.0] — 2026-11-17
 
 ### Added
