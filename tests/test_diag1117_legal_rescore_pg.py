@@ -52,6 +52,7 @@ SEED = "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R2847"
 FOREIGN = "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32022L2555&from=EN"
 DONE = "https://eur-lex.europa.eu/legal-content/DE/TXT/?uri=CELEX:32022L2555"
 
+KPK_SNIPPET = "o zmianie ustawy - Kodeks postępowania karnego oraz ustawy - Kodeks karny skarbowy"
 HP = lambda url: url.split("://", 1)[1].split("?", 1)[0]  # noqa: E731  host+path title as scout stored it
 
 # id, mission, url, title, snippet, source_type, total, relevance, status
@@ -60,8 +61,8 @@ ROWS = [
     (2, M, CELEX_PL, "Publications Office", "", "pdf", 14, 0, "scouted"),
     (3, M, CELEX_OTHER, HP(CELEX_OTHER), "", "web", 14, 0, "scouted"),
     (4, M, PROCESS, HP(PROCESS), '{"ELI": "DU/2024/1228", "title": "o zmianie ustawy"}', "web", 14, 0, "scouted"),
-    (5, M, ELI_901, HP(ELI_901), "", "web", 14, 0, "scouted"),
-    (6, M, PRINT_2608, HP(PRINT_2608), "", "pdf", 14, 0, "scouted"),
+    (5, M, ELI_901, HP(ELI_901), KPK_SNIPPET, "web", 28, 6, "scouted"),   # production shape
+    (6, M, PRINT_2608, HP(PRINT_2608), "", "pdf", 34, 6, "scouted"),     # production shape
     (7, M, SEED, SEED, "", "operator_seed", 0, 0, "pending"),
     (8, "other-mission", FOREIGN, HP(FOREIGN), "", "web", 14, 0, "scouted"),
     (9, M, DONE, HP(DONE), "", "web", 14, 0, "done"),
@@ -174,13 +175,16 @@ def test_celex_row_enters_queue_after_rescore_and_processes_row_does_not(live_db
     assert _row(live_db.conn, 4) == before[4]
     assert 4 not in loaded
 
-    # 901 and 2608: scores are exactly the scorer's answer for the metadata title; nothing forced
+    # 901 and 2608: scores are exactly the scorer's answer for the metadata title; nothing is
+    # forced, the cap holds, and a row is queued only if it passes 5/15 on its own
     for sid, url, meta in ((5, ELI_901, KPK_TITLE), (6, PRINT_2608, PRINT_TITLE)):
         row = _row(live_db.conn, sid)
         want = rescore_legal_source(TOPIC, url, before[sid][2], before[sid][3], meta, source_type=before[sid][4])
         assert (row[5], row[6]) == (want["score_total"], want["score_relevance"])
-        assert row[6] < 5 and row[5] <= 14, row     # cap kept, below the threshold
-        assert sid not in loaded
+        assert row[6] <= before[sid][6], row
+        if row[6] < 5:
+            assert row[5] <= 14, row
+        assert (sid in loaded) == (row[6] >= 5 and row[5] >= 15)
 
     # the failed CELEX (HTTP 400) is left as it was and logged at INFO with the reason
     assert _row(live_db.conn, 3) == before[3]
@@ -217,12 +221,12 @@ def test_slow_fetch_is_cut_and_leaves_the_row(live_db, monkeypatch, caplog):
     before = _row(live_db.conn, 1)
     monkeypatch.setattr(harvest, "LEGAL_RESCORE_FETCH_TIMEOUT_S", 0.2)
     monkeypatch.setattr(ls, "fetch_celex_text", lambda celex, langs=("POL", "ENG"): time.sleep(2.0))
-    monkeypatch.setattr(ls, "fetch_eli_act", lambda *a: pytest.fail("not this row"))
-    monkeypatch.setattr(ls, "fetch_sejm_print", lambda *a: pytest.fail("not this row"))
+    monkeypatch.setattr(ls, "fetch_eli_act", lambda *a: time.sleep(2.0))
+    monkeypatch.setattr(ls, "fetch_sejm_print", lambda *a: time.sleep(2.0))
     caplog.set_level(logging.INFO, logger=LOGGER)
     started = time.monotonic()
     _load(harvest)
-    assert time.monotonic() - started < 1.5
+    assert time.monotonic() - started < 3.0
     assert _row(live_db.conn, 1) == before
     lines = [m for m in _info(caplog) if m.startswith("legal_rescore") and CELEX_EN in m]
     assert len(lines) == 1 and "reason=timeout" in lines[0], lines

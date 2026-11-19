@@ -98,17 +98,24 @@ def test_url_like_title_is_replaced_by_meta_title_not_appended(monkeypatch):
     assert EURLEX_EN_HOST_PATH not in title
 
 
-def test_meta_title_of_a_criminal_code_act_does_not_pass_this_topic():
-    """901 and 2608 get their real titles and are not forced through the threshold."""
+def test_criminal_code_titles_are_scored_by_the_scorer_and_not_lifted():
+    """901 and 2608 get their real titles. Nothing is forced: the result is exactly what the
+    scout scorer says for (url, meta title, snippet), relevance is not above the stored
+    production relevance (6 for both), and the cap holds below 5. The scorer matches the topic
+    word "ustawa" in any statute title, so these titles do reach relevance 5; that is the
+    scorer's answer, not something rescore adds or removes."""
     from behive.engine.legal_sources import rescore_legal_source
 
-    for url, host_path, meta in (
-        (ELI_901, "api.sejm.gov.pl/eli/acts/DU/2026/901", KPK_TITLE),
-        (PRINT_2608, "api.sejm.gov.pl/sejm/term10/prints/2608/2608.pdf", PRINT_TITLE),
+    for url, host_path, meta, snippet, old_rel in (
+        (ELI_901, "api.sejm.gov.pl/eli/acts/DU/2026/901", KPK_TITLE,
+         "o zmianie ustawy - Kodeks postępowania karnego oraz ustawy - Kodeks karny skarbowy", 6),
+        (PRINT_2608, "api.sejm.gov.pl/sejm/term10/prints/2608/2608.pdf", PRINT_TITLE, "", 6),
     ):
-        got = rescore_legal_source(TOPIC, url, host_path, "", meta)
-        assert got["score_relevance"] < 5, (url, got)
-        assert got["score_total"] <= 14, (url, got)
+        got = rescore_legal_source(TOPIC, url, host_path, snippet, meta)
+        assert got == _scout_score(url, meta, snippet), url
+        assert got["score_relevance"] <= old_rel, (url, got)
+        if got["score_relevance"] < 5:
+            assert got["score_total"] <= 14, (url, got)
 
 
 def test_cap_stays_for_any_title_below_relevance_5():

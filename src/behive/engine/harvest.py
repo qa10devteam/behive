@@ -45,6 +45,9 @@ NEWS_DOMAINS = {
 DEFAULT_WORKERS = 5
 JINA_BASE = "https://r.jina.ai/"
 REQUEST_TIMEOUT = 30
+# One legal-metadata fetch (CELEX / ELI / print) before the relevance filter; also capped by
+# the phase deadline (llm.deadline_call_timeout).
+LEGAL_RESCORE_FETCH_TIMEOUT_S = 30.0
 # Fine-grained timeout for new aiohttp/httpx calls: connect=3s, read=8s
 _CONNECT_TIMEOUT = 3
 _READ_TIMEOUT = 8
@@ -1116,8 +1119,142 @@ class HarvesterBee:
         except Exception as exc:
             log.debug(f"score_filter skip log failed (non-critical): {exc}")
 
+    def _legal_meta_fetch(self, kind: str, ident) -> tuple[str, str]:
+        """(metadata title, reason) for one CELEX / ELI act / print, from the L1 fetchers.
+
+        One call is bounded by LEGAL_RESCORE_FETCH_TIMEOUT_S and by the phase deadline;
+        PhaseDeadlineExceeded propagates (nothing was started). A failure is (\"\", reason).
+        """
+        import concurrent.futures as _cf
+        from behive.engine import legal_sources as _ls
+        from behive.engine.llm import deadline_call_timeout
+
+        timeout = deadline_call_timeout(LEGAL_RESCORE_FETCH_TIMEOUT_S, "legal_rescore")
+        if kind == "celex":
+            fn, args = _ls.fetch_celex_text, (ident,)
+        elif kind == "eli":
+            fn, args = _ls.fetch_eli_act, tuple(ident)
+        else:
+            fn, args = _ls.fetch_sejm_print, tuple(ident)
+        pool = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="legal-rescore")
+        try:
+            got = pool.submit(fn, *args).result(timeout=timeout)
+        except _cf.TimeoutError:
+            return "", "timeout"
+        except Exception as exc:
+            return "", f"fetch_error: {type(exc).__name__}"
+        finally:
+            pool.shutdown(wait=False)
+        title = " ".join(str(getattr(got, "title", "") or "").split())
+        if title:
+            return title, ""
+        return "", str(getattr(got, "reason", "") or "no_title")
+
+    def _rescore_legal_sources(self) -> None:
+        """Score pending/scouted rows with a URL-like title or a CELEX/ELI/print id by their
+        metadata title, before the 5/15 filter. Only the score columns (and the title, when
+        the old one is URL-like) of the existing row id change; the threshold, the cap and
+        operator_seed rows are not touched. A failed, slow or too-late fetch leaves the row
+        and is logged at INFO with a reason. One CELEX is fetched once per run."""
+        from behive.engine import legal_sources as ls
+        from behive.engine.llm import PhaseDeadlineExceeded
+
+        mission = self.mission_id
+        row = self.con.execute("SELECT topic FROM hive_missions WHERE id = ?", [mission]).fetchone()
+        topic = (row[0] if row else "") or ""
+        rows = self.con.execute("""
+            SELECT id, url, title, snippet, source_type, score_total, score_relevance,
+                   score_freshness, score_authority, score_depth
+            FROM hive_sources
+            WHERE mission_id = ?
+              AND status IN ('pending', 'scouted')
+              AND source_type IS DISTINCT FROM 'operator_seed'
+            ORDER BY id
+        """, [mission]).fetchall()
+        candidates = []
+        for r in rows:
+            url = r[1] or ""
+            if ls.celex_from_url(url):
+                key = ("celex", ls.celex_from_url(url))
+            elif ls.eli_from_url(url):
+                key = ("eli", ls.eli_from_url(url))
+            elif ls.sejm_print_from_url(url):
+                key = ("print", ls.sejm_print_from_url(url))
+            else:
+                key = None
+            if key is not None or ls.url_like_title(r[2] or "", url):
+                candidates.append((r, key))
+        if not candidates:
+            return
+
+        def _skip(url: str, reason: str) -> None:
+            code, _, detail = reason.partition(":")
+            log.info("legal_rescore skip mission=%s url=%s reason=%s detail=%s",
+                     mission, url, code.strip(), detail.strip())
+
+        cache: dict = {}
+        deadline_hit = False
+        rescored = unchanged = skipped = 0
+        updates = []
+        for (sid, url, title, snippet, stype, total, rel, fresh, auth, depth), key in candidates:
+            if key is None:
+                skipped += 1
+                _skip(url, "no_identifier")
+                continue
+            if not topic:
+                skipped += 1
+                _skip(url, "no_topic")
+                continue
+            if key not in cache:
+                if deadline_hit:
+                    skipped += 1
+                    _skip(url, "phase_deadline")
+                    continue
+                try:
+                    cache[key] = self._legal_meta_fetch(*key)
+                except PhaseDeadlineExceeded:
+                    deadline_hit = True
+                    skipped += 1
+                    _skip(url, "phase_deadline")
+                    continue
+            meta_title, reason = cache[key]
+            if not meta_title:
+                skipped += 1
+                _skip(url, reason or "no_title")
+                continue
+            new = ls.rescore_legal_source(topic, url, title or "", snippet or "", meta_title,
+                                          source_type=stype or "web")
+            new_title = meta_title[:512] if ls.url_like_title(title or "", url) else (title or "")
+            old = (title or "", total, rel, fresh, auth, depth)
+            want = (new_title, new["score_total"], new["score_relevance"],
+                    new["score_freshness"], new["score_authority"], new["score_depth"])
+            if want == old:
+                unchanged += 1
+                continue
+            updates.append((sid, want))
+        if updates:
+            with self._write_con() as wcon:
+                for sid, w in updates:
+                    wcon.execute(
+                        "UPDATE hive_sources SET title = ?, score_total = ?, score_relevance = ?, "
+                        "score_freshness = ?, score_authority = ?, score_depth = ? "
+                        "WHERE id = ? AND mission_id = ? AND status IN ('pending', 'scouted')",
+                        [*w, sid, mission])
+                    rescored += 1
+        log.info("legal_rescore mission=%s candidates=%d rescored=%d unchanged=%d skipped=%d fetches=%d",
+                 mission, len(candidates), rescored, unchanged, skipped, len(cache))
+
+    def _rescore_before_filter(self) -> None:
+        """Never lets the rescore step stop the load: on any error the rows stay as scouted."""
+        try:
+            self._rescore_legal_sources()
+        except Exception as exc:
+            log.info("legal_rescore mission=%s failed reason=%s", self.mission_id, type(exc).__name__)
+            log.debug(f"legal_rescore failed (non-critical): {exc}")
+
     def _load_pending_sources(self) -> list[dict]:
         try:
+            self._rescore_before_filter()
             # MAX_HARVEST = 300 top-scoring sources per mission
             # Filtr: score_relevance >= 5 (entity anchoring: sources without entity name penalized by -5)
             #        score_total >= 15 (eliminuje losowy szum)

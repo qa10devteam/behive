@@ -405,3 +405,48 @@ def fetch_sejm_print(term: int, number: str) -> LegalFetch:
             http_status=int(got.get("status") or 0),
         )
     return _pdf_fetch(source="sejm_print", identifier=ident, title=title, pdf_url=f"{meta_url}/{pdf_name}")
+
+
+_META_TEXT_CHARS = 2000
+_scorers: dict = {}
+
+
+def _scout_scorer(topic: str):
+    """An existing-scorer instance for the topic. SwarmScout.__init__ opens a database
+    connection and a thread pool; scoring needs only the topic, so it is skipped."""
+    from behive.engine.scout import SwarmScout
+
+    scorer = _scorers.get(topic)
+    if scorer is None:
+        scorer = SwarmScout.__new__(SwarmScout)
+        scorer.topic = topic
+        if len(_scorers) >= 8:
+            _scorers.clear()
+        _scorers[topic] = scorer
+    return scorer
+
+
+def rescore_legal_source(
+    topic: str,
+    url: str,
+    title: str,
+    snippet: str,
+    meta_title: str,
+    meta_text: str = "",
+    source_type: str = "web",
+) -> dict:
+    """Score a legal source by its metadata title instead of its URL.
+
+    Calls the scout scorer (SwarmScout._score_source); the 5/15 harvest threshold and the
+    cap (relevance < 5 -> total <= 14) live there and are not touched. A URL-like stored
+    title is replaced by meta_title + meta_text (never host+path). Any other stored title
+    is kept and meta_title is added to it, so another manifestation of the same act (an
+    English EUR-Lex row of a Polish CELEX title) is scored on the act's own title. An
+    empty meta_title scores the stored inputs, i.e. the old scores.
+    """
+    meta_title = (meta_title or "").strip()
+    scored_title = title or ""
+    if meta_title:
+        meta = f"{meta_title} {(meta_text or '').strip()[:_META_TEXT_CHARS]}".strip()
+        scored_title = meta if url_like_title(title, url) else f"{scored_title} {meta}".strip()
+    return _scout_scorer(topic)._score_source(url, scored_title, snippet or "", source_type or "web")
