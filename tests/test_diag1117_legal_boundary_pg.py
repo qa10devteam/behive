@@ -10,8 +10,9 @@ sit on blacklisted domains and are groomed: 0 of 59 harvested. After the fix eve
 exactly one bucket and the skip_summary line adds up:
 
   * eur-lex.europa.eu CELEX rows (above 5/15, and the below ones once rescored by the Polish title
-    of the CELEX) are harvested by method cellar although the domain stays blacklisted, with
-    hive_content ids from hive_content_seq;
+    of the CELEX): one act, one row per run - the first URL is harvested by method cellar although
+    the domain stays blacklisted, the others skip as cache_skip duplicate_act:cellar:<CELEX>;
+    hive_content ids from hive_content_seq; a rescore never lowers a stored score;
   * sip.lex.pl rows end as byok_gap, news.google.com / gov.pl / smart.gov.pl / Sejm /processes/
     rows stay score_filter, ELI 901 and print 2608 are scored by the scorer on their (criminal
     law) metadata title, never forced through;
@@ -294,11 +295,16 @@ def test_nis2_mission_balance_on_the_real_harvest_child(live_db, tmp_path):
     assert any(f["kind"] == "eli" and f["id"] == "DU/2026/901" for f in spy["fetch"])    # metadata title for 901
     assert any(f["kind"] == "print" and f["id"] == "10/2608" for f in spy["fetch"])      # and for print 2608
 
-    # --- hard spec rows ---
+    # --- one act, one content row per run: 20 URLs of CELEX 32022L2555, one is harvested ---
+    celex_urls = [r["url"] for r in rows if r["group"].startswith("eurlex")]
+    assert [buckets[u] for u in celex_urls].count("harvested:cellar") == 1, table
+    dup_detail = ("cache_skip", "duplicate_act:cellar:32022L2555")
     for r in rows:
         url, group, b = r["url"], r["group"], buckets[r["url"]]
-        if group == "eurlex_above":
-            assert b == "harvested:cellar", (url, b)
+        if group == "eurlex_above":      # over 5/15: harvested once, every other URL of the act a duplicate skip
+            assert b in ("harvested:cellar", "skip:cache_skip"), (url, b)
+            if b == "skip:cache_skip":
+                assert skips[url] == [dup_detail], (url, skips[url])
         elif group == "lex":
             assert b == "skip:byok_gap", (url, b)
             assert skips[url] == [("byok_gap", "lex_login_required")]
@@ -306,7 +312,10 @@ def test_nis2_mission_balance_on_the_real_harvest_child(live_db, tmp_path):
             assert b == "skip:score_filter", (url, b)
             assert skips[url] == [("score_filter", f"relevance={r['rel']} total={r['total']}")]
         if b != "harvested:cellar" and group.startswith("eurlex"):
-            assert b == "skip:score_filter", (url, b)           # a CELEX row is never groomed
+            # a CELEX row is never groomed: under 5/15 it is score_filter, otherwise a duplicate of the act
+            assert b in ("skip:score_filter", "skip:cache_skip"), (url, b)
+            if b == "skip:cache_skip":
+                assert skips[url] == [dup_detail], (url, skips[url])
         if group in ("sejm_print", "sejm_eli"):
             # not forced through: scored by the scorer on the metadata title, only ever lowered
             assert after[url]["rel"] <= r["rel"], (url, r["rel"], after[url]["rel"])
@@ -315,7 +324,10 @@ def test_nis2_mission_balance_on_the_real_harvest_child(live_db, tmp_path):
             else:
                 assert b == ("harvested:sejm_print" if group == "sejm_print" else "harvested:eli"), (url, b)
         # not harvested means never fetched: no "Harvesting:" line, the row stays scouted
-        if b.startswith("skip:") and b != "skip:legal_fetch_empty":
+        if b == "skip:cache_skip":
+            # duplicate act: logged before the dedup check, never fetched, row ends as any cache_skip does
+            assert harvesting[url] == 1 and after[url]["status"] == "failed", (url, after[url])
+        elif b.startswith("skip:") and b != "skip:legal_fetch_empty":
             assert harvesting[url] == 0 or b == "skip:byok_gap", (url, b)   # LEX reaches the worker, then no fetch
             assert after[url]["status"] == "scouted", (url, after[url])
         if b.startswith("harvested:"):
@@ -339,7 +351,18 @@ def test_nis2_mission_balance_on_the_real_harvest_child(live_db, tmp_path):
             assert (after[url]["rel"], after[url]["total"], after[url]["title"]) == \
                 (before[url]["rel"], before[url]["total"], before[url]["title"]), url   # nothing else rescored
             continue
-        assert (after[url]["rel"], after[url]["total"]) == (want["score_relevance"], want["score_total"]), url
+        old_ok, new_ok = _passes(r["rel"], r["total"]), _passes(want["score_relevance"], want["score_total"])
+        if (old_ok and not new_ok) or (old_ok == new_ok and (
+                want["score_relevance"] < r["rel"] or want["score_total"] < r["total"])):
+            # R-34: a rescore never lowers rel or total within the same 5/15 verdict and never
+            # drops a passing row: 12/34 does not become 5/24, the row keeps its stored scores
+            assert (after[url]["rel"], after[url]["total"]) == (r["rel"], r["total"]), url
+            want = dict(score_relevance=r["rel"], score_total=r["total"])
+        else:
+            assert (after[url]["rel"], after[url]["total"]) == (want["score_relevance"], want["score_total"]), url
+        if ls.celex_from_url(url) and _passes(want["score_relevance"], want["score_total"]):
+            assert buckets[url] in ("harvested:cellar", "skip:cache_skip"), (url, buckets[url])
+            continue
         want_bucket = ("skip:score_filter" if not _passes(want["score_relevance"], want["score_total"])
                        else "harvested:" + ("cellar" if ls.celex_from_url(url) else
                                             "eli" if ls.eli_from_url(url) else "sejm_print"))
@@ -362,7 +385,7 @@ def test_nis2_mission_balance_on_the_real_harvest_child(live_db, tmp_path):
     # --- hive_content: method cellar, ids from hive_content_seq (not MAX(id)+1 = 9001) ---
     assert [c[2] for c in content if c[1] in by_url] == [c[2] for c in content]
     n = len(content)
-    assert n == len(harvested) >= 10
+    assert n == len(harvested) == 3          # one row per act: the NIS2 directive (cellar), ELI 901, print 2608
     assert sorted(c[0] for c in content) == list(range(SEQ_START, SEQ_START + n)), [c[0] for c in content]
     assert Counter(c[2] for c in content if _host(c[1]) == "eur-lex.europa.eu") == \
         Counter({"cellar": sum(1 for r in rows if r["group"].startswith("eurlex") and

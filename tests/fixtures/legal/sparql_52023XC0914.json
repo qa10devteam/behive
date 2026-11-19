@@ -1,0 +1,19 @@
+{
+  "method": "POST",
+  "url": "https://publications.europa.eu/webapi/rdf/sparql",
+  "query": "?work cdm:resource_legal_id_celex ?celex FILTER(STRSTARTS(STR(?celex), \"52023XC0914\")) LIMIT 10",
+  "status": 200,
+  "content_type": "application/sparql-results+json",
+  "byte_size": 618,
+  "bindings": [
+    {
+      "celex": "52023XC0914(01)",
+      "work": "http://publications.europa.eu/resource/cellar/183d538e-5299-11ee-9220-01aa75ed71a1"
+    },
+    {
+      "celex": "52023XC0914(01)R(01)",
+      "work": "http://publications.europa.eu/resource/cellar/6cf85dd3-5dc9-11ee-9220-01aa75ed71a1"
+    }
+  ],
+  "note": "The work of 52023XC0914(01) exists in CELLAR; only the full id with its suffix finds it."
+}

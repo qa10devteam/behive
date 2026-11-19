@@ -48,6 +48,10 @@ REQUEST_TIMEOUT = 30
 # One legal-metadata fetch (CELEX / ELI / print) before the relevance filter; also capped by
 # the phase deadline (llm.deadline_call_timeout).
 LEGAL_RESCORE_FETCH_TIMEOUT_S = 30.0
+# The harvest filter (see _load_pending_sources): a row is harvested only with
+# score_relevance >= HARVEST_MIN_RELEVANCE AND score_total >= HARVEST_MIN_TOTAL.
+HARVEST_MIN_RELEVANCE = 5
+HARVEST_MIN_TOTAL = 15
 # One legal-act fetch in _harvest_one (CELLAR / ELI / print; a 700 KB act body is one call);
 # also capped by the phase deadline.
 LEGAL_FETCH_TIMEOUT_S = 60.0
@@ -735,6 +739,22 @@ class HarvesterBee:
         # ── Legal sources: act via CELLAR / ELI / Sejm print, before the extension branch ──
         legal_route = route_legal(url, getattr(self, "_routing_hints", {}).get(url))
 
+        # One act, one content row per run: an act (route, identifier) already taken by an
+        # earlier URL is neither fetched nor stored again. Claimed before any await, so the
+        # concurrent workers cannot both take the same act.
+        if legal_route in _LEGAL_ROUTES:
+            act_key = self._legal_act_key(url, legal_route)
+            acts = self.__dict__.setdefault("_legal_acts", {})
+            if act_key is not None and act_key in acts:
+                self._note_skip(url, "cache_skip", f"duplicate_act:{act_key[0]}:{act_key[1]}")
+                base["method"] = "cache_skip"
+                base["error"] = "duplicate act in mission run"
+                return base
+            if act_key is not None:
+                acts[act_key] = url
+        else:
+            act_key = None
+
         # Required delays (rate-limiting — drones measured threshold)
         if delay_ms > 0:
             await asyncio.sleep(delay_ms / 1000.0)
@@ -791,6 +811,9 @@ class HarvesterBee:
         # Phase deadline: the act was not started. Work is deferred — not a failed harvest,
         # no reputation entry, not cached.
         if base.get("deferred"):
+            if act_key is not None:
+                # not started: a later URL of the same act may still take the claim
+                self.__dict__.get("_legal_acts", {}).pop(act_key, None)
             return base
 
         # Empty legal fetch (WAF page, 0 words, CELLAR refusal): logged, and never a bad
@@ -875,6 +898,23 @@ class HarvesterBee:
             log.debug(f"Exception in harvest.py: {exc}")
             result["error"] = str(exc)
         return result
+
+    @staticmethod
+    def _legal_act_key(url: str, route: str):
+        """(route, identifier) of the act a legal URL points at, or None. Identifier formats
+        match the L1 fetchers: CELEX, 'PUB/YEAR/POS', 'TERM/NUMBER'."""
+        from behive.engine import legal_sources as ls
+
+        if route == "cellar":
+            celex = ls.celex_from_url(url)
+            return (route, celex) if celex else None
+        if route == "eli":
+            eli = ls.eli_from_url(url)
+            return (route, f"{eli[0]}/{eli[1]}/{eli[2]}") if eli else None
+        if route == "sejm_print":
+            printed = ls.sejm_print_from_url(url)
+            return (route, f"{printed[0]}/{printed[1]}") if printed else None
+        return None
 
     def _legal_fetch_sync(self, url: str, route: str):
         """Blocking: the L1 fetcher for this route, then HTML → plain text. Returns (LegalFetch, text)."""
@@ -1327,6 +1367,22 @@ class HarvesterBee:
             return title, ""
         return "", str(getattr(got, "reason", "") or "no_title")
 
+    @staticmethod
+    def _rescore_keeps_old(old_rel, old_total, new_rel, new_total) -> bool:
+        """True when a rescore must keep the stored scores: the old row passes the harvest
+        filter and the new one does not, or both have the same verdict and the new relevance
+        or total is lower. A failing row that now passes is lifted."""
+        if old_rel is None or old_total is None:
+            return False
+
+        def passes(rel, total):
+            return rel >= HARVEST_MIN_RELEVANCE and total >= HARVEST_MIN_TOTAL
+
+        old_ok, new_ok = passes(old_rel, old_total), passes(new_rel, new_total)
+        if old_ok and not new_ok:
+            return True
+        return old_ok == new_ok and (new_rel < old_rel or new_total < old_total)
+
     def _rescore_legal_sources(self) -> None:
         """Score pending/scouted rows with a URL-like title or a CELEX/ELI/print id by their
         metadata title, before the 5/15 filter. Only the score columns (and the title, when
@@ -1403,21 +1459,33 @@ class HarvesterBee:
                                           source_type=stype or "web")
             new_title = meta_title[:512] if ls.url_like_title(title or "", url) else (title or "")
             old = (title or "", total, rel, fresh, auth, depth)
-            want = (new_title, new["score_total"], new["score_relevance"],
-                    new["score_freshness"], new["score_authority"], new["score_depth"])
+            kept = self._rescore_keeps_old(rel, total, new["score_relevance"], new["score_total"])
+            if kept:
+                # Never lower a row (12/34 -> 5/27) and never drop a passing row under the
+                # harvest filter. The old scores stay; a URL-like title may still be replaced.
+                want = (new_title, total, rel, fresh, auth, depth)
+            else:
+                want = (new_title, new["score_total"], new["score_relevance"],
+                        new["score_freshness"], new["score_authority"], new["score_depth"])
+            if kept:
+                unchanged += 1
+                if want != old:
+                    updates.append((sid, want, False))
+                continue
             if want == old:
                 unchanged += 1
                 continue
-            updates.append((sid, want))
+            updates.append((sid, want, True))
         if updates:
             with self._write_con() as wcon:
-                for sid, w in updates:
+                for sid, w, scored in updates:
                     wcon.execute(
                         "UPDATE hive_sources SET title = ?, score_total = ?, score_relevance = ?, "
                         "score_freshness = ?, score_authority = ?, score_depth = ? "
                         "WHERE id = ? AND mission_id = ? AND status IN ('pending', 'scouted')",
                         [*w, sid, mission])
-                    rescored += 1
+                    if scored:
+                        rescored += 1
         log.info("legal_rescore mission=%s candidates=%d rescored=%d unchanged=%d skipped=%d fetches=%d",
                  mission, len(candidates), rescored, unchanged, skipped, len(cache))
 
@@ -1451,11 +1519,11 @@ class HarvesterBee:
                 WHERE mission_id = ?
                   AND status IN ('pending', 'scouted')
                   AND source_type IS DISTINCT FROM 'operator_seed'
-                  AND score_relevance >= 5
-                  AND score_total >= 15
+                  AND score_relevance >= ?
+                  AND score_total >= ?
                 ORDER BY score_total DESC NULLS LAST
                 LIMIT 300
-            """, [self.mission_id]).fetchall()
+            """, [self.mission_id, HARVEST_MIN_RELEVANCE, HARVEST_MIN_TOTAL]).fetchall()
             if not rows:
                 # Fallback — relaxed thresholds if nothing passes
                 log.warning("No sources passed relevance filter — falling back to top-100 by score_total")
