@@ -176,12 +176,19 @@ class TestOrchestratorFunctions:
     def test_run_phase(self, mock_sub):
         mock_sub.return_value = MagicMock(returncode=0, stdout="Phase done", stderr="")
         from behive.engine.orchestrator import run_phase
-        result = run_phase(
-            script="hive2_scout.py",
-            args=["--mission", "test-001"],
-            phase_name="scout",
-            timeout=60
-        )
+        # run_phase starts its child with subprocess.Popen, which the mock above does not
+        # cover: the real `behive.engine.scout --mission test-001` child ran a whole scout
+        # (DuckDuckGo/RSS/HTTP searches) and exceeded the 5 s phase timeout whenever the
+        # machine has network access (CI). The phase machinery is exercised with a real but
+        # inert child instead.
+        inert_child = [sys.executable, "-c", "print('Phase done')"]
+        with patch("behive.engine.orchestrator._resolve_cmd", return_value=inert_child):
+            result = run_phase(
+                script="hive2_scout.py",
+                args=["--mission", "test-001"],
+                phase_name="scout",
+                timeout=60
+            )
         assert isinstance(result, float)  # returns duration
 
     @patch("subprocess.run")

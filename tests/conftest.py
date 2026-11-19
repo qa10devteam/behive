@@ -92,6 +92,84 @@ def _test_db_refusal(dsn: str, *, consent: str | None, isolated: bool) -> str | 
     return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Direct psycopg2.connect calls (R-26)
+#
+# About 26 test files call psycopg2.connect(host="localhost", port=5432, dbname="hive", ...)
+# themselves, bypassing PG_DSN and the guard above. On the BeHive host that address is the
+# production database. pytest_configure wraps psycopg2.connect once for the whole session:
+# the legacy default target is redirected to BEHIVE_TEST_PG_DSN when it is set, and refused
+# outside an isolated network namespace otherwise. Other targets are left alone.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_REAL_PG_CONNECT = psycopg2.connect
+
+# Keys that choose WHERE a connection goes; everything else (connect_timeout,
+# application_name, options, ...) is carried over to the redirected connection.
+_TARGET_KEYS = {"host", "hostaddr", "port", "dbname", "database", "user", "password", "service",
+                "passfile", "sslmode", "sslrootcert", "sslcert", "sslkey", "sslcrl",
+                "krbsrvname", "gsslib", "target_session_attrs", "channel_binding"}
+_CONNECT_ONLY_KWARGS = ("dsn", "connection_factory", "cursor_factory")
+
+
+class ProductionDatabaseRefused(RuntimeError):
+    """A test tried to open the legacy default database (production 'hive' on this host)."""
+
+
+def _connect_params(args: tuple, kwargs: dict) -> dict | None:
+    """Effective libpq parameters of a psycopg2.connect call; None when they cannot be parsed
+    (the real connect then raises its own error)."""
+    from psycopg2.extensions import make_dsn, parse_dsn
+    dsn = args[0] if args else kwargs.get("dsn")
+    extra = {k: v for k, v in kwargs.items() if k not in _CONNECT_ONLY_KWARGS}
+    try:
+        return parse_dsn(make_dsn(dsn, **extra))
+    except psycopg2.Error:
+        return None
+
+
+def _target_of(params: dict) -> tuple[str, str, str]:
+    """(host, port, dbname) with the libpq environment defaults applied."""
+    host = params.get("host") or params.get("hostaddr") or os.environ.get("PGHOST", "")
+    port = str(params.get("port") or os.environ.get("PGPORT") or "5432")
+    dbname = (params.get("dbname") or os.environ.get("PGDATABASE") or params.get("user")
+              or os.environ.get("PGUSER") or "")
+    return host, port, dbname
+
+
+def _is_legacy_default(params: dict) -> bool:
+    """dbname 'hive' on a loopback host, over a Unix socket, or with no host at all."""
+    host, _port, dbname = _target_of(params)
+    return dbname == "hive" and (host == "" or host in _LOOPBACK_HOSTS or host.startswith("/"))
+
+
+def _guarded_pg_connect(*args, **kwargs):
+    params = _connect_params(args, kwargs)
+    if params is None:
+        return _REAL_PG_CONNECT(*args, **kwargs)
+    override = os.environ.get("BEHIVE_TEST_PG_DSN")
+    if override and _target_of(params) == _target_of(_connect_params((override,), {}) or {}):
+        return _REAL_PG_CONNECT(*args, **kwargs)  # already the guarded target
+    if not _is_legacy_default(params):
+        return _REAL_PG_CONNECT(*args, **kwargs)
+    if override:
+        from psycopg2.extensions import make_dsn
+        carried = {k: v for k, v in params.items() if k not in _TARGET_KEYS}
+        passthrough = {k: v for k, v in kwargs.items() if k in ("connection_factory", "cursor_factory")}
+        return _REAL_PG_CONNECT(make_dsn(override, **carried), *args[1:], **passthrough)
+    if _network_isolated():
+        return _REAL_PG_CONNECT(*args, **kwargs)  # the harness: localhost:5432/hive is the private copy
+    raise ProductionDatabaseRefused(
+        "tests/conftest.py refuses a direct psycopg2.connect to the legacy default ({}): outside an "
+        "isolated network namespace that is the production database. Set BEHIVE_TEST_PG_DSN to a "
+        "disposable database, or run the isolated harness.".format(
+            "host={} port={} dbname={}".format(*_target_of(params))))
+
+
+def _install_pg_connect_guard() -> None:
+    if psycopg2.connect is not _guarded_pg_connect:
+        psycopg2.connect = _guarded_pg_connect
+
 
 def pytest_configure(config):
     reason = _test_db_refusal(PG_DSN, consent=os.environ.get("BEHIVE_TEST_DB"), isolated=_network_isolated())
@@ -103,10 +181,110 @@ def pytest_configure(config):
             "at a disposable database and set BEHIVE_TEST_DB=1.",
             returncode=4,
         )
+    _install_pg_connect_guard()
     # One target for the whole session: the engine pool uses the same database.
     import behive.engine.db as _db_mod
     _db_mod.DSN = PG_DSN
     _db_mod._pool = None
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pipeline children left behind by a test (R-36)
+#
+# The API's _run_pipeline starts `python -m behive.engine run ...` as a real subprocess and
+# cmd_run begins with cleanup_stuck_missions(max_age_hours=1). A child that outlives its test
+# marks the old missions of a LATER test 'error' while that test runs. After every test, a
+# still-running direct child of the pytest process that runs behive.engine (any module), the
+# orchestrator or a hive2_ script is terminated (killed after a short wait) and recorded;
+# pytest_terminal_summary prints the record (expected: empty).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import re
+import signal
+import time
+
+_PIPELINE_CHILD = re.compile(r"behive[./]engine(?![\w])|orchestrator|hive2_")
+_LEAKED_CHILDREN: list[tuple[str, str]] = []  # (test node id, command line)
+
+
+def _running_children(parent: int) -> list[tuple[int, str]]:
+    """(pid, command line) of the live (not zombie) direct children of ``parent`` (Linux /proc)."""
+    found = []
+    try:
+        pids = [int(name) for name in os.listdir("/proc") if name.isdigit()]
+    except OSError:
+        return found
+    for pid in pids:
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as handle:
+                state, ppid = handle.read().rsplit(")", 1)[1].split()[:2]
+            if int(ppid) != parent or state in ("Z", "X"):
+                continue
+            with open(f"/proc/{pid}/cmdline", "rb") as handle:
+                cmdline = handle.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+        except (OSError, ValueError, IndexError):
+            continue  # ended meanwhile
+        found.append((pid, cmdline))
+    return found
+
+
+def _is_gone(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as handle:
+            return handle.read().rsplit(")", 1)[1].split()[0] in ("Z", "X")
+    except (OSError, IndexError):
+        return True
+
+
+def _reap_leaked_children(test_id: str, grace: float = 3.0) -> None:
+    """SIGTERM, then after ``grace`` seconds SIGKILL, every pipeline child still running."""
+    victims = [(pid, cmd) for pid, cmd in _running_children(os.getpid()) if _PIPELINE_CHILD.search(cmd)]
+    if not victims:
+        return
+    for pid, cmd in victims:
+        _LEAKED_CHILDREN.append((test_id, cmd))
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.monotonic() + grace
+    pending = [pid for pid, _cmd in victims]
+    while pending and time.monotonic() < deadline:
+        pending = [pid for pid in pending if not _is_gone(pid)]
+        if pending:
+            time.sleep(0.05)
+    for pid in pending:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+@pytest.fixture
+def no_real_pipeline(monkeypatch):
+    """POST /research starts `python -m behive.engine run ...` through server._run_pipeline.
+    Tests of the endpoint that do not follow the pipeline replace it with a no-op coroutine:
+    a child outliving its test would run cleanup_stuck_missions on the shared database."""
+    import behive.server
+
+    async def _no_pipeline(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(behive.server, "_run_pipeline", _no_pipeline)
+
+
+@pytest.fixture(autouse=True)
+def reap_pipeline_children(request):
+    yield
+    _reap_leaked_children(request.node.nodeid)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if not _LEAKED_CHILDREN:
+        return
+    terminalreporter.section("behive pipeline children left running by tests (terminated)")
+    for test_id, cmd in _LEAKED_CHILDREN:
+        terminalreporter.write_line(f"{test_id}: {cmd}")
+
 
 # Module-level singleton — created once, reused everywhere
 _SHARED_PGCONN = None

@@ -125,7 +125,7 @@ class TestServerDeep:
     """Deep server tests with actual endpoint logic."""
 
     @pytest.fixture
-    def client(self):
+    def client(self, no_real_pipeline):
         from fastapi.testclient import TestClient
         from behive.server import app
         return TestClient(app, raise_server_exceptions=False)

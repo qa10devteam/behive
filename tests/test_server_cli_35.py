@@ -31,7 +31,7 @@ class TestServerEndpointsDeep:
     """All server.py endpoints via TestClient."""
 
     @pytest.fixture
-    def client(self):
+    def client(self, no_real_pipeline):
         from behive.server import app
         from fastapi.testclient import TestClient
         return TestClient(app)

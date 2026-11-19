@@ -14,6 +14,34 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture
+def parent_mission(pg_cursor):
+    """Create the hive_missions row a test's claims/sources point at (they have a foreign key
+    to it) and remove it, with anything still attached to it, when the test ends. A mission
+    that already existed is left alone."""
+    created = []
+
+    def make(mission_id):
+        pg_cursor.execute("""
+            INSERT INTO hive_missions (id, topic, status, phase, created_at)
+            VALUES (%s, 'test parent mission', 'scout', 'scout', NOW())
+            ON CONFLICT (id) DO NOTHING
+        """, (mission_id,))
+        if pg_cursor.rowcount == 1:
+            created.append(mission_id)
+        pg_cursor.connection.commit()
+        return mission_id
+
+    yield make
+
+    pg_cursor.connection.rollback()
+    for mission_id in created:
+        pg_cursor.execute("DELETE FROM hive_claims WHERE mission_id = %s", (mission_id,))
+        pg_cursor.execute("DELETE FROM hive_sources WHERE mission_id = %s", (mission_id,))
+        pg_cursor.execute("DELETE FROM hive_missions WHERE id = %s", (mission_id,))
+    pg_cursor.connection.commit()
+
+
 class TestMissionLifecycle:
     """Test mission state transitions in the database."""
 
@@ -69,8 +97,9 @@ class TestMissionLifecycle:
 class TestClaimsTable:
     """Test hive_claims operations."""
 
-    def test_insert_claim(self, pg_cursor):
+    def test_insert_claim(self, pg_cursor, parent_mission):
         """Can insert a claim with all fields."""
+        parent_mission("test_claims_mission")
         # Get max ID
         pg_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM hive_claims")
         new_id = list(pg_cursor.fetchone().values())[0]
@@ -92,8 +121,9 @@ class TestClaimsTable:
         pg_cursor.execute("DELETE FROM hive_claims WHERE id = %s", (new_id,))
         pg_cursor.connection.commit()
 
-    def test_quality_score_range_constraint(self, pg_cursor):
+    def test_quality_score_range_constraint(self, pg_cursor, parent_mission):
         """Quality score must be 0.0 - 1.0."""
+        parent_mission("test_range")
         pg_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM hive_claims")
         new_id = list(pg_cursor.fetchone().values())[0]
         
@@ -112,8 +142,9 @@ class TestClaimsTable:
 class TestSourcesTable:
     """Test hive_sources operations."""
 
-    def test_insert_source(self, pg_cursor):
+    def test_insert_source(self, pg_cursor, parent_mission):
         """Can insert a source URL."""
+        parent_mission("test_src_mission")
         pg_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM hive_sources")
         new_id = list(pg_cursor.fetchone().values())[0]
         
@@ -133,8 +164,9 @@ class TestSourcesTable:
         pg_cursor.execute("DELETE FROM hive_sources WHERE id = %s", (new_id,))
         pg_cursor.connection.commit()
 
-    def test_url_deduplication_per_mission(self, pg_cursor):
+    def test_url_deduplication_per_mission(self, pg_cursor, parent_mission):
         """Same URL in same mission should be rejected (unique constraint)."""
+        parent_mission("test_dedup")
         pg_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM hive_sources")
         id1 = list(pg_cursor.fetchone().values())[0]
         id2 = id1 + 1
